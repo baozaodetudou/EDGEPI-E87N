@@ -53,9 +53,16 @@ the real framework assignment and command runner failed before the fix, passed
 after it, and the second application was a no-op. Framework HEAD is still pinned;
 its working tree now intentionally includes this documented fix.
 
-The same terminated build unit was restarted after the fix and is installing
-Python dependencies normally. Kernel compilation and image validation remain
-pending. There is still no final rootfs or image to test.
+The same terminated build unit was restarted after the fix. Python dependencies
+completed, and at 18:42 CST Armbian applied all 17 hardware patches to the actual
+kernel worktree. ARM64 GCC 14.2 then completed Kconfig and began compiling kernel
+objects. At 18:44 CST every board-requested early-boot `=y` setting and the
+MediaTek 2.5G PHY `=m` request was verified in the final `.config`; PCIe/NVMe are
+built in and the MediaTek xHCI driver is modular. The configuration snapshot is
+retained locally at `output/runtime/kernel-final-6.12.108.config`.
+
+The kernel build is still running. No complete kernel packages, rootfs or image
+have yet been validated, and there is still no final image to test on the board.
 
 The active VM output location is `/srv/e87n/source/armbian-build/output/`.
 The launchers have no device-flashing step.
