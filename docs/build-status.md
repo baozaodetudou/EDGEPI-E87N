@@ -61,8 +61,38 @@ MediaTek 2.5G PHY `=m` request was verified in the final `.config`; PCIe/NVMe ar
 built in and the MediaTek xHCI driver is modular. The configuration snapshot is
 retained locally at `output/runtime/kernel-final-6.12.108.config`.
 
-The kernel build is still running. No complete kernel packages, rootfs or image
-have yet been validated, and there is still no final image to test on the board.
+No complete kernel packages, rootfs or image have yet been validated, and there
+is still no final image to test on the board.
+
+At 19:03 CST the same live unit had progressed into networking and device-driver
+compilation. Readelf verified the actual `pinctrl-mt7987.o` and all five MT7987
+clock objects as AArch64 relocatables. No new compiler error had occurred.
+The final config also enables MediaTek CPU frequency control, both thermal
+drivers, PWM fan support and USB storage; these are configuration/object checks,
+not full-link, initramfs, network or hardware validation.
+
+At 19:15 CST, readelf also verified the compiled MediaTek Gen3 PCIe and 2.5G PHY
+objects as AArch64. The PHY object's `.modinfo` requests both MT7987 firmware
+paths shipped by this repository. These are actual compiler outputs, but the
+kernel link and image build are still pending; no Ethernet or PCIe hardware
+functionality has been established.
+
+The Ethernet SoC object failed at 19:16 CST: patch 750 used `DESC_SIZE`, a macro
+from OpenWrt's separate descriptor-shift optimization that the pinned BPI kernel
+does not have. The other make subtrees continued compiling, so a running unit
+was not proof that this build could succeed. The initial journal view also hid
+GCC's ANSI diagnostics as blob data; `journalctl --all` recovered the actual
+errors, and the log helper now always preserves them.
+
+Patch 750 now initializes `.desc_size = sizeof(...)` for both MT7987 descriptor
+types, matching the baseline's MT7988 data and byte-size arithmetic. All 17
+patches passed fuzz-zero application and actual Armbian parsing again. The
+known-failed build was deliberately stopped, its caches retained, and the old
+750 patch backed up in the VM before copying the checked replacement. systemd
+unloaded the stopped transient unit, so the guarded launcher recreated the same
+unit name at 19:26 CST. Armbian applied the corrected patch series using the
+existing kernel worktree; the corrected Ethernet object still needs a real
+compiler result.
 
 The active VM output location is `/srv/e87n/source/armbian-build/output/`.
 The launchers have no device-flashing step.
@@ -84,7 +114,8 @@ resumed running unit returned 75. No real output has yet been exported.
   Armbian's actual Python patch discovery. The former extra `patch/` component
   would have hidden the hardware patches from the builder.
 - Corrected the root command line and requested early-boot storage/clock/pinctrl/
-  serial/ext4 drivers. The full `olddefconfig` and compile still need validation.
+  serial/ext4 drivers. The actual final Kconfig satisfies these requests; the
+  full compile/link and hardware behavior still need validation.
 - Added two unmodified MT7987 PHY firmware blobs with upstream provenance,
   MediaTek redistribution licence, size checks and SHA-256 verification.
 - Passed launcher mock tests and shell syntax checks.
@@ -115,9 +146,14 @@ resumed running unit returned 75. No real output has yet been exported.
   kernel packages or system image have yet been validated with it.
 - Added a Linux-only whole-image audit: clean GPT, expected layout, new read-only
   loop, ext4/fsck, true root UUID, artifact checks and an initramfs listing.
-  Its device/mount operations passed 34 mocked cases; no real image has been
+  Its device/mount operations passed 38 mocked cases; no real image has been
   mounted or validated. The board requests host `initramfs-tools-core` for this
   audit, not as a substitute for the actual target-system checks.
+- Added optional `--require-usb-root` validation of the actual boot config,
+  matching-release USB/SCSI/T-PHY modules and recursive dependencies in the
+  initramfs listing. Its 41 read-only synthetic fixtures passed, including the
+  final config snapshot with a synthetic listing. This is not a real initramfs
+  result, and it does not establish U-Boot USB access or hardware operation.
 - Removed the old squashfs/f2fs bootargs and factory MAC NVMEM references from the
   E87N DTS. The generic GPT lacks factory; this prototype allows temporary random
   MAC addresses instead of deferring the Ethernet probe indefinitely.

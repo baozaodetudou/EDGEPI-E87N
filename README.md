@@ -65,11 +65,15 @@ bash scripts/verify-artifacts.sh --extracted-rootfs /path/to/rootfs --boot-dir /
 # Linux 构建容器内：对已完成、未压缩的普通镜像文件进行只读检查。
 # 明确拒绝 /dev 下的块设备和字符设备；不会执行任何刷写。
 sudo bash scripts/verify-image.sh /path/to/completed.img
+# 首次计划使用外部 USB 根文件系统时，额外核对早期驱动及依赖：
+sudo bash scripts/verify-image.sh --require-usb-root /path/to/completed.img
 ```
 
 `verify-artifacts.sh` 检查内核/模块架构、首启配置、E87N DTB、Debian 标识、PHY 固件校验及 extlinux/fstab 的 root UUID 对应关系。不检查真实 U-Boot 能力、initrd 内容或整盘写入安全，不能代替上板测试。`bash tests/test-verify-artifacts.sh` 仅测试验证脚本自身，使用合成数据，不能作为真实镜像验证结果。
 
 `verify-image.sh` 另外检查 GPT、ext4 完整性及真实 rootfs UUID，以新建只读 loop 和 `ro,noload,nodev,nosuid,noexec` 挂载调用上述检查；再用 `dumpimage`/`lsinitramfs` 读取 initramfs 目录并确认 `/init` 存在，不执行目标代码。它只清理自己创建的挂载和 loop；不会证明 U-Boot 支持、硬件可用性或整盘安装安全。`tests/test-verify-image.sh` 的设备操作全部是 mock，不会实际挂载。
+
+可选 `--require-usb-root` 根据最终内核配置区分内建和模块，检查 initramfs 中对应内核版本的 MediaTek USB 控制器、USB 存储、SCSI 块设备驱动及递归模块依赖。它不执行目标代码，也不代表 U-Boot 能读 USB 或实机 USB 首启已经通过。
 
 ## 当前移植内容
 

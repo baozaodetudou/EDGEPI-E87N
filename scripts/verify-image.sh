@@ -5,12 +5,14 @@ export LC_ALL=C
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 usage() {
 	printf '%s\n' \
-		'Usage: sudo bash scripts/verify-image.sh [--] existing.img' \
+		'Usage: sudo bash scripts/verify-image.sh [--require-usb-root] [--] existing.img' \
 		'Linux/root only; accepts a regular, uncompressed .img, never a device.' \
 		'Checks GPT (16 MiB offset, 256 MiB boot, root at 272 MiB), ext4 and fsck -fn.' \
 		'Creates a NEW read-only loop; mounts only in a private mktemp directory with' \
 		'ro,noload,nodev,nosuid,noexec. Reuses verify-artifacts.sh with the real root UUID.' \
 		'Lists initramfs contents using host lsinitramfs; never executes target code.' \
+		'Optional --require-usb-root checks boot config and matching initramfs USB/SCSI modules' \
+		'plus dependencies from rootfs modules.dep. This does NOT prove external USB boot works.' \
 		'Requires python3, util-linux tools, sgdisk, e2fsck, dumpimage, lsinitramfs and mount privilege.' \
 		'Use a trusted, idle image: do not modify it during this audit. Audit files are retained.' \
 		'Only the mounts/loop owned by this run are released; no force/lazy/global cleanup.' \
@@ -18,6 +20,8 @@ usage() {
 }
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 if [[ ${1:-} == --help || ${1:-} == -h ]]; then usage; exit 0; fi
+require_usb_root=no
+if [[ ${1:-} == --require-usb-root ]]; then require_usb_root=yes; shift; fi
 if [[ ${1:-} == -- ]]; then shift; fi
 [[ $# == 1 ]] || { usage >&2; exit 2; }
 image=$1
@@ -29,6 +33,9 @@ for tool in python3 sfdisk sgdisk losetup blockdev blkid e2fsck mount umount mou
 	command -v "$tool" >/dev/null 2>&1 || fail "missing host tool: $tool"
 done
 [[ -f "$script_dir/verify-artifacts.sh" ]] || fail 'sibling verify-artifacts.sh missing'
+if [[ "$require_usb_root" == yes ]]; then
+	[[ -f "$script_dir/verify-initramfs.py" ]] || fail 'sibling verify-initramfs.py missing'
+fi
 
 # Keep the same opened inode through GPT inspection and loop allocation.
 exec 3<"$image"
@@ -202,6 +209,10 @@ if "init" not in names:
     sys.exit("FAIL: initramfs listing lacks /init")
 print("OK: host lsinitramfs parsed selected initrd and found /init (not executed)")
 PY
+	if [[ "$require_usb_root" == yes ]]; then
+		python3 "$script_dir/verify-initramfs.py" --listing "$audit_dir/initrd-$number.list" \
+			--boot-dir "$audit_dir/boot" --root-dir "$audit_dir/root"
+	fi
 	number=$((number + 1))
 done < "$audit_dir/initrd-files.txt"
 release_resources || fail 'cleanup incomplete; image validation is not successful'

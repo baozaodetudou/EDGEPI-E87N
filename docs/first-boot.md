@@ -115,6 +115,12 @@ label Armbian
 
 ## 6. 首启验收
 
+首次网络测试只连接一个网口到现有 DHCP 路由器，同时保留串口。
+这是 Debian 主机镜像，不预设原厂 LAN/WAN、网桥或 NAT 行为；不要按 OpenWrt
+的默认管理地址访问。先从串口用 `ip -br link`、`ip -br addr` 读取实际网口、MAC
+和地址，再验证 SSH。Armbian networkd 模板请求对 `e*`、`lan*`、`wan*` 接口使用
+DHCP，但模板存在不等于最终镜像或实机 DHCP 已验证，仍须检查实际配置与租约。
+
 保存完整串口日志，并在测试系统内核对：
 
 - `/proc/cmdline` 只有一个 root 参数，根设备与 `/etc/fstab` 均指向预期测试 rootfs；`/etc/os-release` 确认为 Debian，Armbian 包与发行信息一致。

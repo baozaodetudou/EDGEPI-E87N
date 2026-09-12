@@ -92,6 +92,14 @@ mount() {
 		if [[ "$mode" == raw_initrd ]]; then initrd=initrd.img-fixture; fi
 		printf 'label MOCK\n initrd /%s\n' "$initrd" > "$6/extlinux/extlinux.conf"
 		printf 'MOCK INITRD; NOT BOOTABLE\n' > "$6/$initrd"
+		if [[ "$mode" == usb_root_builtin || "$mode" == usb_root_missing_module ]]; then
+			local symbol
+			for symbol in MODULES USB_COMMON USB USB_XHCI_HCD USB_XHCI_MTK USB_STORAGE SCSI_COMMON SCSI BLK_DEV_SD PHY_MTK_TPHY; do
+				printf 'CONFIG_%s=y\n' "$symbol"
+			done > "$6/config-6.12.108-fixture"
+			if [[ "$mode" == usb_root_builtin ]]; then printf 'CONFIG_USB_UAS=y\n'
+			else printf 'CONFIG_USB_UAS=m\n'; fi >> "$6/config-6.12.108-fixture"
+		fi
 	fi
 	if [[ "$mode" == signal && "$part" == root ]]; then kill -TERM "$$"; fi
 }
@@ -209,4 +217,8 @@ run_case cleanup_fail 1 "$image"
 run_case foreign_mount 1 "$image"
 run_case wrapped_initrd 0 "$image"
 run_case raw_initrd 0 "$image"
+run_case usb_root_no_image 2 --require-usb-root
+run_case usb_root_no_config 1 --require-usb-root "$image"
+run_case usb_root_builtin 0 --require-usb-root "$image"
+run_case usb_root_missing_module 1 --require-usb-root "$image"
 printf 'PASS: %s MOCK tests. No real loop/mount/fsck/dumpimage/artifact validation or hardware checks performed.\n' "$count"
