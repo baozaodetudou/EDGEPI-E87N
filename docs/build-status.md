@@ -91,8 +91,11 @@ known-failed build was deliberately stopped, its caches retained, and the old
 750 patch backed up in the VM before copying the checked replacement. systemd
 unloaded the stopped transient unit, so the guarded launcher recreated the same
 unit name at 19:26 CST. Armbian applied the corrected patch series using the
-existing kernel worktree; the corrected Ethernet object still needs a real
-compiler result.
+existing kernel worktree. At 19:29 CST the corrected `mtk_eth_soc.o` passed
+readelf's ELF64/AArch64 check and the MediaTek Ethernet directory produced its
+`built-in.a`. The final `.config` SHA-256 is unchanged from the checked snapshot.
+This resolves that observed compile error; the full kernel/image build is still
+running and Ethernet hardware remains untested.
 
 The active VM output location is `/srv/e87n/source/armbian-build/output/`.
 The launchers have no device-flashing step.
