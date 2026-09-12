@@ -27,7 +27,9 @@ SHA-256：
 - 两份 MT7987 PHY 固件和许可证校验通过。
 - extlinux 只有一个 root 参数，并与实际根文件系统 UUID、fstab 匹配：`738f4a31-6e60-4080-a354-4e23d1efeef9`。
 - 实际 initramfs 可解析，包含 `/init` 和 USB 根盘需要的九个模块/依赖。
+- initramfs 内也包含 MT7987 PHY 模块和它需要的两份固件。
 - 实际根文件系统中 systemd、Bash 为 AArch64，`ttyS0` 串口登录服务和 systemd-networkd 已启用，netplan 配置了有线接口 DHCP。这是文件检查，还不是串口登录或联网的实测结果。
+- Mac 上的压缩文件 SHA-256、xz 完整性及解压数据流的 SHA-256 均与构建机结果一致。
 
 这些是静态检查，不证明 U-Boot 能加载它，也不证明网口、eMMC、USB、NVMe、温度监测和重启已经在实机通过。
 

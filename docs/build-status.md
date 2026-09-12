@@ -143,13 +143,17 @@ measured login or network result. The compressed candidate is 166,285,388 bytes;
 the decompressed disk image is 1,124,073,472 bytes. See
 [candidate notes](candidate-20260912.md) for checksums and the board-test handoff.
 
-The active VM output location is `/srv/e87n/source/armbian-build/output/`.
+The build VM output location is `/srv/e87n/source/armbian-build/output/`.
 The launchers have no device-flashing step.
 
 `build-lima.sh` follows the actual conventional service rather than treating
 successful state queries as completed builds. Its 37 mocked orchestration tests
 passed; read-only checks against the real failed unit returned 1, and against the
-resumed running unit returned 75. No real output has yet been exported.
+resumed running unit returned 75. The completed build now returns 0 with a fresh
+image. The dedicated compressed candidate was copied to the Mac release folder;
+its SHA-256, local xz integrity and streamed decompressed SHA-256 all match the
+VM results. A separate full-output snapshot copy was also started; a `.partial`
+snapshot must never be treated as a completed export or a release image.
 
 ## Changes and checks
 
