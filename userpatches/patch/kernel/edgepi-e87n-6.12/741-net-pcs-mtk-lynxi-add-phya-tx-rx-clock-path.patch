@@ -28,17 +28,17 @@ Signed-off-by: Bo-Cun Chen <bc-bocun.chen@mediatek.com>
  
  /* Register to reset SGMII design */
  #define SGMSYS_RESERVED_0		0x34
-@@ -166,7 +169,7 @@ static int mtk_pcs_lynxi_config(struct p
+@@ -142,7 +145,7 @@ static int mtk_pcs_lynxi_config(struct p
  {
  	struct mtk_pcs_lynxi *mpcs = pcs_to_mtk_pcs_lynxi(pcs);
  	bool mode_changed = false, changed;
--	unsigned int rgc3, sgm_mode, bmcr = 0;
-+	unsigned int rgc3, sgm_mode, bmcr = 0, trxbuf_thr = 0x3112;
- 	int advertise, link_timer;
+-	unsigned int rgc3, sgm_mode, bmcr;
++	unsigned int rgc3, sgm_mode, bmcr, trxbuf_thr = 0x3112;
+ 	int link_timer;
  
- 	advertise = phylink_mii_c22_pcs_encode_advertisement(interface,
-@@ -193,6 +196,12 @@ static int mtk_pcs_lynxi_config(struct p
- 			bmcr = BMCR_ANENABLE;
+ 	if (advertising) {
+@@ -173,6 +176,12 @@ static int mtk_pcs_lynxi_config(struct p
+ 		bmcr = 0;
  	}
  
 +	/* Configure SGMII PCS clock source */

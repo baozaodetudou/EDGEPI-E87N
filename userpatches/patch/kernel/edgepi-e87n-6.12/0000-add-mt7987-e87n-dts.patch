@@ -1259,9 +1259,9 @@
 +	};
 +
 +	chosen {
-+		bootargs = "console=ttyS0,115200n1 earlycon=uart8250,mmio32,0x11000000 \
-+			    vt.global_cursor_default=0 root=PARTLABEL=rootfs \
-+			    rootwait rootfstype=squashfs,f2fs pci=pcie_bus_perf";
++		bootargs = "console=ttyS0,115200n8 earlycon=uart8250,mmio32,0x11000000 \
++			    vt.global_cursor_default=0 \
++			    rootwait rootfstype=ext4 pci=pcie_bus_perf";
 +		stdout-path = "serial0:115200n8";
 +	};
 +
@@ -1345,16 +1345,16 @@
 +&gmac0 {
 +	phy-mode = "2500base-x";
 +	phy-handle = <&phy3>;
-+	nvmem-cells = <&macaddr_factory_24 0>;
-+	nvmem-cell-names = "mac-address";
++	/* Generic Debian GPT does not provide the factory NVMEM partition. */
++	/* Allow the Ethernet driver to fall back to a temporary random MAC. */
 +	status = "okay";
 +};
 +
 +&gmac1 {
 +	phy-mode = "internal";
 +	phy-handle = <&phy15>;
-+	nvmem-cells = <&macaddr_factory_2a 0>;
-+	nvmem-cell-names = "mac-address";
++	/* Generic Debian GPT does not provide the factory NVMEM partition. */
++	/* Allow the Ethernet driver to fall back to a temporary random MAC. */
 +	status = "okay";
 +};
 +
