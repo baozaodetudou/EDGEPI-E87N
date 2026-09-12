@@ -102,17 +102,33 @@ python3 - "$audit_dir" <<'PY'
 import json, os, pathlib, re, sys
 work = pathlib.Path(sys.argv[1])
 try:
-    report = (work / "gpt-check.txt").read_text()
+    report = (work / "gpt-check.txt").read_text().lstrip()
+    table = json.loads((work / "gpt.json").read_text())["partitiontable"]
+    # util-linux fdisk reserves the first MiB as usable-area alignment. GPT
+    # checksums remain valid; permit only this exact sgdisk notice, corroborated
+    # by the actual header's first usable LBA. All other diagnostics still fail.
+    fdisk_alignment_notice = (
+        "Warning: There is a gap between the main partition table (ending sector 33)\n"
+        "and the first usable sector (2048). This is helpful in some exotic configurations,\n"
+        "but is unusual. The util-linux fdisk program often creates disks like this.\n"
+        "Using 'j' on the experts' menu can adjust this gap.\n"
+    )
+    if report.startswith(fdisk_alignment_notice):
+        if table.get("firstlba") != 2048:
+            raise ValueError("fdisk alignment notice disagrees with GPT first usable LBA")
+        report = report[len(fdisk_alignment_notice):]
+        print("OK: recognized fdisk first-usable-LBA 2048 alignment notice")
     if not re.search(r"^No problems found\.", report, re.M) or re.search(
             r"warning|caution|invalid|corrupt|mismatch|identified [1-9]", report, re.I):
         raise ValueError("sgdisk did not report a clean GPT: " + report.strip())
-    table = json.loads((work / "gpt.json").read_text())["partitiontable"]
     parts = table["partitions"]
     if table["label"] != "gpt" or table["unit"] != "sectors" or table["sectorsize"] != 512 or len(parts) != 2:
         raise ValueError("need GPT, 512-byte sectors and exactly two partitions")
     boot, root = parts
     if (boot["start"], boot["size"], root["start"]) != (32768, 524288, 557056):
         raise ValueError("layout must be boot at 16 MiB, boot size 256 MiB, root at 272 MiB")
+    if not 34 <= table["firstlba"] <= boot["start"]:
+        raise ValueError("GPT first usable LBA does not contain the expected partitions")
     if root["size"] <= 0 or root["start"] + root["size"] - 1 > table["lastlba"] or (
             table["lastlba"] > os.fstat(3).st_size // 512 - 34):
         raise ValueError("root/GPT extends outside image bounds")

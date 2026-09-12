@@ -14,6 +14,10 @@ for name, magic in (("fixture.img", b"MOCK DISK - NOT AN ARMBIAN IMAGE"), ("comp
     with (work / name).open("wb") as file:
         file.write(magic)
         file.truncate(280 * 1024 * 1024) # Sparse synthetic file; GPT is entirely mocked.
+# Reproduce the reported fdisk-aligned layout, still without any real GPT/filesystem.
+with (work / "aligned-fixture.img").open("wb") as file:
+    file.write(b"MOCK DISK - NOT AN ARMBIAN IMAGE")
+    file.truncate((2195422 + 34) * 512)
 (work / "tiny.img").write_bytes(b"MOCK")
 (work / "wrong.img.xz").write_bytes(b"MOCK")
 (work / "link.img").symlink_to(work / "fixture.img")
@@ -29,8 +33,15 @@ sfdisk() {
 import json, sys
 mode = sys.argv[1]
 table = {"partitiontable": {"label": "gpt", "unit": "sectors", "sectorsize": 512,
-    "lastlba": 573406, "partitions": [{"start": 32768, "size": 524288}, {"start": 557056, "size": 16351}]}}
+    "firstlba": 34, "lastlba": 573406,
+    "partitions": [{"start": 32768, "size": 524288}, {"start": 557056, "size": 16351}]}}
 p = table["partitiontable"]
+if mode.startswith("fdisk_gap_"):
+    p["firstlba"] = 2048
+    p["lastlba"] = 2195422
+    p["partitions"][1]["size"] = 1636352
+if mode == "fdisk_gap_mismatch": p["firstlba"] = 34
+if mode == "firstlba_past_boot": p["firstlba"] = 32769
 if mode == "wrong_offset": p["partitions"][0]["start"] = 2048
 if mode == "wrong_boot_size": p["partitions"][0]["size"] = 262144
 if mode == "wrong_root_offset": p["partitions"][1]["start"] += 1
@@ -44,6 +55,23 @@ sgdisk() {
 	mock_record sgdisk "$@"
 	[[ $# == 2 && "$1" == --verify && "$2" =~ ^/proc/[0-9]+/fd/3$ ]] || mock_error sgdisk "$@" || return
 	if [[ "$mode" == gpt_command_fail ]]; then return 70; fi
+	if [[ "$mode" == fdisk_gap_* ]]; then
+		if [[ "$mode" == fdisk_gap_leading_blank ]]; then printf '\n\n'; fi
+		if [[ "$mode" == fdisk_gap_leading_whitespace ]]; then printf ' \t\n  \n'; fi
+		local first_usable=2048
+		if [[ "$mode" == fdisk_gap_unknown ]]; then first_usable=4096; fi
+		printf '%s\n' \
+			'Warning: There is a gap between the main partition table (ending sector 33)' \
+			"and the first usable sector ($first_usable). This is helpful in some exotic configurations," \
+			'but is unusual. The util-linux fdisk program often creates disks like this.' \
+			"Using 'j' on the experts' menu can adjust this gap." ''
+		if [[ "$mode" != fdisk_gap_no_success ]]; then
+			printf '%s\n' 'No problems found. 32735 free sectors (16.0 MiB) available in 2' \
+				'segments, the largest of which is 30720 (15.0 MiB) in size.'
+		fi
+		if [[ "$mode" == fdisk_gap_corrupt ]]; then printf 'Warning: invalid main GPT header; CRC mismatch\n'; fi
+		return 0 # A successful sgdisk process alone must not mean a clean GPT.
+	fi
 	printf 'No problems found. (MOCK REPORT)\n'
 	if [[ "$mode" == corrupt_gpt ]]; then printf 'Warning: invalid main GPT header\n'; fi
 }
@@ -168,9 +196,9 @@ run_case() {
 	calls=''
 	if [[ -f "$mock_dir/calls" ]]; then calls=$(< "$mock_dir/calls"); fi
 	case "$mode" in
-		help|no_args|missing|character_device|symlink|wrong_extension|tiny|compressed|nonlinux|nonroot|not_gpt|wrong_offset|wrong_boot_size|wrong_root_offset|extra_partition|outside_image|corrupt_gpt|gpt_command_fail)
+		help|no_args|missing|character_device|symlink|wrong_extension|tiny|compressed|nonlinux|nonroot|not_gpt|wrong_offset|wrong_boot_size|wrong_root_offset|extra_partition|outside_image|corrupt_gpt|gpt_command_fail|firstlba_past_boot|fdisk_gap_mismatch|fdisk_gap_corrupt|fdisk_gap_unknown|fdisk_gap_no_success)
 			[[ "$calls" != *'losetup '* ]] ;;
-		wrapped_initrd|raw_initrd)
+		wrapped_initrd|raw_initrd|fdisk_gap_ok|fdisk_gap_leading_blank|fdisk_gap_leading_whitespace)
 			[[ "$calls" == *'verify-artifacts '* && "$calls" == *'lsinitramfs '* && "$calls" == *'losetup --detach /dev/loop770077'* ]] ;;
 		cleanup_fail|foreign_mount)
 			[[ "$calls" != *'losetup --detach'* && -f "$mock_dir/loop-owned" ]] ;;
@@ -200,6 +228,13 @@ run_case compressed 1 "$test_dir/compressed.img"
 run_case nonlinux 1 "$image"
 run_case nonroot 1 "$image"
 for mode in not_gpt wrong_offset wrong_boot_size wrong_root_offset extra_partition outside_image corrupt_gpt; do run_case "$mode" 1 "$image"; done
+run_case firstlba_past_boot 1 "$image"
+for mode in fdisk_gap_mismatch fdisk_gap_corrupt fdisk_gap_unknown fdisk_gap_no_success; do
+	run_case "$mode" 1 "$test_dir/aligned-fixture.img"
+done
+for mode in fdisk_gap_ok fdisk_gap_leading_blank fdisk_gap_leading_whitespace; do
+	run_case "$mode" 0 "$test_dir/aligned-fixture.img"
+done
 run_case gpt_command_fail 70 "$image"
 run_case loop_fail 66 "$image"
 run_case writable_loop 1 "$image"
