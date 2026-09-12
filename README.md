@@ -2,6 +2,8 @@
 
 这是使用 Armbian 构建框架的 E87N Debian Bookworm 实验性移植，尚未完成上板首启验证。Armbian 负责 Debian rootfs、内核打包、ext4 分区和启动配置；MT7987 驱动与设备树参考 E87N 开源项目，目标系统不包含 OpenWrt 用户空间。
 
+2026-09-12 已生成完整候选镜像，并通过真实只读整盘、启动配置、固件和 USB-root initramfs 检查。压缩镜像约 159 MiB，Mac 本地目录为 `output/releases/2026-09-12-e87n-bookworm/`；校验值和当前设备测试入口见 [本次候选镜像](docs/candidate-20260912.md)。这仍不是上板通过的正式版本。
+
 `BOOTCONFIG=none` 仅用于跳过 BL2/FIP/U-Boot 构建与镜像注入，并不保证整盘写入会保留设备原有 U-Boot。完整 `.img` 包含新的 GPT、空白区和文件系统；直接写入 eMMC 用户区可能覆盖原有 FIP、环境、factory 数据及分区表。
 
 首启前必须阅读 [首启验证与写入边界](docs/first-boot.md)，核实实际 U-Boot 的加载能力、原分区布局以及 Image、DTB、initrd 和 rootfs 的对应关系。当前没有原厂 U-Boot 支持 extlinux 或 `booti` 的上板证据。
@@ -32,7 +34,7 @@ Armbian 构建框架默认固定在 `7c1bb29eb0e7bd75b0703d86fe654b2680e646da`�
 
 ```sh
 limactl shell --workdir=/srv/e87n e87n-armbian sudo systemctl status e87n-armbian-build --no-pager
-limactl shell --workdir=/srv/e87n e87n-armbian sudo journalctl -u e87n-armbian-build --no-pager -n 50
+limactl shell --workdir=/srv/e87n e87n-armbian sudo journalctl --all -u e87n-armbian-build --no-pager -n 50
 ```
 
 `active/running` 且 `Result=success` 仅表示运行中没有记录错误，不表示已生成镜像。`scripts/seed-kernel-cache.sh` 可在 Linux 构建前准备固定内核的浅层缓存；它核验 Git 对象，保留已有缓存，并与构建互斥。不要在运行中更换输入或再次启动编译。

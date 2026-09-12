@@ -1,9 +1,12 @@
 # Build status — 2026-09-12
 
-No bootable image has been produced or board-tested. The target remains Debian
-Bookworm / Armbian, not an OpenWrt root filesystem.
+An experimental Debian Bookworm / Armbian disk image was built successfully at
+19:54 CST and passed the real read-only image audit, including USB-root
+initramfs modules. It has NOT been booted or hardware-tested on E87N. The target
+is not an OpenWrt root filesystem. A safe permanent eMMC installation procedure
+still depends on the actual board's bootloader, partition layout and backups.
 
-## Build environment
+## Build history
 
 The interrupted official image pull never reached Armbian compilation. A new
 native ARM64 Debian 13.6 container started successfully:
@@ -61,8 +64,8 @@ MediaTek 2.5G PHY `=m` request was verified in the final `.config`; PCIe/NVMe ar
 built in and the MediaTek xHCI driver is modular. The configuration snapshot is
 retained locally at `output/runtime/kernel-final-6.12.108.config`.
 
-No complete kernel packages, rootfs or image have yet been validated, and there
-is still no final image to test on the board.
+At this early stage no complete kernel packages, rootfs or image had been
+validated; later compilation and image results are recorded below.
 
 At 19:03 CST the same live unit had progressed into networking and device-driver
 compilation. Readelf verified the actual `pinctrl-mt7987.o` and all five MT7987
@@ -94,8 +97,51 @@ unit name at 19:26 CST. Armbian applied the corrected patch series using the
 existing kernel worktree. At 19:29 CST the corrected `mtk_eth_soc.o` passed
 readelf's ELF64/AArch64 check and the MediaTek Ethernet directory produced its
 `built-in.a`. The final `.config` SHA-256 is unchanged from the checked snapshot.
-This resolves that observed compile error; the full kernel/image build is still
-running and Ethernet hardware remains untested.
+This resolved that observed compile error; the full build continued. Ethernet
+hardware remains untested.
+
+At 19:45 CST the real kernel passed MODPOST and completed the `vmlinux` link.
+`arch/arm64/boot/Image` is 17,134,080 bytes and is identified as an ARM64 boot
+Image; `vmlinux` is a statically linked AArch64 ELF executable. The actual
+22,284-byte DTB contains `edgepi,e87n`, `mediatek,mt7987a` and `mediatek,mt7987`.
+Compiled thermal, USB controller/storage, CPU frequency, MMC, PWM and EFUSE
+objects were also checked as AArch64 relocatables. Module completion and Debian
+packaging continued; these files alone were not the final disk image.
+
+At 19:50–19:52 CST kernel/module compilation, installation and packaging
+completed. The real kernel/DTB packages passed `verify-artifacts.sh`, first in
+`output/packages-hashed/global` and again after framework reversioning into
+`output/debs` as version `26.11.0-trunk`. The checked kernel release is
+`6.12.108-current-filogic`, with Image SHA-256
+`b7e21e3213782d2ba4dd911b508fd54ac5ae5a6ab6af4ed5d3df114e3059fcbd`.
+This verified the Image header, final kernel configuration, E87N DTB and actual
+compressed AArch64 PHY module; it did not verify a root filesystem or initrd.
+Armbian then extracted its Bookworm ARM64 minimal rootfs cache and installed the
+kernel, DTB and E87N BSP packages.
+
+At 19:54 CST the unit completed normally: `active(exited)`, `Result=success`,
+`ExecMainCode=1`, `ExecMainStatus=0`. It produced
+`Armbian-unofficial_26.11.0-trunk_Edgepi-e87n_bookworm_current_6.12.108_minimal.img`.
+The original image SHA-256 sidecar verified before and after the read-only audit.
+The first audit exposed an overly strict verifier rule: sgdisk reported a valid
+GPT plus its standard fdisk first-usable-LBA 2048 alignment notice. The verifier
+now permits only that exact notice when the parsed GPT agrees; other warnings,
+corruption, layout mismatches and boundary failures still fail.
+
+The real whole-image audit then passed: expected GPT, clean ext4 filesystems,
+Debian Bookworm identity, checked PHY firmware/licence, matching Image/DTB/module
+release, and one root UUID matching extlinux and fstab. The actual root UUID is
+`738f4a31-6e60-4080-a354-4e23d1efeef9`. The selected initramfs was parsed by host
+tools and contains `/init` plus nine required USB-root modules/dependencies.
+Audit directory `/tmp/e87n-image-audit.OrYsZal2` is retained in the VM; its owned
+loop and mounts were released. No image or physical device was flashed.
+
+An additional read-only check found AArch64 systemd/Bash, the `ttyS0` serial
+getty enablement, systemd-networkd enablement and the expected Ethernet DHCP
+netplan file inside the actual image. These are startup-file checks, not a
+measured login or network result. The compressed candidate is 166,285,388 bytes;
+the decompressed disk image is 1,124,073,472 bytes. See
+[candidate notes](candidate-20260912.md) for checksums and the board-test handoff.
 
 The active VM output location is `/srv/e87n/source/armbian-build/output/`.
 The launchers have no device-flashing step.
@@ -118,7 +164,7 @@ resumed running unit returned 75. No real output has yet been exported.
   would have hidden the hardware patches from the builder.
 - Corrected the root command line and requested early-boot storage/clock/pinctrl/
   serial/ext4 drivers. The actual final Kconfig satisfies these requests; the
-  full compile/link and hardware behavior still need validation.
+  full compile/link passed. Hardware behavior still needs validation.
 - Added two unmodified MT7987 PHY firmware blobs with upstream provenance,
   MediaTek redistribution licence, size checks and SHA-256 verification.
 - Passed launcher mock tests and shell syntax checks.
@@ -145,18 +191,20 @@ resumed running unit returned 75. No real output has yet been exported.
 - Made watchdog/reset, syscon and EFUSE/NVMEM configuration requests explicit.
 - Added a read-only artifact verifier for matching kernel/DTB packages or
   extracted Debian rootfs/bootfs. Its 60 synthetic fixture checks passed,
-  including malformed/missing artifacts and root-parameter errors. No real
-  kernel packages or system image have yet been validated with it.
+  including malformed/missing artifacts and root-parameter errors. The actual
+  kernel/DTB packages and mounted read-only candidate filesystems also passed.
 - Added a Linux-only whole-image audit: clean GPT, expected layout, new read-only
   loop, ext4/fsck, true root UUID, artifact checks and an initramfs listing.
-  Its device/mount operations passed 38 mocked cases; no real image has been
-  mounted or validated. The board requests host `initramfs-tools-core` for this
-  audit, not as a substitute for the actual target-system checks.
+  Its device/mount operations passed 46 mocked cases, including the narrow
+  fdisk alignment-notice rule and rejection of corruption or mismatched GPT
+  metadata. The actual image was also mounted read-only and passed the audit.
+  The board requests host `initramfs-tools-core` for the host-side listing.
 - Added optional `--require-usb-root` validation of the actual boot config,
   matching-release USB/SCSI/T-PHY modules and recursive dependencies in the
   initramfs listing. Its 41 read-only synthetic fixtures passed, including the
-  final config snapshot with a synthetic listing. This is not a real initramfs
-  result, and it does not establish U-Boot USB access or hardware operation.
+  final config snapshot with a synthetic listing. The real image's initramfs
+  then passed with nine required modules/dependencies. This does not establish
+  U-Boot USB access or hardware operation.
 - Removed the old squashfs/f2fs bootargs and factory MAC NVMEM references from the
   E87N DTS. The generic GPT lacks factory; this prototype allows temporary random
   MAC addresses instead of deferring the Ethernet probe indefinitely.
@@ -184,7 +232,8 @@ uv run --script tests/test-patch-discovery.py
 | E87N reference source | `c51dcd733aeda3c24c730ddaff2c54440a72ca6d` |
 | Linux firmware | `c0af6c70df291701fdecf6402e47dd4564e6b718` |
 
-The kernel and default Armbian build checkout are now pinned to the revisions
-above. Compile, artifact and hardware validation are
-still required before release. Further prerequisites and destructive-write boundaries are in
+The kernel and default Armbian build checkout are pinned to the revisions above.
+Compilation, packaging and the real static image audit passed. Board boot,
+hardware validation and a safe eMMC installation plan are still required before
+calling this usable or production-ready. Prerequisites and destructive-write boundaries are in
 [first-boot.md](first-boot.md).
