@@ -29,6 +29,9 @@ patch_files=("$USERPATCHES_PATH/kernel/$KERNELPATCHDIR/"*.patch)
 [[ ${#patch_files[@]} == 17 && -f "${patch_files[0]}" ]]
 [[ "$SRC_CMDLINE" != *root=* ]]
 [[ "$SRC_CMDLINE" != *squashfs* ]]
+EXTRA_BUILD_DEPS=()
+add_host_dependencies__edgepi_e87n_image_validation
+[[ " ${EXTRA_BUILD_DEPS[*]} " == *' core::initramfs-tools-core '* ]]
 if declare -F write_uboot_platform >/dev/null; then
 	echo 'Unexpected raw bootloader writer in E87N family' >&2
 	exit 1

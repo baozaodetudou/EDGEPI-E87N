@@ -20,6 +20,11 @@ HAS_VIDEO_OUTPUT="no"
 # Armbian supplies root=UUID=... when it completes extlinux.conf.
 SRC_CMDLINE="console=ttyS0,115200n8 earlycon=uart8250,mmio32,0x11000000 rootwait rootfstype=ext4"
 
+function add_host_dependencies__edgepi_e87n_image_validation() {
+	# Supplies host-side lsinitramfs for the final read-only image audit.
+	EXTRA_BUILD_DEPS+=("core::initramfs-tools-core")
+}
+
 function post_family_config__edgepi_e87n_existing_uboot() {
 	# Disable bootloader artifacts only. Writing the whole image to eMMC
 	# still replaces its GPT and user-area contents; see docs/first-boot.md.

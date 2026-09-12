@@ -18,9 +18,10 @@ uninterruptible disk I/O while unpacking perl-base. Reading that process's kerne
 stack showed `jbd2_log_wait_commit → ext4_sync_file → ovl_copy_up_metadata`.
 There was free disk space, and container inspection reported no OOM kill.
 This was a Docker VM/storage stall, not a kernel compiler result. It subsequently
-resumed unpacking without restarting Docker. Bootstrap finished and the Armbian
-CLI is now installing its own basic host dependencies. Kernel compilation has
-not begun yet; the new rootfs and image are not available.
+resumed unpacking without restarting Docker. Bootstrap and Armbian's basic host
+dependency installation have now finished. The live CLI has read the custom
+E87N board and entered main configuration; full build dependencies and kernel
+compilation are still pending. The new rootfs and image are not available.
 
 The container and logs are retained. Docker also hosts unrelated running
 projects: **do not restart Docker or stop those projects without approval**.
@@ -68,6 +69,11 @@ starting another build. The launcher has no device-flashing step.
   extracted Debian rootfs/bootfs. Its 60 synthetic fixture checks passed,
   including malformed/missing artifacts and root-parameter errors. No real
   kernel packages or system image have yet been validated with it.
+- Added a Linux-only whole-image audit: clean GPT, expected layout, new read-only
+  loop, ext4/fsck, true root UUID, artifact checks and an initramfs listing.
+  Its device/mount operations passed 34 mocked cases; no real image has been
+  mounted or validated. The board requests host `initramfs-tools-core` for this
+  audit, not as a substitute for the actual target-system checks.
 - Removed the old squashfs/f2fs bootargs and factory MAC NVMEM references from the
   E87N DTS. The generic GPT lacks factory; this prototype allows temporary random
   MAC addresses instead of deferring the Ethernet probe indefinitely.
