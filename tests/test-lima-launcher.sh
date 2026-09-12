@@ -34,7 +34,7 @@ systemctl() {
 }
 journalctl() {
 	record journalctl "$@"
-	[[ "$*" == '--unit=e87n-armbian-build.service --no-pager --lines=200' ]] || unexpected journalctl "$@" || return
+	[[ "$*" == '--all --unit=e87n-armbian-build.service --no-pager --lines=200' ]] || unexpected journalctl "$@" || return
 	printf 'MOCK JOURNAL: existing manual conventional unit, no receipt needed\n'
 }
 flock() {
@@ -115,7 +115,7 @@ export mock_default=no
 fixture initial
 check 'unknown command' 2 reset
 check 'unit not found is not success' 3 status
-check 'journal works without private receipts' 0 logs
+check 'journal preserves compiler diagnostics without private receipts' 0 logs
 unit_state active running success 0 0
 check 'manual active/running with Result=success' 75 status
 check 'active unit prevents build' 75 build

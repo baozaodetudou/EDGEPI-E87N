@@ -85,7 +85,8 @@ check_images() {
 	printf 'No fresh nonempty image; process success alone is insufficient\n' >&2; return 4
 }
 if [[ "$action" == logs ]]; then
-	journalctl --unit="$unit" --no-pager --lines=200
+	# GCC's ANSI diagnostics otherwise become "[NNNB blob data]" in the journal.
+	journalctl --all --unit="$unit" --no-pager --lines=200
 	exit $?
 fi
 read_unit
