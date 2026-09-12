@@ -18,15 +18,36 @@ uninterruptible disk I/O while unpacking perl-base. Reading that process's kerne
 stack showed `jbd2_log_wait_commit → ext4_sync_file → ovl_copy_up_metadata`.
 There was free disk space, and container inspection reported no OOM kill.
 This was a Docker VM/storage stall, not a kernel compiler result. It subsequently
-resumed unpacking without restarting Docker. Bootstrap and Armbian's basic host
-dependency installation have now finished. The live CLI has read the custom
-E87N board and entered main configuration; full build dependencies and kernel
-compilation are still pending. The new rootfs and image are not available.
+resumed unpacking without restarting Docker. After installing basic tools, it
+spent over 23 minutes in the framework's `git describe --dirty` scan. The Docker
+VM also reported high CPU pressure. It had not started kernel compilation.
 
-The container and logs are retained. Docker also hosts unrelated running
+The E87N container was deliberately stopped and retained for a build-host
+migration (exit 137 is not a kernel compiler result). Docker also hosts unrelated running
 projects: **do not restart Docker or stop those projects without approval**.
-Once the environment is healthy, inspect this named container and its log before
-starting another build. The launcher has no device-flashing step.
+
+The active build has moved to a separate Lima 2.2.0 ARM64 Debian 13 VM, named
+`e87n-armbian`, with 4 CPUs, 8 GiB RAM and a 64 GiB sparse disk. The pinned image
+and its SHA-512 are in `scripts/lima-e87n.yaml`; it shares no host directories,
+SSH agent, Docker socket or physical devices. Port forwarding other than its
+local SSH connection is disabled. No Docker daemon restart was performed.
+
+The same framework scan completed in 1.833 seconds there. Input archive SHA-256
+`b433d2bf47fcbb86995cd2b3b4560d55947f88a885110182855820d8a05b3fe8`
+matched after transfer; it was unpacked into `/srv/e87n` on the native Linux disk.
+The framework's tracked tree is clean and the board-loader test passed again.
+
+At 18:26 CST, the retained systemd unit `e87n-armbian-build.service` started the
+fixed-commit kernel cache preparation followed by the full Armbian build.
+`scripts/seed-kernel-cache.sh` uses a depth-one, unfiltered fetch of the actual
+BPI kernel commit and verifies Git objects before marking the cache ready. It
+does not patch the kernel, bypass compilation, or replace an existing cache.
+At 18:29 CST the 261 MiB kernel cache passed object validation, and Armbian
+started installing build-host dependencies. Kernel compilation and image
+validation remain pending. There is still no final rootfs or image to test.
+
+The active VM output location is `/srv/e87n/source/armbian-build/output/`.
+The launchers have no device-flashing step.
 
 ## Changes and checks
 

@@ -24,13 +24,28 @@ E87N_BUILD_IMAGE=debian:13.6-slim ./build.sh
 
 Armbian 构建框架默认固定在 `7c1bb29eb0e7bd75b0703d86fe654b2680e646da`，避免后续上游变化影响首次移植。已有源码版本不一致时会停止，不会自动覆盖本地 checkout。macOS 启动器会在更换 overlay 之前检测已有的 E87N 构建容器并拒绝重复启动。
 
-输出在：
+### 本次使用的独立 Linux 构建机
+
+由于现有 Docker 虚拟机出现严重等待，本次构建已转到专用 Lima 虚拟机 `e87n-armbian`，没有重启 Docker。配置见 [`scripts/lima-e87n.yaml`](scripts/lima-e87n.yaml)：固定校验的 Debian 13 ARM64 构建主机，4 核、8 GiB 内存、64 GiB 稀疏磁盘，不共享 Mac 目录、SSH agent 或物理设备。它只是编译环境，目标系统仍是 Debian **Bookworm / Armbian**。Lima 安装方式见[官方文档](https://lima-vm.io/docs/installation/)。
+
+输入已复制到虚拟机的 `/srv/e87n`，源码、缓存和镜像均在原生 Linux 文件系统上。当前任务由 `e87n-armbian-build.service` 保留，SSH 断开不会中断构建。可只读查看：
+
+```sh
+limactl shell --workdir=/srv/e87n e87n-armbian sudo systemctl status e87n-armbian-build --no-pager
+limactl shell --workdir=/srv/e87n e87n-armbian sudo journalctl -u e87n-armbian-build --no-pager -n 50
+```
+
+`active/running` 且 `Result=success` 仅表示运行中没有记录错误，不表示已生成镜像。`scripts/seed-kernel-cache.sh` 可在 Linux 构建前准备固定内核的浅层缓存；它核验 Git 对象，保留已有缓存，并与构建互斥。不要在运行中更换输入或再次启动编译。
+
+普通 Linux / Docker 构建输出在：
 
 ```text
 source/armbian-build/output/images/
 ```
 
 成功构建后，磁盘镜像位于 `output/images/`，`linux-image-*.deb` 和 `linux-dtb-*.deb` 位于 `output/debs/`。这些目录相对于 `source/armbian-build/`。
+
+本次 Lima 构建的对应绝对路径是 `/srv/e87n/source/armbian-build/output/`；这是虚拟机内部路径，产物验证后还需显式复制回 Mac。
 
 首版为有线网络最小系统，只额外附带校验过的 MT7987 PHY 固件，不包含完整的通用 USB/Wi-Fi 固件集合。需要外接无线设备时，需按设备另行安装固件。
 

@@ -1,0 +1,24 @@
+# Isolated native ARM64 build host; this is not the E87N target image.
+# No macOS directory, SSH agent, Docker socket, or physical device is shared.
+minimumLimaVersion: 2.0.0
+vmType: vz
+arch: aarch64
+cpus: 4
+memory: 8GiB
+disk: 64GiB
+images:
+  - location: https://cloud.debian.org/images/cloud/trixie/20260712-2537/debian-13-genericcloud-arm64-20260712-2537.qcow2
+    arch: aarch64
+    digest: sha512:8543d795f2fde630eb66c492f245a8c1da19dedc636e0a8e7b3d0f95920e1a05aa911ef2d82d177d41cc53ced5fccbd2a3945d07fa5e15018914c4d864bb07ed
+mounts: []
+containerd:
+  system: false
+  user: false
+ssh:
+  loadDotSSHPubKeys: false
+  forwardAgent: false
+portForwards:
+  - guestPortRange: [1, 65535]
+    guestIP: 0.0.0.0
+    proto: any
+    ignore: true
