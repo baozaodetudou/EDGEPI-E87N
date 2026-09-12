@@ -14,13 +14,24 @@ rm -rf "$ARMBIAN_DIR/userpatches"
 cp -a "$ROOT_DIR/userpatches" "$ARMBIAN_DIR/userpatches"
 
 cd "$ARMBIAN_DIR"
-exec ./compile.sh \
-	BOARD=edgepi-e87n \
-	BRANCH=current \
-	RELEASE=bookworm \
-	BUILD_DESKTOP=no \
-	BUILD_MINIMAL=yes \
-	KERNEL_BTF=no \
-	KERNEL_CONFIGURE=no \
+ARGS=(
+	BOARD=edgepi-e87n
+	BRANCH=current
+	RELEASE=bookworm
+	BUILD_DESKTOP=no
+	BUILD_MINIMAL=yes
+	KERNEL_BTF=no
+	KERNEL_CONFIGURE=no
 	SHOW_LOG=yes
+)
 
+if [ "$(uname -s)" = Darwin ]; then
+	docker run --rm --privileged \
+		-e ARMBIAN_RUNNING_IN_CONTAINER=yes \
+		-v "$ROOT_DIR:/workspace" \
+		-w /workspace/source/armbian-build \
+		ghcr.io/armbian/docker-armbian-build:armbian-debian-trixie-latest \
+		bash ./compile.sh "${ARGS[@]}"
+else
+	exec ./compile.sh "${ARGS[@]}"
+fi
