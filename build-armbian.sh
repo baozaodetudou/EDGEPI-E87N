@@ -33,6 +33,7 @@ printf 'Armbian source: %s\n' "$ARMBIAN_ACTUAL"
 if [ "$(git -C "$ARMBIAN_DIR" config --get core.sparseCheckout || true)" = true ]; then
 	git -C "$ARMBIAN_DIR" sparse-checkout disable
 fi
+bash "$ROOT_DIR/scripts/prepare-framework.sh" "$ARMBIAN_DIR"
 
 # Keep the previous overlay recoverable, including any local build adjustments.
 if [ -d "$ARMBIAN_DIR/userpatches" ]; then

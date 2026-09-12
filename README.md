@@ -37,6 +37,10 @@ limactl shell --workdir=/srv/e87n e87n-armbian sudo journalctl -u e87n-armbian-b
 
 `active/running` 且 `Result=success` 仅表示运行中没有记录错误，不表示已生成镜像。`scripts/seed-kernel-cache.sh` 可在 Linux 构建前准备固定内核的浅层缓存；它核验 Git 对象，保留已有缓存，并与构建互斥。不要在运行中更换输入或再次启动编译。
 
+仓库也提供 `./build-lima.sh status` 和 `./build-lima.sh logs`。`status` 在运行中返回 75，真正失败时返回构建退出码；成功退出且存在本次新生成的非空镜像才返回 0。`export` 只复制输出快照，不代表镜像检查或上板测试通过；`build` 不会重启、替换已经存在的构建服务。
+
+固定框架另有一处已记录的主机兼容修补：`patches/armbian-build/0001-python-env-path.patch` 去除 Python 环境 `PATH` 中的字面引号，避免最小 systemd 环境无法找到 Git。启动器会检查并幂等应用；不会替换整个框架或覆盖冲突修改。此时框架 HEAD 仍为固定提交，工作树包含这项已知修补。
+
 普通 Linux / Docker 构建输出在：
 
 ```text

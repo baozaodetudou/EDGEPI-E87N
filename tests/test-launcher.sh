@@ -5,6 +5,9 @@ test_dir=$(mktemp -d "${TMPDIR:-/tmp}/e87n-launcher-test.XXXXXX")
 printf 'Test files retained at %s\n' "$test_dir"
 mkdir -p "$test_dir/source/armbian-build/.git" "$test_dir/source/armbian-build/userpatches"
 cp "$repo_dir/build.sh" "$repo_dir/build-armbian.sh" "$test_dir/"
+mkdir -p "$test_dir/scripts" "$test_dir/patches"
+cp "$repo_dir/scripts/prepare-framework.sh" "$test_dir/scripts/"
+cp -a "$repo_dir/patches/armbian-build" "$test_dir/patches/"
 cp -a "$repo_dir/userpatches" "$test_dir/userpatches"
 cp -a "$repo_dir/firmware" "$test_dir/firmware"
 cp "$repo_dir/README.md" "$test_dir/source/armbian-build/userpatches/local-marker"
@@ -16,6 +19,8 @@ git() {
 	case "$*" in
 		*'rev-parse HEAD') printf '%s\n' "${mock_revision:-7c1bb29eb0e7bd75b0703d86fe654b2680e646da}" ;;
 		*'config --get core.sparseCheckout') return 1 ;;
+		*'apply --reverse --check '*) return 1 ;;
+		*'apply --check '*|*'apply '*) return 0 ;;
 		*) printf 'Unexpected git command: %s\n' "$*" >&2; return 99 ;;
 	esac
 }

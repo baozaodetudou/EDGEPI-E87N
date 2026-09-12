@@ -42,12 +42,28 @@ fixed-commit kernel cache preparation followed by the full Armbian build.
 `scripts/seed-kernel-cache.sh` uses a depth-one, unfiltered fetch of the actual
 BPI kernel commit and verifies Git objects before marking the cache ready. It
 does not patch the kernel, bypass compilation, or replace an existing cache.
-At 18:29 CST the 261 MiB kernel cache passed object validation, and Armbian
-started installing build-host dependencies. Kernel compilation and image
-validation remain pending. There is still no final rootfs or image to test.
+At 18:29 CST the 261 MiB kernel cache passed object validation. Build-host
+compiler dependencies finished installing at 18:37. The first build exited 1
+because upstream Python setup embedded literal quotes in PATH, so pip could not
+find `/usr/bin/git`. Git was installed; this was not a kernel source failure.
+
+The one-line fix is recorded in `patches/armbian-build/0001-python-env-path.patch`
+and applied idempotently by `scripts/prepare-framework.sh`. A regression using
+the real framework assignment and command runner failed before the fix, passed
+after it, and the second application was a no-op. Framework HEAD is still pinned;
+its working tree now intentionally includes this documented fix.
+
+The same terminated build unit was restarted after the fix and is installing
+Python dependencies normally. Kernel compilation and image validation remain
+pending. There is still no final rootfs or image to test.
 
 The active VM output location is `/srv/e87n/source/armbian-build/output/`.
 The launchers have no device-flashing step.
+
+`build-lima.sh` follows the actual conventional service rather than treating
+successful state queries as completed builds. Its 37 mocked orchestration tests
+passed; read-only checks against the real failed unit returned 1, and against the
+resumed running unit returned 75. No real output has yet been exported.
 
 ## Changes and checks
 

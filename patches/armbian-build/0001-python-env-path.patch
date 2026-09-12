@@ -1,0 +1,12 @@
+diff --git a/lib/functions/general/python-tools.sh b/lib/functions/general/python-tools.sh
+--- a/lib/functions/general/python-tools.sh
++++ b/lib/functions/general/python-tools.sh
+@@ -107,7 +107,7 @@ function prepare_python_and_pip() {
+ 		"PYTHONPATH=/does/not/exist/armbian/uses/user/packages/only"
+ 		"PYTHONUSERBASE=${PYTHON3_INFO[USERBASE]}"
+ 		"PYTHONUNBUFFERED=yes"
+ 		"PYTHONPYCACHEPREFIX=${PYTHON3_INFO[PYCACHEPREFIX]}"
+-		"PATH='${PYTHON3_INFO[USERBASE]}/bin:${PATH}'"
++		"PATH=${PYTHON3_INFO[USERBASE]}/bin:${PATH}"
+ 	)
+ 
