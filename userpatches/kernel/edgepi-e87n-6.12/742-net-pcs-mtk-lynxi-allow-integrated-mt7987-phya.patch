@@ -1,0 +1,38 @@
+Subject: net: pcs: mtk-lynxi: allow the integrated MT7987 PHYA
+
+MT7987 uses the integrated SGMII PHYA and has no external XFI T-PHY
+phandle. Do not fail its PCS probe with -ENODEV for an absent phys
+property. An explicit phys property, including deferred providers,
+still propagates errors. Keep the MT7988 requirement unchanged.
+
+Use a property-presence check for resets instead of acquiring and
+leaking a device-node reference merely to test whether it exists.
+
+--- a/drivers/net/pcs/pcs-mtk-lynxi.c
++++ b/drivers/net/pcs/pcs-mtk-lynxi.c
+@@ -419,7 +419,7 @@
+ 	if (of_property_read_bool(np->parent, "mediatek,phya_trx_ck"))
+ 		flags |= MTK_SGMII_FLAG_PHYA_TRX_CK;
+ 
+-	if (of_parse_phandle(np->parent, "resets", 0)) {
++	if (of_property_present(np->parent, "resets")) {
+ 		mpcs->rstc = of_reset_control_get_shared(np->parent, NULL);
+ 		if (IS_ERR(mpcs->rstc))
+ 			return PTR_ERR(mpcs->rstc);
+@@ -439,9 +439,13 @@
+ 	if (IS_ERR(mpcs->sgmii_tx))
+ 		return PTR_ERR(mpcs->sgmii_tx);
+ 
+-	mpcs->xfi_tphy = devm_of_phy_get(mpcs->dev, np, NULL);
+-	if (IS_ERR(mpcs->xfi_tphy))
+-		return PTR_ERR(mpcs->xfi_tphy);
++	/* MT7987's PHYA is integrated; MT7988 still requires its XFI T-PHY. */
++	if (!of_device_is_compatible(np, "mediatek,mt7987-sgmii") ||
++	    of_property_present(np, "phys")) {
++		mpcs->xfi_tphy = devm_of_phy_get(mpcs->dev, np, NULL);
++		if (IS_ERR(mpcs->xfi_tphy))
++			return PTR_ERR(mpcs->xfi_tphy);
++	}
+ 
+ 	pcs = mtk_pcs_lynxi_init(dev, regmap, (uintptr_t)of_device_get_match_data(dev),
+ 				 flags, mpcs);

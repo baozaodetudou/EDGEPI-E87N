@@ -55,6 +55,8 @@ Signed-off-by: Daniel Golle <daniel@makrotopia.org>
  obj-$(CONFIG_COMMON_CLK_MT7988) += clk-mt7988-apmixed.o
  obj-$(CONFIG_COMMON_CLK_MT7988) += clk-mt7988-topckgen.o
  obj-$(CONFIG_COMMON_CLK_MT7988) += clk-mt7988-infracfg.o
+diff --git a/drivers/clk/mediatek/clk-mt7987-apmixed.c b/drivers/clk/mediatek/clk-mt7987-apmixed.c
+new file mode 100644
 --- /dev/null
 +++ b/drivers/clk/mediatek/clk-mt7987-apmixed.c
 @@ -0,0 +1,116 @@
@@ -174,6 +176,8 @@ Signed-off-by: Daniel Golle <daniel@makrotopia.org>
 +};
 +builtin_platform_driver(clk_mt7987_apmixed_drv);
 +MODULE_LICENSE("GPL");
+diff --git a/drivers/clk/mediatek/clk-mt7987-eth.c b/drivers/clk/mediatek/clk-mt7987-eth.c
+new file mode 100644
 --- /dev/null
 +++ b/drivers/clk/mediatek/clk-mt7987-eth.c
 @@ -0,0 +1,94 @@
@@ -271,6 +275,8 @@ Signed-off-by: Daniel Golle <daniel@makrotopia.org>
 +
 +MODULE_DESCRIPTION("MediaTek MT7987 Ethernet clocks driver");
 +MODULE_LICENSE("GPL");
+diff --git a/drivers/clk/mediatek/clk-mt7987-infracfg.c b/drivers/clk/mediatek/clk-mt7987-infracfg.c
+new file mode 100644
 --- /dev/null
 +++ b/drivers/clk/mediatek/clk-mt7987-infracfg.c
 @@ -0,0 +1,325 @@
@@ -599,6 +605,8 @@ Signed-off-by: Daniel Golle <daniel@makrotopia.org>
 +};
 +module_platform_driver(clk_mt7987_infracfg_drv);
 +MODULE_LICENSE("GPL");
+diff --git a/drivers/clk/mediatek/clk-mt7987-mcusys.c b/drivers/clk/mediatek/clk-mt7987-mcusys.c
+new file mode 100644
 --- /dev/null
 +++ b/drivers/clk/mediatek/clk-mt7987-mcusys.c
 @@ -0,0 +1,47 @@
@@ -649,6 +657,8 @@ Signed-off-by: Daniel Golle <daniel@makrotopia.org>
 +};
 +module_platform_driver(clk_mt7987_mcusys_drv);
 +MODULE_LICENSE("GPL");
+diff --git a/drivers/clk/mediatek/clk-mt7987-topckgen.c b/drivers/clk/mediatek/clk-mt7987-topckgen.c
+new file mode 100644
 --- /dev/null
 +++ b/drivers/clk/mediatek/clk-mt7987-topckgen.c
 @@ -0,0 +1,311 @@
@@ -963,6 +973,8 @@ Signed-off-by: Daniel Golle <daniel@makrotopia.org>
 +};
 +module_platform_driver(clk_mt7987_topckgen_drv);
 +MODULE_LICENSE("GPL");
+diff --git a/include/dt-bindings/clock/mediatek,mt7987-clk.h b/include/dt-bindings/clock/mediatek,mt7987-clk.h
+new file mode 100644
 --- /dev/null
 +++ b/include/dt-bindings/clock/mediatek,mt7987-clk.h
 @@ -0,0 +1,206 @@
@@ -1172,6 +1184,8 @@ Signed-off-by: Daniel Golle <daniel@makrotopia.org>
 +
 +#endif /* _DT_BINDINGS_CLK_MT7987_H */
 +
+diff --git a/include/dt-bindings/reset/mediatek,mt7987-resets.h b/include/dt-bindings/reset/mediatek,mt7987-resets.h
+new file mode 100644
 --- /dev/null
 +++ b/include/dt-bindings/reset/mediatek,mt7987-resets.h
 @@ -0,0 +1,10 @@

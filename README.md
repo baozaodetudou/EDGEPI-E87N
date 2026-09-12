@@ -22,6 +22,8 @@ E87N_BUILD_IMAGE=debian:13.6-slim ./build.sh
 
 构建日志打印容器名并保存在 `source/armbian-build/output/logs/`；容器与 Linux 缓存卷会保留用于诊断。不要并发启动多个构建。当前进度和验证边界见 [构建状态](docs/build-status.md)。
 
+Armbian 构建框架默认固定在 `7c1bb29eb0e7bd75b0703d86fe654b2680e646da`，避免后续上游变化影响首次移植。已有源码版本不一致时会停止，不会自动覆盖本地 checkout。macOS 启动器会在更换 overlay 之前检测已有的 E87N 构建容器并拒绝重复启动。
+
 输出在：
 
 ```text
@@ -32,9 +34,22 @@ source/armbian-build/output/images/
 
 首版为有线网络最小系统，只额外附带校验过的 MT7987 PHY 固件，不包含完整的通用 USB/Wi-Fi 固件集合。需要外接无线设备时，需按设备另行安装固件。
 
+## 产物检查
+
+生成包或提取镜像后，可执行只读静态检查；脚本不会挂载镜像、执行目标系统脚本或刷写设备：
+
+```sh
+# 只检查同一版本的内核与 DTB 包，不代表 rootfs 已通过验证：
+bash scripts/verify-artifacts.sh --debs source/armbian-build/output/debs
+# 分别提供已经提取的 Debian rootfs 与 bootfs：
+bash scripts/verify-artifacts.sh --extracted-rootfs /path/to/rootfs --boot-dir /path/to/bootfs
+```
+
+验证包含内核/模块架构、首启配置、E87N DTB、Debian 标识、PHY 固件校验及 extlinux/fstab 的 root UUID 对应关系。不检查真实 U-Boot 能力、initrd 内容或整盘写入安全，不能代替上板测试。`bash tests/test-verify-artifacts.sh` 仅测试验证脚本自身，使用合成数据，不能作为真实镜像验证结果。
+
 ## 当前移植内容
 
-`userpatches/config/boards/edgepi-e87n.csc` 定义 E87N 板卡和首启内核配置 hook；独立的 `userpatches/config/sources/families/edgepi-e87n.conf` 提供 MT7987 分支配置；`userpatches/patch/kernel/edgepi-e87n-6.12/` 包含 MT7987 驱动补丁和 E87N DTB。板卡使用 `BOARDFAMILY=edgepi-e87n` 避免加载上游 filogic family，独立 family 内部保留 `LINUXFAMILY=filogic` 供内核配置与打包使用。
+`userpatches/config/boards/edgepi-e87n.csc` 定义 E87N 板卡和首启内核配置 hook；独立的 `userpatches/config/sources/families/edgepi-e87n.conf` 提供 MT7987 分支配置；`userpatches/kernel/edgepi-e87n-6.12/` 包含 MT7987 驱动补丁和 E87N DTB。板卡使用 `BOARDFAMILY=edgepi-e87n` 避免加载上游 filogic family，独立 family 内部保留 `LINUXFAMILY=filogic` 供内核配置与打包使用。
 
 构建使用 `frank-w/BPI-Router-Linux`，内核固定为 `commit:b864732ee285e7868fb0857d69a8ff349e37003e`（Linux 6.12.108），然后应用 E87N 的 MT7987 补丁。它属于 Debian/Armbian 的内核构建过程，不使用 OpenWrt rootfs 或 OpenWrt sysupgrade 镜像。
 

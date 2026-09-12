@@ -4,12 +4,32 @@ export GIT_TERMINAL_PROMPT=0
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ARMBIAN_DIR="$ROOT_DIR/source/armbian-build"
-ARMBIAN_REF=${ARMBIAN_REF:-main}
+ARMBIAN_REF=${ARMBIAN_REF:-7c1bb29eb0e7bd75b0703d86fe654b2680e646da}
+
+# Check before replacing the overlay: a detached build may outlive its launcher.
+# These E87N containers share the same named cache/temp volumes.
+if [ "$(uname -s)" = Darwin ]; then
+	ACTIVE_BUILDS=$(docker ps --filter name=e87n-armbian- --filter status=running --format '{{.Names}}')
+	if [ -n "$ACTIVE_BUILDS" ]; then
+		printf 'An E87N build is already running; inspect it before retrying:\n%s\n' "$ACTIVE_BUILDS" >&2
+		exit 75
+	fi
+fi
 
 mkdir -p "$ROOT_DIR/source"
 if [ ! -d "$ARMBIAN_DIR/.git" ]; then
-	git clone --depth 1 --branch "$ARMBIAN_REF" https://github.com/armbian/build.git "$ARMBIAN_DIR"
+	git init "$ARMBIAN_DIR"
+	git -C "$ARMBIAN_DIR" remote add origin https://github.com/armbian/build.git
+	git -C "$ARMBIAN_DIR" fetch --depth 1 origin "$ARMBIAN_REF"
+	git -C "$ARMBIAN_DIR" checkout --detach FETCH_HEAD
 fi
+ARMBIAN_ACTUAL=$(git -C "$ARMBIAN_DIR" rev-parse HEAD)
+if [[ "$ARMBIAN_REF" =~ ^[0-9a-f]{40}$ && "$ARMBIAN_ACTUAL" != "$ARMBIAN_REF" ]]; then
+	printf 'Armbian checkout mismatch: expected %s, found %s. Existing checkout left unchanged.\n' \
+		"$ARMBIAN_REF" "$ARMBIAN_ACTUAL" >&2
+	exit 1
+fi
+printf 'Armbian source: %s\n' "$ARMBIAN_ACTUAL"
 if [ "$(git -C "$ARMBIAN_DIR" config --get core.sparseCheckout || true)" = true ]; then
 	git -C "$ARMBIAN_DIR" sparse-checkout disable
 fi

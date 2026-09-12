@@ -8,7 +8,8 @@
 
 - **独立 family：** 板卡使用 `BOARDFAMILY=edgepi-e87n`。`lib/functions/main/config-prepare.sh:141` 先据此设置 `LINUXFAMILY`，`lib/functions/configuration/main-config.sh:582–590` 再按这个名字选取存在的 family 文件，因此只加载 userpatches 中的 `config/sources/families/edgepi-e87n.conf`，避免进入上游 filogic 对其他 SoC 的分支。独立 family 内部再设 `LINUXFAMILY=filogic`，保持内核配置和包名兼容。更新上游时需重新验证文件选择与最终变量。
 - **Board hook：** `lib/functions/general/extensions.sh:167–173` 识别双下划线 hook 名；`main-config.sh:362–369` 在 family 加载后注册并调用 `post_family_config`。此时板卡 hook 设置 `ATF_COMPILE=no`、`BOOTCONFIG=none`，跳过 bootloader 产物。
-- **DTS bootargs：** [DTS 补丁](../userpatches/patch/kernel/edgepi-e87n-6.12/0000-add-mt7987-e87n-dts.patch) 的 1262–1264 行已改为 `console=ttyS0,115200n8`、`rootfstype=ext4`，并移除旧的 `root=PARTLABEL=rootfs` 和 squashfs/f2fs 参数。具体 root 设备由 Armbian 的启动配置提供；临时启动还应显式设置完整 bootargs，并核对生成 DTB 与最终 `/chosen/bootargs`。
+- **DTS bootargs：** [DTS 补丁](../userpatches/kernel/edgepi-e87n-6.12/0000-add-mt7987-e87n-dts.patch) 的 `/chosen/bootargs` 已改为 `console=ttyS0,115200n8`、`rootfstype=ext4`，并移除旧的 `root=PARTLABEL=rootfs` 和 squashfs/f2fs 参数。具体 root 设备由 Armbian 的启动配置提供；临时启动还应显式设置完整 bootargs，并核对生成 DTB 与最终 `/chosen/bootargs`。
+- **内存：** 已补齐 `device_type = "memory"`，但容量仍保留参考 DTS 的 256 MiB 范围。实际板载 RAM 容量、保留区及 U-Boot 是否正确修正 DTB，需要从串口日志确认；不能把该默认值当成已测硬件规格。
 
 配置加载成功、补丁无 fuzz 应用和 DTB 检查通过，均不代表内核编译或实机首启已经通过。
 

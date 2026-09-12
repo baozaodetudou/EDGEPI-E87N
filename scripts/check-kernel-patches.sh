@@ -5,7 +5,7 @@ repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 kernel_repo=${1:?Usage: bash scripts/check-kernel-patches.sh /path/to/kernel/git [revision]}
 kernel_ref=${2:-b864732ee285e7868fb0857d69a8ff349e37003e}
 patch_bin=${PATCH_BIN:-patch}
-patch_dir="$repo_dir/userpatches/patch/kernel/edgepi-e87n-6.12"
+patch_dir="$repo_dir/userpatches/kernel/edgepi-e87n-6.12"
 
 if ! "$patch_bin" --version | head -1 | grep -q 'GNU patch'; then
 	echo 'GNU patch is required. On macOS set PATCH_BIN to gpatch.' >&2
@@ -48,3 +48,29 @@ for patch_file in "$patch_dir"/*.patch; do
 	count=$((count + 1))
 done
 printf 'PASS: %s patches applied with fuzz=0. This is not a compilation test.\n' "$count"
+
+# Optional device-tree compile independent of the slow container bootstrap.
+# Fetch only these unmodified binding headers, never the full partial-clone tree.
+if [[ ${CHECK_DTB:-no} == yes ]]; then
+	command -v dtc >/dev/null
+	command -v fdtget >/dev/null
+	for header in \
+		interrupt-controller/irq.h interrupt-controller/arm-gic.h phy/phy.h \
+		reset/ti-syscon.h pinctrl/mt65xx.h gpio/gpio.h thermal/thermal.h \
+		leds/common.h input/input.h; do
+		mkdir -p "$audit_dir/tree/include/dt-bindings/$(dirname "$header")"
+		git -C "$kernel_repo" show "$kernel_ref:include/dt-bindings/$header" \
+			> "$audit_dir/tree/include/dt-bindings/$header"
+	done
+	# linux-event-codes.h is a relative symlink in the kernel; materialize its target.
+	git -C "$kernel_repo" show "$kernel_ref:include/uapi/linux/input-event-codes.h" \
+		> "$audit_dir/tree/include/dt-bindings/input/linux-event-codes.h"
+	"${CPP_BIN:-cc}" -E -nostdinc -undef -D__DTS__ -x assembler-with-cpp \
+		-I "$audit_dir/tree/include" \
+		"$audit_dir/tree/arch/arm64/boot/dts/mediatek/mt7987a-edgepi-e87n.dts" \
+		-o "$audit_dir/e87n.preprocessed.dts"
+	dtc -I dts -O dtb -o "$audit_dir/mt7987a-edgepi-e87n.dtb" \
+		"$audit_dir/e87n.preprocessed.dts" 2> "$audit_dir/logs/dtc.log"
+	fdtget -t s "$audit_dir/mt7987a-edgepi-e87n.dtb" / compatible | grep -w 'edgepi,e87n'
+	printf 'PASS: E87N DTB compiled. Warnings: %s/logs/dtc.log; not a kernel or boot test.\n' "$audit_dir"
+fi

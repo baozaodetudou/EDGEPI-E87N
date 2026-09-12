@@ -35,6 +35,9 @@ starting another build. The launcher has no device-flashing step.
   forwarding, overlay backups, detached execution and exit-code propagation.
 - Isolated the E87N family so the upstream Filogic MT7987 rejection is not reached;
   removed the copied raw BL2/FIP writer from this project's active family.
+- Moved the patchset to `userpatches/kernel/edgepi-e87n-6.12`, the path used by
+  Armbian's actual Python patch discovery. The former extra `patch/` component
+  would have hidden the hardware patches from the builder.
 - Corrected the root command line and requested early-boot storage/clock/pinctrl/
   serial/ext4 drivers. The full `olddefconfig` and compile still need validation.
 - Added two unmodified MT7987 PHY firmware blobs with upstream provenance,
@@ -44,9 +47,27 @@ starting another build. The launcher has no device-flashing step.
   Armbian family/architecture loader. This is a configuration test, not a build.
 - Firmware SHA-256 and expected sizes passed local verification.
 - Ported the PHY/LED/PCS patches to the baseline's actual APIs and file layout,
-  added the missing thermal/cpufreq prerequisites, and checked all **16 patches
+  added the missing thermal/cpufreq prerequisites, and checked all **17 patches
   with GNU patch and `--fuzz=0`** in an isolated tree. All applied. This is not
   evidence that the resulting kernel compiles or boots.
+- The actual Armbian Python patch-discovery and parsing classes now find and
+  parse all 17 patches. Normalized multi-file addition headers to avoid the
+  parser's repeated `/dev/null` ambiguity.
+- Independently compiled the E87N DTB using the pinned kernel's binding headers;
+  checked the root compatible and memory type. Added missing `device_type` on
+  memory and SPI address/size cells. DTC still reports vendor-source node naming
+  warnings; a complete schema check and hardware validation have not run.
+- Kept the reference DTS's conservative 256 MiB memory range. The actual board
+  RAM size and U-Boot memory fixup still need to be established from boot logs.
+- Added patch 742 to allow the integrated MT7987 PHYA without an external `phys`
+  phandle. Explicit PHY references still propagate errors/deferred probes;
+  MT7988's required external PHY path is unchanged. This fixes a source-level
+  PCS probe failure, not a measured Ethernet test.
+- Made watchdog/reset, syscon and EFUSE/NVMEM configuration requests explicit.
+- Added a read-only artifact verifier for matching kernel/DTB packages or
+  extracted Debian rootfs/bootfs. Its 60 synthetic fixture checks passed,
+  including malformed/missing artifacts and root-parameter errors. No real
+  kernel packages or system image have yet been validated with it.
 - Removed the old squashfs/f2fs bootargs and factory MAC NVMEM references from the
   E87N DTS. The generic GPT lacks factory; this prototype allows temporary random
   MAC addresses instead of deferring the Ethernet probe indefinitely.
@@ -59,6 +80,10 @@ bash tests/test-launcher.sh
 bash tests/test-board-config.sh
 # Linux uses GNU patch; on macOS set PATCH_BIN to gpatch:
 bash scripts/check-kernel-patches.sh /path/to/BPI-Router-Linux
+# Optional DTB compile (C preprocessor, dtc and fdtget required):
+CHECK_DTB=yes bash scripts/check-kernel-patches.sh /path/to/BPI-Router-Linux
+# Uses the checked-out Armbian parser; uv supplies isolated Python dependencies:
+uv run --script tests/test-patch-discovery.py
 ```
 
 ## Source revisions inspected
@@ -70,7 +95,7 @@ bash scripts/check-kernel-patches.sh /path/to/BPI-Router-Linux
 | E87N reference source | `c51dcd733aeda3c24c730ddaff2c54440a72ca6d` |
 | Linux firmware | `c0af6c70df291701fdecf6402e47dd4564e6b718` |
 
-The kernel is now pinned to the revision above; the Armbian build checkout is
-not pinned by the launcher yet. Compile, artifact and hardware validation are
+The kernel and default Armbian build checkout are now pinned to the revisions
+above. Compile, artifact and hardware validation are
 still required before release. Further prerequisites and destructive-write boundaries are in
 [first-boot.md](first-boot.md).

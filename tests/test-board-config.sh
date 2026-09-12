@@ -24,6 +24,9 @@ post_family_config__edgepi_e87n_existing_uboot
 [[ "$BOOT_FDT_FILE" == mediatek/mt7987a-edgepi-e87n.dtb ]]
 [[ "$BOOTFS_TYPE" == ext4 && "$ROOTFS_TYPE" == ext4 ]]
 [[ "$KERNELPATCHDIR" == edgepi-e87n-6.12 ]]
+# Armbian's patching.py uses USERPATCHES_PATH/kernel, not userpatches/patch/kernel.
+patch_files=("$USERPATCHES_PATH/kernel/$KERNELPATCHDIR/"*.patch)
+[[ ${#patch_files[@]} == 17 && -f "${patch_files[0]}" ]]
 [[ "$SRC_CMDLINE" != *root=* ]]
 [[ "$SRC_CMDLINE" != *squashfs* ]]
 if declare -F write_uboot_platform >/dev/null; then
@@ -36,7 +39,7 @@ opts_m=(EXT4_FS CONFIG_EXT4_FS BTRFS_FS)
 custom_kernel_config__edgepi_e87n_first_boot
 [[ " ${opts_m[*]} " != *' EXT4_FS '* && " ${opts_m[*]} " != *' CONFIG_EXT4_FS '* ]]
 [[ " ${opts_m[*]} " == *' BTRFS_FS '* && " ${opts_m[*]} " == *' MEDIATEK_2P5G_PHY '* ]]
-for required in COMMON_CLK_MT7987 PINCTRL_MT7987 MMC_MTK SERIAL_8250_MT6577 EXT4_FS; do
+for required in COMMON_CLK_MT7987 PINCTRL_MT7987 MMC_MTK SERIAL_8250_MT6577 EXT4_FS MEDIATEK_WATCHDOG MFD_SYSCON NVMEM NVMEM_MTK_EFUSE; do
 	[[ " ${opts_y[*]} " == *" $required "* ]] || exit 1
 done
 printf 'PASS: Armbian family loader, no bootloader writer, root cmdline, first-boot driver requests\n'

@@ -1,5 +1,7 @@
---- /dev/null	2026-09-12 15:18:29
-+++ b/arch/arm64/boot/dts/mediatek/mt7987.dtsi	2026-09-12 15:17:45
+diff --git a/arch/arm64/boot/dts/mediatek/mt7987.dtsi b/arch/arm64/boot/dts/mediatek/mt7987.dtsi
+new file mode 100644
+--- /dev/null
++++ b/arch/arm64/boot/dts/mediatek/mt7987.dtsi
 @@ -0,0 +1,1155 @@
 +// SPDX-License-Identifier: (GPL-2.0 OR MIT)
 +/*
@@ -1156,9 +1158,11 @@
 +		};
 +	};
 +};
---- /dev/null	2026-09-12 15:18:29
-+++ b/arch/arm64/boot/dts/mediatek/mt7987a.dtsi	2026-09-12 15:17:45
-@@ -0,0 +1,37 @@
+diff --git a/arch/arm64/boot/dts/mediatek/mt7987a.dtsi b/arch/arm64/boot/dts/mediatek/mt7987a.dtsi
+new file mode 100644
+--- /dev/null
++++ b/arch/arm64/boot/dts/mediatek/mt7987a.dtsi
+@@ -0,0 +1,38 @@
 +// SPDX-License-Identifier: (GPL-2.0 OR MIT)
 +/*
 + * Copyright (C) 2023 MediaTek Inc.
@@ -1173,6 +1177,7 @@
 +	compatible = "mediatek,mt7987a", "mediatek,mt7987";
 +
 +	memory {
++		device_type = "memory";
 +		reg = <0 0x40000000 0 0x10000000>;
 +	};
 +};
@@ -1196,9 +1201,11 @@
 +&watchdog {
 +	status = "okay";
 +};
---- /dev/null	2026-09-12 15:18:29
-+++ b/arch/arm64/boot/dts/mediatek/mt7987b.dtsi	2026-09-12 15:17:45
-@@ -0,0 +1,38 @@
+diff --git a/arch/arm64/boot/dts/mediatek/mt7987b.dtsi b/arch/arm64/boot/dts/mediatek/mt7987b.dtsi
+new file mode 100644
+--- /dev/null
++++ b/arch/arm64/boot/dts/mediatek/mt7987b.dtsi
+@@ -0,0 +1,39 @@
 +// SPDX-License-Identifier: (GPL-2.0 OR MIT)
 +/*
 + * Copyright (C) 2023 MediaTek Inc.
@@ -1212,6 +1219,7 @@
 +	compatible = "mediatek,mt7987b", "mediatek,mt7987";
 +
 +	memory {
++		device_type = "memory";
 +		reg = <0 0x40000000 0 0x10000000>;
 +	};
 +
@@ -1237,9 +1245,11 @@
 +&trng {
 +	status = "okay";
 +};
---- /dev/null	2026-09-12 15:18:29
-+++ b/arch/arm64/boot/dts/mediatek/mt7987a-edgepi-e87n.dts	2026-09-12 15:17:45
-@@ -0,0 +1,277 @@
+diff --git a/arch/arm64/boot/dts/mediatek/mt7987a-edgepi-e87n.dts b/arch/arm64/boot/dts/mediatek/mt7987a-edgepi-e87n.dts
+new file mode 100644
+--- /dev/null
++++ b/arch/arm64/boot/dts/mediatek/mt7987a-edgepi-e87n.dts
+@@ -0,0 +1,279 @@
 +// SPDX-License-Identifier: (GPL-2.0 OR MIT)
 +/*
 + * EdgePi E87N board support
@@ -1484,6 +1494,8 @@
 +};
 +
 +&spi2 {
++	#address-cells = <1>;
++	#size-cells = <0>;
 +	pinctrl-names = "default";
 +	pinctrl-0 = <&spi2_flash_pins>;
 +	status = "okay";
@@ -1517,8 +1529,9 @@
 +	pinctrl-0 = <&uart0_pins>;
 +	status = "okay";
 +};
---- a/arch/arm64/boot/dts/mediatek/Makefile	2026-09-12 15:17:45
-+++ b/arch/arm64/boot/dts/mediatek/Makefile	2026-09-12 15:18:29
+diff --git a/arch/arm64/boot/dts/mediatek/Makefile b/arch/arm64/boot/dts/mediatek/Makefile
+--- a/arch/arm64/boot/dts/mediatek/Makefile
++++ b/arch/arm64/boot/dts/mediatek/Makefile
 @@ -135,3 +135,4 @@
  DTC_FLAGS_mt7986a-bananapi-bpi-r3-mini := -@
  DTC_FLAGS_mt7988a-bananapi-bpi-r4 := -@
