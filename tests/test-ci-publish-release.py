@@ -262,7 +262,7 @@ class PublisherTests(unittest.TestCase):
         self.manifest()
         self.assertEqual(self.run_cli(), 0, self.errors.getvalue())
 
-    def test_success_order_and_all_assets_verified_while_draft(self):
+    def test_success_order_and_only_two_downloads_verified_while_draft(self):
         self.assertEqual(self.run_cli(), 0, self.errors.getvalue())
         self.assertEqual(self.actions(), ["create", "upload", "edit"])
         calls = self.fake.calls
@@ -270,8 +270,10 @@ class PublisherTests(unittest.TestCase):
         edit_index = next(i for i, c in enumerate(calls) if c[1:3] == ["release", "edit"])
         self.assertTrue(any(c[-1].endswith("releases/42/assets?per_page=100") for c in calls[upload_index + 1:edit_index]))
         upload = calls[upload_index]
-        self.assertEqual(set(upload[upload.index("--") + 1:]), {str(p) for p in self.assets.iterdir()})
-        self.assertEqual(len(self.fake.assets), 8)
+        self.assertEqual(set(upload[upload.index("--") + 1:]),
+                         {str(self.assets / "e87n-trixie.img.xz"), str(self.assets / "e87n-display_1.2.3_all.deb")})
+        self.assertEqual({a["name"] for a in self.fake.assets},
+                         {"e87n-trixie.img.xz", "e87n-display_1.2.3_all.deb"})
         self.assertTrue(self.fake.published and self.fake.tag_exists)
         self.assertTrue(calls[-1][-1].endswith(f"git/ref/tags/{TAG}"))
 

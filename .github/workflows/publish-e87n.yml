@@ -1,0 +1,100 @@
+name: Publish existing E87N build
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: 'Successful main build run ID; blank selects the latest successful build'
+        type: string
+        required: false
+      release_tag:
+        description: 'New tag; blank generates e87n-trixie-6.18.51-<source-run-id>'
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+# Serialize manual releases across tags; publisher preflight also rejects existing tags/drafts.
+concurrency:
+  group: e87n-release-${{ github.repository }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  GIT_TERMINAL_PROMPT: '0'
+  GH_HOST: github.com
+  GH_PROMPT_DISABLED: '1'
+
+jobs:
+  publish:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      # Publishing code comes from this main workflow, never from the artifact's checkout.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          clean: false
+      - name: Resolve and verify the existing successful build
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_BUILD_RUN_ID: ${{ inputs.build_run_id }}
+        run: |
+          [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "$GITHUB_REF" == refs/heads/main ]]
+          python3 scripts/ci-resolve-build.py --repository "$GITHUB_REPOSITORY" \
+            --build-run-id="$INPUT_BUILD_RUN_ID"
+      - name: Check source commit and unused release tag
+        id: release_tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+          SOURCE_COMMIT: ${{ steps.source.outputs.source_commit }}
+          SOURCE_RUN_ID: ${{ steps.source.outputs.source_run_id }}
+        run: |
+          release_tag=${INPUT_RELEASE_TAG:-e87n-trixie-6.18.51-${SOURCE_RUN_ID}}
+          python3 scripts/ci-publish-release.py preflight \
+            --repository "$GITHUB_REPOSITORY" --source-commit "$SOURCE_COMMIT" --tag "$release_tag"
+          printf 'release_tag=%s\n' "$release_tag" >> "$GITHUB_OUTPUT"
+      - name: Download the two artifacts from the resolved build attempt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ steps.source.outputs.source_run_id }}
+          SOURCE_RUN_ATTEMPT: ${{ steps.source.outputs.source_run_attempt }}
+        run: |
+          gh auth status --hostname github.com >/dev/null 2>&1
+          gh run download "$SOURCE_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "e87n-trixie-6.18.51-candidate-${SOURCE_RUN_ID}-${SOURCE_RUN_ATTEMPT}" \
+            --dir output/release-input/image
+          gh run download "$SOURCE_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "e87n-display-candidate-${SOURCE_RUN_ID}-${SOURCE_RUN_ATTEMPT}" \
+            --dir output/release-input/display
+      - name: Verify and prepare release assets
+        env:
+          SOURCE_COMMIT: ${{ steps.source.outputs.source_commit }}
+          SOURCE_RUN_ID: ${{ steps.source.outputs.source_run_id }}
+          SOURCE_RUN_ATTEMPT: ${{ steps.source.outputs.source_run_attempt }}
+          RELEASE_TAG: ${{ steps.release_tag.outputs.release_tag }}
+        run: |
+          python3 scripts/ci-prepare-release.py \
+            --image-artifact output/release-input/image --display-artifact output/release-input/display \
+            --output output/release-assets --source-commit "$SOURCE_COMMIT" \
+            --run-id "$SOURCE_RUN_ID" --run-attempt "$SOURCE_RUN_ATTEMPT" \
+            --tag "$RELEASE_TAG" --repository "$GITHUB_REPOSITORY"
+      - name: Publish the verified image and display package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_COMMIT: ${{ steps.source.outputs.source_commit }}
+          RELEASE_TAG: ${{ steps.release_tag.outputs.release_tag }}
+        run: |
+          python3 scripts/ci-publish-release.py publish \
+            --repository "$GITHUB_REPOSITORY" --source-commit "$SOURCE_COMMIT" \
+            --tag "$RELEASE_TAG" --assets output/release-assets

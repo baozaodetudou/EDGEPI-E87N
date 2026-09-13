@@ -14,6 +14,7 @@ import shutil
 import stat
 import sys
 import tarfile
+from urllib.parse import quote
 
 REPO = Path(__file__).resolve().parents[1]
 TARGET = {"debian": "13", "release": "trixie", "kernel": "6.18.51", "extra_storage": "no"}
@@ -206,7 +207,26 @@ def main():
         for n, checksum in sorted(artifact[1].items())
         if n in ("SHA256SUMS", "build-metadata.json") or n.startswith("logs/")])
     base = "https://github.com/" + args.repository
+    image_name, display_name = Path(image[2][0]).name, Path(display[3][0]).name
+    download_base = base + "/releases/download/" + quote(args.tag, safe="")
     notes = f"""# E87N {args.tag} — experimental release
+
+## 下载 / Downloads
+
+- [系统镜像（.img.xz）]({download_base}/{quote(image_name, safe='')})
+- [屏幕控制安装包（.deb）]({download_base}/{quote(display_name, safe='')})
+
+本 Release 仅有以上两个二进制附件：镜像已预装屏幕程序，独立安装包用于安装/升级。
+GitHub 自带的 Source code (zip/tar.gz) 是源码，不是可刷写镜像。
+
+## SHA-256
+
+```text
+{image[1][image[2][0]]}  {image_name}
+{display[1][display[3][0]]}  {display_name}
+```
+
+下载后运行 `sha256sum 文件名`（macOS：`shasum -a 256 文件名`），与上面的摘要比较。
 
 Experimental Debian 13 (trixie) + Linux 6.18.51; extra_storage=no.
 Default login: root / doumao over SSH port 22. First connect only to a trusted
@@ -219,10 +239,10 @@ Do not flash this whole image over the original eMMC: the GPT, boot chain and
 factory data may be overwritten. This release provides no whole-eMMC installer.
 
 The standalone e87n-display .deb comes from the independent display job.
-kernel-packages.tar.xz preserves packages/armbian/*.deb recursively.
-build-evidence.tar.xz contains both jobs' original manifests, metadata and logs;
-payloads referenced by those original manifests remain in the release assets.
-Verify the release assets with `sha256sum -c SHA256SUMS` before use.
+Kernel packages, metadata, checksum manifests and full logs remain in the
+source build's Actions artifacts (14-day retention); they are not extra
+installation downloads on this Release. The source tag and commit remain
+available alongside these two binary downloads.
 
 Source: {base}/commit/{args.source_commit}
 Build run: {base}/actions/runs/{args.run_id}

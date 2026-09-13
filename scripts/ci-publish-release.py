@@ -172,15 +172,20 @@ def check_tag(args, pending=False):
 
 
 def publish(args, files):
+    # Only the two end-user downloads belong on Releases. The other validated
+    # files are staging/evidence, not extra installation packages for users.
+    downloads = {name: value for name, value in files.items()
+                 if name.endswith(".img.xz") or re.fullmatch(r"e87n-display_.+_all\.deb", name)}
+    require(len(downloads) == 2, "Release must contain one image and one display package")
     try:
         gh("release", "create", args.tag, "--repo", args.repository, "--target", args.source_commit,
            "--title", f"E87N {args.tag}", "--notes-file", files["RELEASE-NOTES.md"][0],
            "--draft", "--prerelease", "--latest=false")
         release_id = check_release(find_release(args), args, True)
         check_remote_assets(args, release_id, {})  # Never adopt or overwrite preexisting assets.
-        gh("release", "upload", args.tag, "--repo", args.repository, "--", *(v[0] for v in files.values()))
+        gh("release", "upload", args.tag, "--repo", args.repository, "--", *(v[0] for v in downloads.values()))
         check_release(api(args.repository, f"releases/{release_id}"), args, True, release_id)
-        check_remote_assets(args, release_id, files)
+        check_remote_assets(args, release_id, downloads)
         check_tag(args, pending=True)
         gh("release", "edit", args.tag, "--repo", args.repository, "--draft=false", "--prerelease", "--latest=false")
         check_release(api(args.repository, f"releases/{release_id}"), args, False, release_id)

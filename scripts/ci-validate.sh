@@ -6,9 +6,10 @@ cd "$repo_dir"
 for tool in actionlint shellcheck python3; do
 	command -v "$tool" >/dev/null || { printf 'Missing validation tool: %s\n' "$tool" >&2; exit 1; }
 done
-actionlint .github/workflows/build-e87n.yml
+actionlint .github/workflows/*.yml
 for script in scripts/ci-*.sh; do bash -n "$script"; done
 shellcheck scripts/ci-*.sh
 python3 tests/test-ci-workflow.py
 python3 tests/test-ci-prepare-release.py
 python3 tests/test-ci-publish-release.py
+python3 tests/test-ci-resolve-build.py

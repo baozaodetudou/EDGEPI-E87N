@@ -122,6 +122,12 @@ class ReleasePreparation(unittest.TestCase):
                     self.assertEqual((member.uid, member.gid, member.mode), (0, 0, 0o644))
                     self.assertEqual(bundle.extractfile(member).read(), expected[member.name].read_bytes())
         notes = (self.output / "RELEASE-NOTES.md").read_text()
+        self.assertIn("/releases/download/e87n-test-6.18.51/candidate.img.xz", notes)
+        self.assertIn("/releases/download/e87n-test-6.18.51/" + DEB, notes)
+        self.assertIn("仅有以上两个二进制附件", notes)
+        self.assertIn(hashlib.sha256((self.output / "candidate.img.xz").read_bytes()).hexdigest(), notes)
+        self.assertIn(hashlib.sha256((self.output / DEB).read_bytes()).hexdigest(), notes)
+        self.assertNotIn("sha256sum -c SHA256SUMS", notes)
         for required in ("experimental", "Debian 13", "trixie", "6.18.51", "extra_storage=no", "root / doumao",
                          "SSH port 22", "LAN", "passwd", "DHCP", "zh_CN.UTF-8", "Asia/Shanghai", "static checks only",
                          "No board has been validated", "Do not flash", "eMMC", "/commit/" + COMMIT,

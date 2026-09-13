@@ -6,12 +6,23 @@
 
 > 当前[最小系统默认配置](docs/DEFAULTS.md)已通过 [Actions 34737922588](https://github.com/baozaodetudou/EDGEPI-E87N/actions/runs/34737922588) 的完整构建、真实镜像静态审计和产物上传，另有 VM 用户空间副本的 SSH/APT 集成结果，见[本轮记录](docs/ci-keygen-fix-20260913.md)。**尚未在 E87N 上完成启动或硬件验收**。不要通过 LuCI 上传，不要直接整盘覆盖原 eMMC。跳过 U-Boot 构建不等于保留原盘启动数据。
 
+## 镜像与屏幕安装包下载
+
+发布成功后，从 [Releases](https://github.com/baozaodetudou/EDGEPI-E87N/releases) 选择 tag，每个版本提供两个二进制附件：
+
+- `Armbian-…_trixie_current_6.18.51_minimal.img.xz`：系统镜像，已预装屏幕控制程序。
+- `e87n-display_<版本>_all.deb`：独立屏幕控制安装包，用于安装/升级；不需要重新刷镜像。
+
+Release 正文直接列出下载链接和 SHA-256；GitHub 自动附带的 Source code zip/tar.gz **不是系统镜像**。
+
+**首次发布仍须手动运行。** 已成功构建的 `34737922588` 不需要重编译：打开 [Publish existing E87N build](https://github.com/baozaodetudou/EDGEPI-E87N/actions/workflows/publish-e87n.yml) → **Run workflow** → 选择 `main`，`build_run_id` 填 `34737922588`，`release_tag` 留空即可。留空 run ID 则选择最近一次成功的 main 构建；仅在其 artifacts 尚未过期且全部校验通过时发布。新镜像使用 [E87N Debian 13 release](https://github.com/baozaodetudou/EDGEPI-E87N/actions/workflows/build-e87n.yml) 手动构建并发布。两个入口都不会因 push/tag push 自动触发。详细说明见[下载与校验](docs/DOWNLOADS.md)。
+
 ## 从这里开始
 
 - [最小系统默认配置](docs/DEFAULTS.md)：`root` / `doumao`、SSH 22、DHCP、上海时区与中文 UTF-8；默认值以此为准。
 - [系统范围与验证状态](docs/SYSTEM-READINESS.md)：最小配置、实际验证状态和硬件证据缺口。
 - [只读诊断](docs/DIAGNOSTICS.md)与[网口稳定身份](docs/NETWORKING.md)。
-- [获取镜像与校验](docs/DOWNLOADS.md)：本仓库只提交源码和文档，镜像尚未发布为 GitHub Release 附件。
+- [获取镜像与校验](docs/DOWNLOADS.md)：tag Release 的两个下载附件、首次手动发布和 Actions 备用下载。
 - [构建指南](docs/BUILDING.md)：Linux、macOS/Docker、Lima 说明及版本固定方式。
 - [测试与验收](docs/TESTING.md)：区分代码夹具、镜像静态检查和实机测试。
 - [屏幕与风扇使用](docs/display-fan.md)：亮度、页面、开关、配置及服务。
@@ -104,7 +115,7 @@ tests/                         代码夹具和模拟回归测试
 docs/                          构建、使用、验收及历史记录
 ```
 
-`output/`、`source/`、镜像、内核包、构建日志、设备参考件和本地凭证不进入 Git。保留的 `edgepi-e87n-6.12/` 仅用于历史对照，不是当前默认配置。从[已成功的最小配置 run](https://github.com/baozaodetudou/EDGEPI-E87N/actions/runs/34737922588) 获取并校验现有 artifacts，具体名称见[下载说明](docs/DOWNLOADS.md)。新工作流**仅手动触发**，成功后以 tag 发布实验性 GitHub Release；push/tag push 不触发。首次新发布流程仍待手动运行，不会将已有 artifacts 自动转换为 Release。
+`output/`、`source/`、镜像、内核包、构建日志、设备参考件和本地凭证不进入 Git。保留的 `edgepi-e87n-6.12/` 仅用于历史对照，不是当前默认配置。镜像与独立显示包通过 tag Release 分发，原始内核包和日志仍可从源构建的 Actions artifacts 获取，具体名称见[下载说明](docs/DOWNLOADS.md)。两个发布入口**仅手动触发**；首次仍须手动运行，不会将已有 artifacts 自动转换为 Release。
 
 ## 来源、许可与反馈
 

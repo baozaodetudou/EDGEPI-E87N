@@ -2,11 +2,30 @@
 
 本仓库公开的是构建源码、板级补丁、Debian 小屏程序、测试与文档。
 **当前最小配置已在 [Actions 34737922588](https://github.com/baozaodetudou/EDGEPI-E87N/actions/runs/34737922588) 成功构建并上传 artifacts，尚未发布为 GitHub Release。**
-新的[手动构建流程](GITHUB-ACTIONS.md)已改为全部成功后按 tag 发布到 [Releases](https://github.com/baozaodetudou/EDGEPI-E87N/releases)；只在手动 Run workflow 后执行，不会因推送源码或 tag 自动运行。首次新发布流程的实际结果仍待手动运行，以下保留现有成功 artifact 的下载方式。
+新的[手动发布流程](GITHUB-ACTIONS.md)提供“重新构建并发布”和“发布已有成功构建”两个入口，发布到 [Releases](https://github.com/baozaodetudou/EDGEPI-E87N/releases)；只在手动 Run workflow 后执行，不会因推送源码或 tag 自动运行。首次发布仍待手动运行。
 `git clone` 不会下载之前本地生成的 `.img.xz`、内核包、完整日志或构建缓存。
 可按 [构建指南](BUILDING.md) 自行生成，或在 [GitHub Actions](GITHUB-ACTIONS.md) 对应 run 成功并上传 artifacts 后取得文件，再校验。工作流文件存在、任务开始运行与成功产物上传是不同状态；artifacts 也不等同于 Release。
 
-## 当前最小配置的交付状态
+## 下载入口：tag Release
+
+在仓库 [Releases](https://github.com/baozaodetudou/EDGEPI-E87N/releases) 中选择版本，下载正文链接或 Assets 中的两个二进制文件：
+
+- `Armbian-…_trixie_current_6.18.51_minimal.img.xz`：完整系统镜像，已预装屏幕包。
+- `e87n-display_<版本>_all.deb`：独立屏幕控制安装包；在已经运行的 Debian/Armbian 中按[安装说明](DISPLAY-PACKAGE.md)安装或升级。
+
+Release 正文包含这两个文件的 SHA-256。下载后运行 `sha256sum 文件名`（macOS：`shasum -a 256 文件名`），与该版本正文比较。GitHub 自带的 **Source code (zip/tar.gz) 只是源码，不是镜像**。内核包和审计日志保留在 Actions artifacts，不增加普通用户需要下载的安装附件。
+
+如果 Releases 还是空的，仓库维护者只需手动发布一次现有产物，无需再次编译：
+
+1. 打开 [Publish existing E87N build](https://github.com/baozaodetudou/EDGEPI-E87N/actions/workflows/publish-e87n.yml)，点击 **Run workflow**，选择 `main`。
+2. `build_run_id` 填 `34737922588`（留空则取最近一次成功的 main 构建），`release_tag` 留空。
+3. 点击运行；全部校验和上传完成后，当前源构建会发布为 `e87n-trixie-6.18.51-34737922588`。
+
+这是操作说明，**不是该 tag 已经发布的声明**。如果 tag 已存在，不会覆盖，需另填新的 tag；如果源 artifacts 已过期或被删除，需在 [E87N Debian 13 release](https://github.com/baozaodetudou/EDGEPI-E87N/actions/workflows/build-e87n.yml) 手动重新构建并发布。tag 指向源镜像实际构建的提交，而不是执行发布时最新的 main。
+
+Release 下载不受 Actions 的 14 天保留期约束。候选仍标记为 Pre-release，硬件状态见下文；大镜像和 `.deb` 不进入 Git 源码历史。
+
+## 当前最小配置的交付状态与 Actions 备用下载
 
 新配置以 [DEFAULTS.md](DEFAULTS.md) 为准：`root` / `doumao`、SSH 22、DHCP、上海时区、中文 UTF-8、正常 APT 和预装版本化 `e87n-display` 包；额外存储默认 `E87N_EXTRA_STORAGE=no`。本轮源码为 `2a60011`，镜像校验值与审计证据见[本轮记录](ci-keygen-fix-20260913.md)。
 
@@ -57,10 +76,6 @@ Linux 可用 `sha256sum` 替代 `shasum -a 256`。若同时收到完整交付目
 文件名和内核版本相同不代表同一个构建：2026-09-12 的旧 Trixie 文件缺少新增屏幕支持，
 压缩 SHA-256 是 `32474999d280d4a9057985c6ba6985b1ed5f223584b7f8fe1809f9e4f48cb33e`。
 它也不是上面记录的 9 月 13 日历史屏幕/风扇候选。
-
-## tag Release 下载
-
-手动构建成功后，新的版本化 Release 提供镜像、显示包、内核包归档、构建证据和 `SHA256SUMS`，tag 固定到实际构建源码提交。未经验收的候选标为 Pre-release，不宣称稳定可刷。具体上传校验及失败保留草稿的规则见[发布流程](GITHUB-ACTIONS.md)。本次工作流调整不等于已执行首次发布；大镜像和 `.deb` 仍不进入 Git 源码历史。
 
 ## 禁止当作直接刷机指南
 
