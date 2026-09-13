@@ -325,7 +325,7 @@ class PublisherTests(unittest.TestCase):
         self.assertEqual(self.actions(), ["create", "upload"])
 
     def test_wrong_draft_identity_or_state_prevents_upload(self):
-        for key, value in (("id", "42"), ("draft", False), ("prerelease", False), ("target_commitish", "main"),
+        for key, value in (("id", "42"), ("draft", False), ("prerelease", False), ("target_commitish", "other-branch"),
                            ("published_at", "already published")):
             with self.subTest(key=key):
                 self.fake = FakeGh(self)

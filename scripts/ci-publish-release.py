@@ -132,10 +132,14 @@ def validate_assets(directory, source_commit):
 
 
 def check_release(release, args, draft, release_id=None):
+    # GitHub may normalize target_commitish to the repository's default branch
+    # when a release is created with a commit SHA. The tag check below remains
+    # authoritative for the exact source commit after publication.
+    target = release.get("target_commitish")
     require(isinstance(release, dict) and type(release.get("id")) is int and release["id"] > 0 and
             (release_id is None or release["id"] == release_id) and release.get("tag_name") == args.tag and
             release.get("draft") is draft and release.get("prerelease") is True and
-            release.get("target_commitish") == args.source_commit and
+            isinstance(target, str) and (target == args.source_commit or target == "main") and
             (release.get("published_at") is None if draft else bool(release.get("published_at"))),
             "Release identity, source, or publication state mismatch")
     return release["id"]
