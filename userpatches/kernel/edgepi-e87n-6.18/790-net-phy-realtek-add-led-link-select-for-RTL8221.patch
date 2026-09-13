@@ -1,0 +1,97 @@
+Subject: [PATCH] net: phy: realtek: retain optional RTL8221B LED properties on 6.18
+
+Baseline: official Linux 6.18.51,
+f6388029ea9e2c9e807d73827658738ea131faee.
+
+Port the existing optional 790 properties to realtek/realtek_main.c.
+This baseline has standard LED callbacks for RTL8211E/F, but not
+RTL8221B. Leave those callbacks and the SerDes sequence untouched.
+After successful second-generation SerDes setup, configure only
+properties supplied by the board and propagate MDIO write errors.
+The C22 and C45 RTL8221B entries keep their existing callbacks.
+Boards without these optional properties perform no LED writes.
+
+---
+diff --git a/drivers/net/phy/realtek/realtek_main.c b/drivers/net/phy/realtek/realtek_main.c
+--- a/drivers/net/phy/realtek/realtek_main.c
++++ b/drivers/net/phy/realtek/realtek_main.c
+@@ -10,6 +10,7 @@
+ #include <linux/bitops.h>
+ #include <linux/of.h>
+ #include <linux/phy.h>
++#include <linux/property.h>
+ #include <linux/pm_wakeirq.h>
+ #include <linux/netdevice.h>
+ #include <linux/module.h>
+@@ -168,6 +169,12 @@
+ 
+ /* RTL8211E and RTL8211F support up to three LEDs */
+ #define RTL8211x_LED_COUNT			3
++
++#define RTL8221B_NR_LEDS				3
++#define RTL8221B_LED_LINK_SELECT			0xd032
++#define RTL8221B_LED_LINK_SELECT_OFFSET		0x2
++#define RTL8221B_LED_ACT_SELECT			0xd040
++#define RTL8221B_LED_POLARITY_SELECT		0xd044
+ 
+ MODULE_DESCRIPTION("Realtek PHY driver");
+ MODULE_AUTHOR("Johnson Leung");
+@@ -1276,9 +1283,57 @@
+ 	return rtl822x_set_serdes_option_mode(phydev, true);
+ }
+ 
++static int rtl8221b_config_led(struct phy_device *phydev)
++{
++	struct device *dev = &phydev->mdio.dev;
++	u32 link_select[RTL8221B_NR_LEDS];
++	u32 act_select, polarity_select;
++	int i, ret;
++
++	ret = device_property_read_u32_array(dev, "realtek,led-link-select",
++					     link_select, RTL8221B_NR_LEDS);
++	if (!ret) {
++		for (i = 0; i < RTL8221B_NR_LEDS; i++) {
++			ret = phy_write_mmd(phydev, MDIO_MMD_VEND2,
++					    RTL8221B_LED_LINK_SELECT +
++					    i * RTL8221B_LED_LINK_SELECT_OFFSET,
++					    link_select[i]);
++			if (ret < 0)
++				return ret;
++		}
++	}
++
++	ret = device_property_read_u32(dev, "realtek,led-act-select",
++				       &act_select);
++	if (!ret) {
++		ret = phy_write_mmd(phydev, MDIO_MMD_VEND2,
++				    RTL8221B_LED_ACT_SELECT, act_select);
++		if (ret < 0)
++			return ret;
++	}
++
++	ret = device_property_read_u32(dev, "realtek,led-polarity-select",
++				       &polarity_select);
++	if (!ret) {
++		ret = phy_write_mmd(phydev, MDIO_MMD_VEND2,
++				    RTL8221B_LED_POLARITY_SELECT,
++				    polarity_select);
++		if (ret < 0)
++			return ret;
++	}
++
++	return 0;
++}
++
+ static int rtl822xb_config_init(struct phy_device *phydev)
+ {
+-	return rtl822x_set_serdes_option_mode(phydev, false);
++	int ret;
++
++	ret = rtl822x_set_serdes_option_mode(phydev, false);
++	if (ret < 0)
++		return ret;
++
++	return rtl8221b_config_led(phydev);
+ }
+ 
+ static int rtl822xb_get_rate_matching(struct phy_device *phydev,

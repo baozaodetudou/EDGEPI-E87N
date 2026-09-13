@@ -24,15 +24,20 @@ sys.path.insert(0, str(source / "lib/tools"))
 from common.patching_utils import PatchDir, PatchRootDir, PatchSubDir
 
 patch_dir = PatchDir(
-    PatchRootDir(str(overlay / "kernel/edgepi-e87n-6.12"), "user", "kernel", str(overlay)),
+    PatchRootDir(str(overlay / "kernel/edgepi-e87n-6.18"), "user", "kernel", str(overlay)),
     PatchSubDir("", "common"),
     str(source),
 )
 files = patch_dir.find_files_patch_files()
-if len(files) != 17:
-    raise SystemExit(f"FAIL: Armbian discovered {len(files)} patches, expected 17")
+expected_prefixes = ["0000", "360", "361", "740", "750", "752", "790", "791", "792", "821", "830", "843", "900"]
+files = sorted(files, key=lambda item: item.file_name)
+if len(files) != len(expected_prefixes):
+    raise SystemExit(f"FAIL: Armbian discovered {len(files)} patches, expected 13")
+prefixes = [Path(item.file_name).name.split("-", 1)[0] for item in files]
+if prefixes != expected_prefixes:
+    raise SystemExit(f"FAIL: missing, duplicate or unexpected patch prefixes: {prefixes}; expected {expected_prefixes}")
 touched = set()
-for patch_file in sorted(files, key=lambda item: item.file_name):
+for patch_file in files:
     patches = patch_file.split_patches_from_file()
     if len(patches) != 1:
         raise SystemExit(f"FAIL: expected one fragment in {patch_file.file_name}")
@@ -40,8 +45,16 @@ for patch_file in sorted(files, key=lambda item: item.file_name):
         patch.parse_patch()
         if patch.failed_to_parse:
             raise SystemExit(f"FAIL: Armbian cannot parse {patch_file.file_name}")
+        if not patch.all_file_names_touched:
+            raise SystemExit(f"FAIL: empty patch: {patch_file.file_name}")
         touched.update(patch.all_file_names_touched)
     print(f"Parsed: {patch_file.file_name}")
 if "arch/arm64/boot/dts/mediatek/mt7987a-edgepi-e87n.dts" not in touched:
     raise SystemExit("FAIL: E87N DTS was not discovered in the patchset")
-print("PASS: Armbian discovered and parsed all 17 patches; no compilation performed.")
+for required in ("drivers/net/phy/mediatek/mtk-2p5ge.c", "drivers/net/phy/realtek/realtek_main.c"):
+    if required not in touched:
+        raise SystemExit(f"FAIL: Linux 6.18 PHY patch target not discovered: {required}")
+legacy = touched & {"drivers/net/phy/mtk-2p5ge.c", "drivers/net/phy/realtek.c"}
+if legacy:
+    raise SystemExit(f"FAIL: legacy flat PHY paths in Linux 6.18 patchset: {sorted(legacy)}")
+print("PASS: Armbian discovered and parsed all 13 Linux 6.18 patches; no compilation performed.")

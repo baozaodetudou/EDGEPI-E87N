@@ -10,6 +10,7 @@ cp "$repo_dir/scripts/prepare-framework.sh" "$test_dir/scripts/"
 cp -a "$repo_dir/patches/armbian-build" "$test_dir/patches/"
 cp -a "$repo_dir/userpatches" "$test_dir/userpatches"
 cp -a "$repo_dir/firmware" "$test_dir/firmware"
+cp -a "$repo_dir/board-support" "$test_dir/board-support"
 cp "$repo_dir/README.md" "$test_dir/source/armbian-build/userpatches/local-marker"
 
 # Exported shell functions mock the external runtime; no Docker/git changes.
@@ -42,6 +43,12 @@ export test_dir
 bash "$test_dir/build.sh" kernel TEST_MARKER=passed
 grep -qx kernel "$test_dir/docker-args"
 grep -qx TEST_MARKER=passed "$test_dir/docker-args"
+grep -qx RELEASE=trixie "$test_dir/docker-args"
+grep -qx BSPFREEZE=yes "$test_dir/docker-args"
+if grep -qx RELEASE=bookworm "$test_dir/docker-args"; then
+	printf 'FAIL: launcher still defaults to Debian 12\n' >&2
+	exit 1
+fi
 grep -qx 'e87n-armbian-cache:/workspace/source/armbian-build/cache' "$test_dir/docker-args"
 grep -qx 'e87n-armbian-tmp:/workspace/source/armbian-build/.tmp' "$test_dir/docker-args"
 grep -qx -- --detach "$test_dir/docker-args"

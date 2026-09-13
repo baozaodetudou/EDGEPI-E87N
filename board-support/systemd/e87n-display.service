@@ -1,0 +1,33 @@
+[Unit]
+Description=E87N NV3007 status display (kernel-managed fan, no fan writer)
+After=systemd-modules-load.service
+StartLimitIntervalSec=0
+ConditionPathExists=/sys/firmware/devicetree/base/compatible
+
+[Service]
+Type=simple
+User=root
+ExecStartPre=/usr/bin/e87nctl display apply
+ExecStart=/usr/bin/python3 -I -m e87n.display --daemon
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+LockPersonality=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX
+UMask=0077
+# Sysfs is normally writable even with ProtectSystem=strict. Restrict it to
+# the actual backlight target; the dashboard has no thermal/PWM write access.
+ReadOnlyPaths=/sys
+ReadWritePaths=-/sys/class/backlight/backlight
+DevicePolicy=closed
+DeviceAllow=/dev/fb0 rw
+
+[Install]
+WantedBy=multi-user.target

@@ -5,8 +5,9 @@ export LC_ALL=C
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 usage() {
 	printf '%s\n' \
-		'Usage: sudo bash scripts/verify-image.sh [--require-usb-root] [--] existing.img' \
+		'Usage: sudo bash scripts/verify-image.sh [--release bookworm|trixie] [--require-usb-root] [--require-display-fan] [--] existing.img' \
 		'Linux/root only; accepts a regular, uncompressed .img, never a device.' \
+		'Target Debian release defaults to trixie (13); use --release bookworm for Debian 12 candidates.' \
 		'Checks GPT (16 MiB offset, 256 MiB boot, root at 272 MiB), ext4 and fsck -fn.' \
 		'Creates a NEW read-only loop; mounts only in a private mktemp directory with' \
 		'ro,noload,nodev,nosuid,noexec. Reuses verify-artifacts.sh with the real root UUID.' \
@@ -19,10 +20,28 @@ usage() {
 		'PASS is static image validation, NOT board/U-Boot validation or safe eMMC installation.'
 }
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
-if [[ ${1:-} == --help || ${1:-} == -h ]]; then usage; exit 0; fi
+release=trixie
 require_usb_root=no
-if [[ ${1:-} == --require-usb-root ]]; then require_usb_root=yes; shift; fi
-if [[ ${1:-} == -- ]]; then shift; fi
+require_display_fan=no
+while (( $# )); do
+	case "$1" in
+		--help|-h) usage; exit 0 ;;
+		--release)
+			[[ $# -ge 2 ]] || { printf 'FAIL: --release requires bookworm or trixie\n' >&2; exit 2; }
+			release=$2
+			shift 2 ;;
+		--release=*) release=${1#--release=}; shift ;;
+		--require-usb-root) require_usb_root=yes; shift ;;
+		--require-display-fan) require_display_fan=yes; shift ;;
+		--) shift; break ;;
+		-*) printf 'FAIL: unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
+		*) break ;;
+	esac
+done
+case "$release" in
+	bookworm|trixie) ;;
+	*) printf 'FAIL: --release must be bookworm or trixie: %s\n' "$release" >&2; exit 2 ;;
+esac
 [[ $# == 1 ]] || { usage >&2; exit 2; }
 image=$1
 [[ ! -b "$image" && ! -c "$image" ]] || fail 'block/character devices are explicitly forbidden'
@@ -35,6 +54,10 @@ done
 [[ -f "$script_dir/verify-artifacts.sh" ]] || fail 'sibling verify-artifacts.sh missing'
 if [[ "$require_usb_root" == yes ]]; then
 	[[ -f "$script_dir/verify-initramfs.py" ]] || fail 'sibling verify-initramfs.py missing'
+fi
+if [[ "$require_display_fan" == yes ]]; then
+	[[ "$release" == trixie ]] || fail 'display/fan candidate requires Debian 13'
+	[[ -f "$script_dir/verify-display-fan.py" ]] || fail 'sibling verify-display-fan.py missing'
 fi
 
 # Keep the same opened inode through GPT inspection and loop allocation.
@@ -163,7 +186,14 @@ for part in boot root; do
 	options=$(findmnt --noheadings --output OPTIONS --mountpoint "$audit_dir/$part")
 	[[ ",$options," == *,ro,* && ",$options," != *,rw,* ]] || fail 'mount is not read-only'
 done
-bash "$script_dir/verify-artifacts.sh" --extracted-rootfs "$audit_dir/root" --boot-dir "$audit_dir/boot" --expected-root-uuid "$root_uuid"
+bash "$script_dir/verify-artifacts.sh" --extracted-rootfs "$audit_dir/root" --boot-dir "$audit_dir/boot" \
+	--expected-root-uuid "$root_uuid" --release "$release"
+
+if [[ "$require_display_fan" == yes ]]; then
+	python3 "$script_dir/verify-display-fan.py" --rootfs "$audit_dir/root" \
+		--config "$audit_dir/boot/config-6.18.51-current-filogic" \
+		--dtb "$audit_dir/boot/dtb-6.18.51-current-filogic/mediatek/mt7987a-edgepi-e87n.dtb"
+fi
 
 # Inspect every extlinux-selected initrd, resolving symlinks within the bootfs.
 # uInitrd's legacy U-Boot wrapper must not be passed to lsinitramfs as raw cpio.

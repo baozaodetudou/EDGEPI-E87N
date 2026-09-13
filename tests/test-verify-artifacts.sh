@@ -20,6 +20,7 @@ SCRIPT = REPO / "scripts/verify-artifacts.sh"
 RELEASE = "6.12.108-current-filogic"
 UUID = "12345678-1234-4abc-8def-123456789abc"
 DTB = "mt7987a-edgepi-e87n.dtb"
+TRIXIE_OS_RELEASE = 'ID=debian\nVERSION_ID="13"\nVERSION_CODENAME=trixie\n'
 # Independent expectations: do not import validator functions or source board code.
 REQUIRED = """ARM64 ARCH_MEDIATEK OF PINCTRL_MT7987 COMMON_CLK_MT7987
 WATCHDOG MEDIATEK_WATCHDOG MFD_SYSCON NVMEM NVMEM_MTK_EFUSE
@@ -29,6 +30,10 @@ SERIAL_EARLYCON DEVTMPFS DEVTMPFS_MOUNT BLK_DEV_INITRD RD_GZIP RD_ZSTD
 EXT4_FS EXT4_FS_POSIX_ACL EXT4_FS_SECURITY FW_LOADER MODULES""".split()
 CONFIG = "# SYNTHETIC TEST CONFIG, NOT A BUILD RESULT\n" + "".join(
     "CONFIG_" + name + "=y\n" for name in REQUIRED) + "CONFIG_MEDIATEK_2P5G_PHY=m\n"
+RELEASE_618 = "6.18.51-current-filogic"
+PHY_DIR_612 = "kernel/drivers/net/phy"
+PHY_DIR_618 = "kernel/drivers/net/phy/mediatek"
+CONFIG_618 = CONFIG.replace("CONFIG_MEDIATEK_2P5G_PHY=m", "CONFIG_MEDIATEK_2P5GE_PHY=m") + "CONFIG_MTK_NET_PHYLIB=m\n"
 EXTLINUX = ("# SYNTHETIC TEST INPUT\ndefault Armbian\nlabel Armbian\n"
             " kernel /Image\n initrd /uInitrd\n fdt /dtb/mediatek/" + DTB + "\n"
             " append root=UUID=" + UUID + " console=ttyS0,115200n8 rootwait rootfstype=ext4 rw\n")
@@ -76,17 +81,19 @@ struct.pack_into("<HH", ELF, 16, 1, 183)
 ELF[64:] = b"SYNTHETIC MODULE HEADER ONLY; NOT LOADABLE".ljust(64, b"\0")
 
 
-def make_root(path):
-    put(path / "boot" / ("vmlinuz-" + RELEASE), IMAGE)
-    put(path / "boot" / ("config-" + RELEASE), CONFIG)
-    put(path / "boot" / ("dtb-" + RELEASE) / "mediatek" / DTB, make_dtb())
+def make_root(path, release=RELEASE, config=CONFIG, phy_dir=PHY_DIR_612, helper=False):
+    put(path / "boot" / ("vmlinuz-" + release), IMAGE)
+    put(path / "boot" / ("config-" + release), config)
+    put(path / "boot" / ("dtb-" + release) / "mediatek" / DTB, make_dtb())
     put(path / "boot/uInitrd", b"SYNTHETIC INITRD PRESENCE FIXTURE; NOT BOOTABLE\n" * 4)
     put(path / "boot/extlinux/extlinux.conf", EXTLINUX)
-    (path / "boot/Image").symlink_to("vmlinuz-" + RELEASE)
-    (path / "boot/dtb").symlink_to("dtb-" + RELEASE)
-    put(path / "usr/lib/modules" / RELEASE / "kernel/drivers/net/phy/mtk-2p5ge.ko", ELF)
+    (path / "boot/Image").symlink_to("vmlinuz-" + release)
+    (path / "boot/dtb").symlink_to("dtb-" + release)
+    put(path / "usr/lib/modules" / release / phy_dir / "mtk-2p5ge.ko", ELF)
+    if helper:
+        put(path / "usr/lib/modules" / release / phy_dir / "mtk-phy-lib.ko", ELF)
     (path / "lib").symlink_to("usr/lib")
-    put(path / "usr/lib/os-release", 'ID=debian\nVERSION_ID="12"\nVERSION_CODENAME=bookworm\n')
+    put(path / "usr/lib/os-release", TRIXIE_OS_RELEASE)
     put(path / "etc/fstab", "UUID=" + UUID + " / ext4 defaults 0 1\n")
     (path / "etc/os-release").symlink_to("/usr/lib/os-release")
     for name in ("i2p5ge-phy-DSPBitTb.bin", "i2p5ge-phy-pmb.bin"):
@@ -129,14 +136,19 @@ def make_deb(path, name, files, version="1.0-fixture", arch="arm64", compression
     put(path, data)
 
 
-def make_packages(path, version="1.0-fixture", arch="arm64", compression="gz", config=CONFIG):
-    make_deb(path / "linux-image-current-filogic_fixture_arm64.deb", "linux-image-current-filogic", {
-        "boot/vmlinuz-" + RELEASE: IMAGE,
-        "boot/config-" + RELEASE: config,
-        "lib/modules/" + RELEASE + "/kernel/drivers/net/phy/mtk-2p5ge.ko": ELF,
-    }, arch=arch, compression=compression)
+def make_packages(path, version="1.0-fixture", arch="arm64", compression="gz", config=CONFIG,
+                  release=RELEASE, phy_dir=PHY_DIR_612, helper=False):
+    files = {
+        "boot/vmlinuz-" + release: IMAGE,
+        "boot/config-" + release: config,
+        "lib/modules/" + release + "/" + phy_dir + "/mtk-2p5ge.ko": ELF,
+    }
+    if helper:
+        files["lib/modules/" + release + "/" + phy_dir + "/mtk-phy-lib.ko"] = ELF
+    make_deb(path / "linux-image-current-filogic_fixture_arm64.deb", "linux-image-current-filogic", files,
+             arch=arch, compression=compression)
     make_deb(path / "linux-dtb-current-filogic_fixture_arm64.deb", "linux-dtb-current-filogic", {
-        "boot/dtb-" + RELEASE + "/mediatek/" + DTB: make_dtb(),
+        "boot/dtb-" + release + "/mediatek/" + DTB: make_dtb(),
     }, version=version, compression=compression)
 
 
@@ -180,7 +192,41 @@ with tempfile.TemporaryDirectory(prefix="e87n-verify-fixtures-") as temporary:
     run_case("help", ["--help"], True, "No mounts, flashing, downloads", work)
     run_case("missing mode", [], False, "required", work)
     run_case("unknown option", base + ["--not-an-option"], False, "unrecognized", work)
+    run_case("unsupported Debian release", base + ["--release", "testing"], False, "invalid choice", work)
+    run_case("missing Debian release value", base + ["--release"], False, "expected one argument", work)
+    run_case("empty Debian release value", base + ["--release="], False, "invalid choice", work)
     run_case("valid root incl. absolute os-release and merged-/usr symlinks", base, True, "PASS: FIXTURE", work)
+    # Check every version/codename pairing against the default and both explicit
+    # targets. In particular, a consistent old candidate must not pass as Trixie.
+    os_release = root / "usr/lib/os-release"
+    for target, flags, wanted_version, wanted_codename in (
+            ("default", [], "13", "trixie"),
+            ("bookworm", ["--release", "bookworm"], "12", "bookworm"),
+            ("trixie", ["--release", "trixie"], "13", "trixie")):
+        for version, codename in (("12", "bookworm"), ("13", "trixie"),
+                                  ("12", "trixie"), ("13", "bookworm")):
+            put(os_release, 'ID=debian\nVERSION_ID="%s"\nVERSION_CODENAME=%s\n' % (version, codename))
+            matches = (version, codename) == (wanted_version, wanted_codename)
+            diagnostic = ("target /etc/os-release: " if matches else "must identify ") + (
+                "Debian %s %s" % (wanted_version, wanted_codename.capitalize()))
+            run_case("%s target with %s/%s" % (target, version, codename),
+                     base + flags, matches, diagnostic, work)
+    for codename, version in (("bookworm", "12"), ("trixie", "13")):
+        fields = {"ID": "debian", "VERSION_ID": version, "VERSION_CODENAME": codename}
+        wrong_values = {"ID": "ubuntu", "VERSION_ID": version + ".0", "VERSION_CODENAME": "testing"}
+        for field in fields:
+            for state, value in (("missing", None), ("empty", ""), ("wrong", wrong_values[field])):
+                changed = dict(fields)
+                if value is None:
+                    del changed[field]
+                else:
+                    changed[field] = value
+                put(os_release, "".join('%s="%s"\n' % item for item in changed.items()))
+                run_case("%s %s %s" % (codename, state, field), base + ["--release", codename],
+                         False, "%s=%r (need %r)" % (field, value, fields[field]), work)
+    put(os_release, TRIXIE_OS_RELEASE)
+    run_case("equals-form Debian release", base + ["--release=trixie"],
+             True, "target /etc/os-release: Debian 13 Trixie", work)
     run_case("independent root UUID", base + ["--expected-root-uuid", UUID], True, "PASS: FIXTURE", work)
     run_case("wrong independent UUID", base + ["--expected-root-uuid", "aaaaaaaa-1234-4abc-8def-123456789abc"],
              False, "differs from --expected-root-uuid", work)
@@ -210,7 +256,7 @@ with tempfile.TemporaryDirectory(prefix="e87n-verify-fixtures-") as temporary:
         ("DTB chosen root override", "boot/dtb-" + RELEASE + "/mediatek/" + DTB, make_dtb(bootargs="root=PARTLABEL=rootfs"), "must leave root="),
         ("DTB old filesystem args", "boot/dtb-" + RELEASE + "/mediatek/" + DTB, make_dtb(bootargs="rootfstype=squashfs,f2fs"), "legacy DTB"),
         ("truncated DTB", "boot/dtb-" + RELEASE + "/mediatek/" + DTB, make_dtb()[:60], "invalid DTB magic/size"),
-        ("wrong OS", "usr/lib/os-release", "ID=openwrt\nVERSION_CODENAME=bookworm\n", "must identify Debian Bookworm"),
+        ("wrong OS", "usr/lib/os-release", "ID=openwrt\nVERSION_ID=13\nVERSION_CODENAME=trixie\n", "must identify Debian 13 Trixie"),
         ("missing PHY module bytes", "usr/lib/modules/" + RELEASE + "/kernel/drivers/net/phy/mtk-2p5ge.ko", b"", "not an arm64 relocatable ELF"),
         ("corrupt firmware same size", "usr/lib/firmware/mediatek/mt7987/i2p5ge-phy-pmb.bin", bytes(98304), "firmware sha256/size mismatch"),
         ("corrupt firmware licence", "usr/share/doc/e87n-phy-firmware/LICENCE.mediatek", "bad licence", "licence checksum mismatch"),
@@ -242,7 +288,7 @@ with tempfile.TemporaryDirectory(prefix="e87n-verify-fixtures-") as temporary:
     link = root / "etc/os-release"
     link.unlink()
     link.symlink_to("../../outside-os-release")
-    put(work / "outside-os-release", 'ID=debian\nVERSION_CODENAME=bookworm\n')
+    put(work / "outside-os-release", TRIXIE_OS_RELEASE)
     run_case("symlink traversal cannot read host fixture", base, False, "path escapes target root", work)
     link.unlink()
     link.symlink_to(str(work / "outside-os-release"))
@@ -256,12 +302,70 @@ with tempfile.TemporaryDirectory(prefix="e87n-verify-fixtures-") as temporary:
     shutil.move(str(root / "boot"), str(work / "bootfs"))
     run_case("separate extracted bootfs", base + ["--boot-dir", work / "bootfs"], True, "PASS: FIXTURE", work)
     shutil.move(str(work / "bootfs"), str(root / "boot"))
+    # These expectations are independent of the verifier's profile definitions.
+    # Exercise identical errors through rootfs and Debian-package entry points.
+    layouts = [
+        ("618 trixie modular PHY and helper", RELEASE_618, CONFIG_618, PHY_DIR_618, True, True, "CONFIG_MEDIATEK_2P5GE_PHY=m"),
+        ("618 built-in helper", RELEASE_618, CONFIG_618.replace("CONFIG_MTK_NET_PHYLIB=m", "CONFIG_MTK_NET_PHYLIB=y"),
+         PHY_DIR_618, False, True, "CONFIG_MEDIATEK_2P5GE_PHY=m"),
+        ("618 old symbol", RELEASE_618, CONFIG, PHY_DIR_618, True, False, "CONFIG_MEDIATEK_2P5GE_PHY=MISSING"),
+        ("612 new symbol", RELEASE, CONFIG_618, PHY_DIR_612, True, False, "CONFIG_MEDIATEK_2P5G_PHY=MISSING"),
+        ("618 both symbols", RELEASE_618, CONFIG_618 + "CONFIG_MEDIATEK_2P5G_PHY=m\n", PHY_DIR_618, True, False, "wrong PHY config"),
+        ("612 both symbols", RELEASE, CONFIG + "CONFIG_MEDIATEK_2P5GE_PHY=m\n", PHY_DIR_612, True, False, "wrong PHY config"),
+        ("618 flat module", RELEASE_618, CONFIG_618, PHY_DIR_612, True, False, "wrong PHY module path"),
+        ("612 nested module", RELEASE, CONFIG, PHY_DIR_618, False, False, "wrong PHY module path"),
+        ("618 built-in PHY", RELEASE_618, CONFIG_618.replace("CONFIG_MEDIATEK_2P5GE_PHY=m", "CONFIG_MEDIATEK_2P5GE_PHY=y"),
+         PHY_DIR_618, True, False, "CONFIG_MEDIATEK_2P5GE_PHY=y"),
+        ("618 missing helper config", RELEASE_618, CONFIG_618.replace("CONFIG_MTK_NET_PHYLIB=m\n", ""),
+         PHY_DIR_618, True, False, "CONFIG_MTK_NET_PHYLIB must be m or y"),
+        ("618 disabled helper", RELEASE_618, CONFIG_618.replace("CONFIG_MTK_NET_PHYLIB=m", "CONFIG_MTK_NET_PHYLIB=n"),
+         PHY_DIR_618, True, False, "CONFIG_MTK_NET_PHYLIB must be m or y"),
+        ("618 missing helper module", RELEASE_618, CONFIG_618, PHY_DIR_618, False, False, "mtk-phy-lib"),
+        ("unsupported future kernel", "7.2.5-current-filogic", CONFIG_618, PHY_DIR_618, True, False, "unsupported kernel series"),
+        ("unsupported adjacent kernel", "6.19.1-current-filogic", CONFIG_618, PHY_DIR_618, True, False, "unsupported kernel series"),
+    ]
+    for index, (name, release, config, phy_dir, helper, expected, diagnostic) in enumerate(layouts):
+        candidate = work / ("layout-%02d" % index)
+        make_root(candidate, release, config, phy_dir, helper)
+        run_case(name + " rootfs", ["--fixture", "--extracted-rootfs", candidate], expected, diagnostic, work)
+        candidate_debs = work / ("layout-debs-%02d" % index)
+        make_packages(candidate_debs, release=release, config=config, phy_dir=phy_dir, helper=helper)
+        run_case(name + " debs", ["--fixture", "--debs", candidate_debs], expected, diagnostic, work)
+    root618 = work / "layout-00"
+    args618 = ["--fixture", "--extracted-rootfs", root618]
+    modules618 = root618 / "usr/lib/modules" / RELEASE_618
+    for name in ("mtk-2p5ge", "mtk-phy-lib"):
+        module = modules618 / PHY_DIR_618 / (name + ".ko")
+        original = module.read_bytes()
+        put(module, b"invalid module")
+        run_case("618 corrupt " + name, args618, False, "not an arm64 relocatable ELF", work)
+        put(module, original)
+        misplaced = modules618 / PHY_DIR_612 / (name + ".ko")
+        put(misplaced, original)
+        run_case("618 duplicate flat " + name, args618, False, "expected exactly one, found 2", work)
+        misplaced.unlink()
+        compressed = module.with_suffix(".ko.gz")
+        put(compressed, gzip.compress(original))
+        module.unlink()
+        run_case("618 gzip " + name, args618, True, "PASS: FIXTURE", work)
+        compressed.unlink()
+        put(module, original)
+    put(work / "618.config", CONFIG_618)
+    run_case("618 explicit unversioned config", args618 + ["--config", work / "618.config", "--kernel-release", RELEASE_618],
+             True, "PASS: FIXTURE", work)
+    shutil.move(str(root618 / "boot"), str(work / "bootfs618"))
+    run_case("618 separate bootfs", args618 + ["--boot-dir", work / "bootfs618"], True, "PASS: FIXTURE", work)
+    shutil.move(str(work / "bootfs618"), str(root618 / "boot"))
     packages = work / "debs"
     packages.mkdir()
     deb_args = ["--fixture", "--debs", packages]
     run_case("empty deb output is not success", deb_args, False, "no linux-image/linux-dtb", work)
     make_packages(packages)
     run_case("valid synthetic debs have limited scope", deb_args, True, "Debian rootfs, firmware, initrd and extlinux NOT VERIFIED", work)
+    for codename in ("bookworm", "trixie"):
+        run_case("%s selection does not extend deb-only scope" % codename,
+                 deb_args + ["--release", codename], True,
+                 "Debian rootfs, firmware, initrd and extlinux NOT VERIFIED", work)
     run_case("debs rejects rootfs-only options", deb_args + ["--config", work / ".config"], False, "require --extracted-rootfs", work)
     make_packages(packages, compression="xz")
     run_case("xz deb payload", deb_args, True, "PASS: FIXTURE", work)

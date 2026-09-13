@@ -1,0 +1,74 @@
+Subject: [PATCH] net: phy: mediatek: retain optional E87N LED mode on Linux 6.18
+
+Baseline: official Linux 6.18.51,
+f6388029ea9e2c9e807d73827658738ea131faee.
+
+Depends on the 752 port for this baseline. Reuse mtk.h LED register
+definitions rather than duplicating the old flat-driver constants.
+Only mediatek,e87n-led-mode on MT7987 selects the existing E87N
+timing, active-low link and activity settings. Program these before
+pinctrl selection and the checked shared LED-state reads.
+MT7988 and boards without the property keep their existing behavior.
+
+---
+diff --git a/drivers/net/phy/mediatek/mtk-2p5ge.c b/drivers/net/phy/mediatek/mtk-2p5ge.c
+--- a/drivers/net/phy/mediatek/mtk-2p5ge.c
++++ b/drivers/net/phy/mediatek/mtk-2p5ge.c
+@@ -8,6 +8,7 @@
+ #include <linux/of_platform.h>
+ #include <linux/pinctrl/consumer.h>
+ #include <linux/phy.h>
++#include <linux/property.h>
+ #include <linux/unaligned.h>
+ 
+ #include "mtk.h"
+@@ -756,6 +757,38 @@
+ 	return phy_restore_page(phydev, oldpage, ret);
+ }
+ 
++/* LED0 carries both colours on E87N; apply only to its MT7987 PHY. */
++static int mt7987_2p5ge_e87n_led_config(struct phy_device *phydev)
++{
++	int ret;
++
++	if (!device_property_read_bool(&phydev->mdio.dev,
++				       "mediatek,e87n-led-mode"))
++		return 0;
++
++	/* E87N timing: approximately 60 ms, 50 percent duty cycle. */
++	ret = phy_write_mmd(phydev, MDIO_MMD_VEND2, 0x22, 0x0200);
++	if (ret < 0)
++		return ret;
++	ret = phy_write_mmd(phydev, MDIO_MMD_VEND2, 0x23, 0x0400);
++	if (ret < 0)
++		return ret;
++
++	/* LED0 only: link at all supported speeds, active low, no link-down. */
++	ret = phy_write_mmd(phydev, MDIO_MMD_VEND2, MTK_PHY_LED0_ON_CTRL,
++			    MTK_PHY_LED_ON_ENABLE | MTK_PHY_LED_ON_LINK10 |
++			    MTK_PHY_LED_ON_LINK100 | MTK_PHY_LED_ON_LINK1000 |
++			    MTK_PHY_LED_ON_LINK2500);
++	if (ret < 0)
++		return ret;
++
++	return phy_write_mmd(phydev, MDIO_MMD_VEND2, MTK_PHY_LED0_BLINK_CTRL,
++			     MTK_PHY_LED_BLINK_1000TX | MTK_PHY_LED_BLINK_1000RX |
++			     MTK_PHY_LED_BLINK_100TX | MTK_PHY_LED_BLINK_100RX |
++			     MTK_PHY_LED_BLINK_10TX | MTK_PHY_LED_BLINK_10RX |
++			     MTK_PHY_LED_BLINK_2500TX | MTK_PHY_LED_BLINK_2500RX);
++}
++
+ static int mt7987_2p5ge_phy_config_init(struct phy_device *phydev)
+ {
+ 	struct mt7987_2p5ge_phy_priv *priv = phydev->priv;
+@@ -777,6 +810,10 @@
+ 		return ret;
+ 	ret = phy_set_bits_mmd(phydev, MDIO_MMD_VEND2, MTK_PHY_LED1_ON_CTRL,
+ 			       MTK_PHY_LED_ON_FDX | MTK_PHY_LED_ON_HDX);
++	if (ret < 0)
++		return ret;
++
++	ret = mt7987_2p5ge_e87n_led_config(phydev);
+ 	if (ret < 0)
+ 		return ret;
+ 

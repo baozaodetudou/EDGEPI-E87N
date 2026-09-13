@@ -120,12 +120,12 @@ mount() {
 		if [[ "$mode" == raw_initrd ]]; then initrd=initrd.img-fixture; fi
 		printf 'label MOCK\n initrd /%s\n' "$initrd" > "$6/extlinux/extlinux.conf"
 		printf 'MOCK INITRD; NOT BOOTABLE\n' > "$6/$initrd"
-		if [[ "$mode" == usb_root_builtin || "$mode" == usb_root_missing_module ]]; then
+		if [[ "$mode" == usb_root_builtin* || "$mode" == usb_root_missing_module ]]; then
 			local symbol
 			for symbol in MODULES USB_COMMON USB USB_XHCI_HCD USB_XHCI_MTK USB_STORAGE SCSI_COMMON SCSI BLK_DEV_SD PHY_MTK_TPHY; do
 				printf 'CONFIG_%s=y\n' "$symbol"
 			done > "$6/config-6.12.108-fixture"
-			if [[ "$mode" == usb_root_builtin ]]; then printf 'CONFIG_USB_UAS=y\n'
+			if [[ "$mode" == usb_root_builtin* ]]; then printf 'CONFIG_USB_UAS=y\n'
 			else printf 'CONFIG_USB_UAS=m\n'; fi >> "$6/config-6.12.108-fixture"
 		fi
 	fi
@@ -153,10 +153,15 @@ umount() {
 }
 bash() {
 	mock_record verify-artifacts "$@"
-	[[ $# == 7 && "$1" == "$repo_dir/scripts/verify-artifacts.sh" &&
+	local expected_release=trixie
+	case "$mode" in
+		release_bookworm*|usb_root_builtin_bookworm|artifacts_fail_bookworm) expected_release=bookworm ;;
+	esac
+	[[ $# == 9 && "$1" == "$repo_dir/scripts/verify-artifacts.sh" &&
 		"$2 $4 $6 $7" == '--extracted-rootfs --boot-dir --expected-root-uuid 12345678-1234-4abc-8def-123456789abc' &&
+		"$8" == --release && "$9" == "$expected_release" &&
 		"$3" == "$mock_dir"/e87n-image-audit.*/root && "$5" == "$mock_dir"/e87n-image-audit.*/boot ]] || mock_error bash "$@" || return
-	if [[ "$mode" == artifacts_fail ]]; then return 23; fi
+	if [[ "$mode" == artifacts_fail || "$mode" == artifacts_fail_bookworm ]]; then return 23; fi
 	printf 'MOCK: artifact verifier delegation only; real verifier was NOT run\n'
 }
 dumpimage() {
@@ -196,9 +201,11 @@ run_case() {
 	calls=''
 	if [[ -f "$mock_dir/calls" ]]; then calls=$(< "$mock_dir/calls"); fi
 	case "$mode" in
+		release_invalid*|release_empty*|release_missing*|release_no_image|unknown_option|help_after_options)
+			[[ -z "$calls" ]] ;;
 		help|no_args|missing|character_device|symlink|wrong_extension|tiny|compressed|nonlinux|nonroot|not_gpt|wrong_offset|wrong_boot_size|wrong_root_offset|extra_partition|outside_image|corrupt_gpt|gpt_command_fail|firstlba_past_boot|fdisk_gap_mismatch|fdisk_gap_corrupt|fdisk_gap_unknown|fdisk_gap_no_success)
 			[[ "$calls" != *'losetup '* ]] ;;
-		wrapped_initrd|raw_initrd|fdisk_gap_ok|fdisk_gap_leading_blank|fdisk_gap_leading_whitespace)
+		wrapped_initrd|raw_initrd|fdisk_gap_ok|fdisk_gap_leading_blank|fdisk_gap_leading_whitespace|release_trixie*|release_bookworm*|end_options|usb_root_builtin*)
 			[[ "$calls" == *'verify-artifacts '* && "$calls" == *'lsinitramfs '* && "$calls" == *'losetup --detach /dev/loop770077'* ]] ;;
 		cleanup_fail|foreign_mount)
 			[[ "$calls" != *'losetup --detach'* && -f "$mock_dir/loop-owned" ]] ;;
@@ -218,7 +225,16 @@ run_case() {
 }
 image="$test_dir/fixture.img"
 run_case help 0 --help
+run_case help_after_options 0 --require-usb-root --release bookworm --help
 run_case no_args 2
+run_case release_missing_value 2 --release
+run_case release_missing_before_usb 2 --release --require-usb-root "$image"
+run_case release_invalid 2 --release testing "$image"
+run_case release_invalid_equals 2 --release=testing "$image"
+run_case release_empty 2 --release '' "$image"
+run_case release_empty_equals 2 --release= "$image"
+run_case release_no_image 2 --release bookworm
+run_case unknown_option 2 --not-an-option "$image"
 run_case missing 1 "$test_dir/missing.img"
 run_case character_device 1 /dev/null
 run_case symlink 1 "$test_dir/link.img"
@@ -244,6 +260,7 @@ run_case bad_uuid 1 "$image"
 run_case mount_fail 32 "$image"
 run_case writable_mount 1 "$image"
 run_case artifacts_fail 23 "$image"
+run_case artifacts_fail_bookworm 23 --release bookworm "$image"
 run_case dump_fail 51 "$image"
 run_case initrd_fail 52 "$image"
 run_case missing_init 1 "$image"
@@ -252,8 +269,16 @@ run_case cleanup_fail 1 "$image"
 run_case foreign_mount 1 "$image"
 run_case wrapped_initrd 0 "$image"
 run_case raw_initrd 0 "$image"
+run_case release_trixie 0 --release trixie "$image"
+run_case release_bookworm 0 --release bookworm "$image"
+run_case release_trixie_equals 0 --release=trixie "$image"
+run_case release_bookworm_equals 0 --release=bookworm "$image"
+run_case end_options 0 -- "$image"
+run_case release_bookworm_end_options 0 --release bookworm -- "$image"
 run_case usb_root_no_image 2 --require-usb-root
 run_case usb_root_no_config 1 --require-usb-root "$image"
 run_case usb_root_builtin 0 --require-usb-root "$image"
+run_case usb_root_builtin_release_first 0 --release trixie --require-usb-root "$image"
+run_case usb_root_builtin_bookworm 0 --require-usb-root --release bookworm -- "$image"
 run_case usb_root_missing_module 1 --require-usb-root "$image"
 printf 'PASS: %s MOCK tests. No real loop/mount/fsck/dumpimage/artifact validation or hardware checks performed.\n' "$count"

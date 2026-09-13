@@ -43,14 +43,17 @@ fi
 cp -a "$ROOT_DIR/userpatches" "$ARMBIAN_DIR/userpatches"
 mkdir -p "$ARMBIAN_DIR/userpatches/overlay"
 cp -a "$ROOT_DIR/firmware" "$ARMBIAN_DIR/userpatches/overlay/e87n-firmware"
+cp -a "$ROOT_DIR/board-support" "$ARMBIAN_DIR/userpatches/overlay/e87n-board-support"
 
 cd "$ARMBIAN_DIR"
 ARGS=(
 	BOARD=edgepi-e87n
 	BRANCH=current
-	RELEASE=bookworm
+	RELEASE=trixie
 	BUILD_DESKTOP=no
 	BUILD_MINIMAL=yes
+	# Official Filogic packages do not carry this experimental E87N port.
+	BSPFREEZE=yes
 	KERNEL_BTF=no
 	KERNEL_CONFIGURE=no
 	SHOW_LOG=yes

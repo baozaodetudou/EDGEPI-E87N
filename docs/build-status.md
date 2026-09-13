@@ -1,12 +1,153 @@
 # Build status — 2026-09-12
 
-An experimental Debian Bookworm / Armbian disk image was built successfully at
-19:54 CST and passed the real read-only image audit, including USB-root
-initramfs modules. It has NOT been booted or hardware-tested on E87N. The target
-is not an OpenWrt root filesystem. A safe permanent eMMC installation procedure
-still depends on the actual board's bootloader, partition layout and backups.
+> Historical build log, superseded by the [2026-09-13 display/fan candidate](candidate-display-fan-20260913.md). References below to 12 patches or an unsupported display describe the older images, not the current 13-patch source tree. Local artifacts and logs mentioned here are excluded from Git; see [artifact availability](DOWNLOADS.md).
 
-## Build history
+The current target is **Debian 13 Trixie + Linux 6.18.51 LTS**. The family now
+pins the official stable-kernel commit
+`f6388029ea9e2c9e807d73827658738ea131faee`, uses `edgepi-e87n-6.18` and
+`linux-edgepi-e87n-lts`, and has an integrated **12-patch** board series.
+Targeted ARM64 compilation has passed. The initial full compilation started at
+21:40:35 CST on 2026-09-12 and was intentionally superseded, with its object
+cache preserved, after review found PHY resource/firmware error-path issues.
+The final-input build completed under invocation
+`282bd69e0665409cb6137de1d30b8046`, using the corrected PHY patches,
+`BSPFREEZE=yes` and `CLEAN_LEVEL=none`.
+At 23:16:03 CST the final-input build completed the kernel link and generated a
+20,103,680-byte ARM64 `Image`. Module compilation has also finished; at 23:20
+CST the build entered kernel/DTB/header Debian-package generation. The full build
+finished successfully at **23:25:03 CST on 2026-09-12**, with `active (exited)`,
+`Result=success`, `ExecMainCode=1` and `ExecMainStatus=0`. `ExecMainCode=1` is
+the normal-exit category, not a process exit status of 1.
+**The real Debian 13.6 Trixie / Linux 6.18.51 candidate has been generated and
+passed the real read-only static image audit.** Its installed kernel release is
+`6.18.51-current-filogic`. Xz compression and the complete export to the Mac have
+finished. `xz --test` passed in both the VM and on the Mac; the Mac compressed
+SHA-256 and streamed decompressed raw SHA-256 both match the VM results.
+The release `SHA256SUMS` passed in full, and all 52 host source-build-inputs
+entries match the VM manifest. Local static-candidate delivery is complete.
+This is not board-boot, all-driver or production-security acceptance.
+
+`RELEASE=trixie` pins the target Debian release; packages within that release
+still receive updates from signed repositories. The Armbian framework remains
+pinned to `7c1bb29eb0e7bd75b0703d86fe654b2680e646da`. Neither the kernel nor the
+framework follows a floating branch. The prepared Trixie ARM64 rootfs cache is
+an input, not a bootable E87N image. Linux 7.2.5 was an exploratory source download
+and read-only review only: it was never compiled and is not this build's target.
+
+## Current LTS integration and limits
+
+- The main build has confirmed all 12 patches apply to the real 6.18.51 baseline
+  with `--fuzz=0`. The DTB compiles with 7 retained warnings about legacy node
+  structure; this is not a clean full-schema validation result.
+- Targeted ARM64 objects passed for MAC, PCS, two PHY drivers, PWM, LVTS, PCIe
+  and the CPUFreq-dt blocklist. The five clock objects and pinctrl had already
+  passed. These were targeted compile results, not just patch-parser checks;
+  the full build and real image audit have since passed separately. Compiling the
+  CPUFreq-dt blocklist does not enable or validate DVFS.
+- The first full-build attempt failed because of Mac AppleDouble metadata files.
+  After a clean input transfer, the retry passed Armbian's actual parsing and
+  application of all 12 patches, then began full compilation at 21:40:35 CST.
+  This records recovery from the input problem; the final-input build completion
+  and separate real audit are recorded above and below.
+- The final `.config` for this attempt has been checked: thermal, PWM fan,
+  efuse, USB-root and MMC requirements are built in; `CPU_FREQ=n`,
+  `CPU_THERMAL=n`, `MEDIATEK_2P5GE_PHY=m` and `MTK_NET_PHYLIB=y`.
+  Configuration checks do not prove runtime driver or board behavior.
+- The revised PHY caches pinctrl/state during probe instead of acquiring another
+  managed reference on every initialization. Both firmware files are requested
+  and size-checked before hardware writes. The revised object passed native
+  ARM64 compilation, and all 12 patches plus the DTB passed again. These checks
+  do not prove runtime firmware loading, recovery or Ethernet operation.
+- The 12 patches cover the board DTS, pinctrl/clocks, Ethernet MAC/PHY/PCS,
+  PCIe, PWM, LVTS and the CPUFreq safety restriction. This is a different series
+  from the 17 patches used for the historical 6.12.108 image below.
+- CPU DVFS and CPU cooling are disabled for this prototype. CPU OPP and CPU
+  cooling-map references are removed; the board retains its firmware-set boot
+  frequency without Linux CPUFreq frequency/voltage transitions. The old common
+  850 mV OPP values and missing `proc-supply` are not validated supply data.
+  The generic CPUFreq auto-registration path is blocked, and this attempt's
+  final config confirms the disabling policy; CPU throttling is not available.
+- **MT7987 WED is unsupported** and is not registered. MAC/PHY/PCS integration
+  does not establish WED hardware-offload support or measured Ethernet operation.
+- LVTS uses software polling, with both normal and passive intervals set to
+  1000 ms; no physical IRQ is guessed. Invalid or missing calibration is rejected.
+  A failed sensor probe means temperature protection has not been established.
+- Fan levels are `<0 128 192 255>`, with active trips at 50/65/75 degrees C mapped
+  to fan states 1/2/3, plus a critical trip. These are software control thresholds,
+  not chip limits. All inherited CPU cooling references must be absent so a
+  missing provider cannot prevent thermal-zone registration. This avoids the
+  old 26-level table/1-2-3 map mismatch and does not depend on an OpenWrt fan daemon.
+  The thermal/PWM fan chain should be built in; actual sensor accuracy, fan spin-up,
+  RPM, heat dissipation and critical-trip behavior remain untested on the board.
+- **The NV3007 small display is unsupported and awaits a driver port.** The
+  vendor `999990-fbtft` patch is absent from both this 6.18.51 series and the old
+  6.12.108 series. A display node in the DTS or a compiled PWM object does not
+  prove display support; backlight behavior is not guaranteed either.
+- The vendor USB `auto_load_valid` extension property is ignored by the 6.18
+  driver. Keeping it in the DTS does not port or validate the vendor calibration
+  flow. U-Boot RAM fixup is also unverified: actual RAM size, the memory layout
+  passed to Linux and the final detected capacity require real boot logs.
+- Original fixed MAC addresses have not been restored. Factory MAC references
+  were removed; temporary random MAC fallback and lack of persistence mean old
+  MAC-based DHCP reservations cannot be assumed to work.
+- Board boot, Ethernet, eMMC, USB, NVMe, suspend/resume and reboot remain untested.
+  The target is not an OpenWrt root filesystem. A safe permanent eMMC installation
+  still depends on the actual bootloader, partition layout and backups.
+
+## Current candidate: actual static evidence and delivery state
+
+The generated raw disk image is
+`Armbian-unofficial_26.11.0-trunk_Edgepi-e87n_trixie_current_6.18.51_minimal.img`,
+**1,149,239,296 bytes**, SHA-256
+`1697307756412aef6fa4cabd33bb4c115daa78f80d81e43233a689a3e962f6bc`.
+The actual target filesystem identifies Debian **13.6 Trixie**, not just a
+Debian 13 build host or rootfs cache.
+
+- Real whole-disk `verify-image --release trixie --require-usb-root` passed GPT,
+  ext4 `fsck -fn`, root/boot UUID consistency, firmware and initrd USB-root checks.
+  The real Debian packages and the final installed DTB/config also passed their
+  checks. No target image code was executed and no device was flashed.
+- Read-only inspection confirmed linux-image, DTB, BSP and base-files are held.
+  Their `Package`, `Version` and `Armbian-Original-Hash` match the unique respective
+  `.deb` from this final build. No `linux-u-boot` package or unexpected user SSH
+  key was found; shadow contained no empty password fields. This does not imply
+  strong passwords or a complete security audit.
+- The actual `10-dhcp-all-interfaces.yaml` uses networkd and requests IPv4/IPv6
+  DHCP on `e*`, `lan*` and `wan*`. `serial-getty@ttyS0` is enabled, with a generic
+  getty override for root autologin. These are file-level checks, not proof of a
+  successful serial login, Ethernet link or DHCP lease on E87N.
+- **Isolated first boot is mandatory.** The image retains `root/1234`, serial
+  autologin and permitted SSH root login. Cached shared initial SSH host keys
+  remain; first-boot regeneration is ordered `After=ssh.service`, so unique keys
+  cannot be assumed before the first SSH connection. Change the password and
+  verify key regeneration/fingerprints before exposing the board to untrusted
+  networks. Automatic root expansion targets only the current root disk.
+
+The `.img.xz` compression is complete: **176,462,804 bytes** (about 168.3 MiB),
+SHA-256 `32474999d280d4a9057985c6ba6985b1ed5f223584b7f8fe1809f9e4f48cb33e`.
+The complete output has arrived in the actual Mac release directory
+`output/releases/2026-09-12-e87n-trixie-lts-6.18.51/`. `xz --test` passed on the
+Mac as well as in the VM. The Mac compressed-file SHA-256 matches the value
+above, and `xz -dc | shasum -a 256` produced the same raw SHA-256 recorded above.
+The transfer archive checksum also matched. These are completed local-delivery
+and image-integrity checks, not hardware tests. The release `SHA256SUMS` was
+generated and every entry passed `shasum -a 256 -c`. All 52 host
+source-build-inputs entries match the VM manifest. On the Mac,
+`xz --robot --list` confirmed compressed/uncompressed sizes of 176,462,804 /
+1,149,239,296 bytes and CRC64 integrity was verified. See the
+[new candidate record](candidate-trixie-6.18.51-20260912.md) for exact component
+hashes, UUIDs, package hashes and the delivery handoff, and
+[the upgrade record](upgrade-trixie.md) for the pin and acceptance criteria.
+
+## Historical Bookworm / Linux 6.12.108 build
+
+The following history and its successful compilation/image checks apply only
+to the old Debian 12 Bookworm / Linux 6.12.108 candidate. That image was built
+at 19:54 CST and passed the real read-only audit, including USB-root initramfs
+modules. It has NOT been booted or hardware-tested on E87N. Its files and original
+checksums are retained under `output/releases/2026-09-12-e87n-bookworm/`; see
+[the historical candidate evidence](candidate-20260912.md). These results do not
+validate Debian 13 or Linux 6.18.51.
 
 The interrupted official image pull never reached Armbian compilation. A new
 native ARM64 Debian 13.6 container started successfully:
@@ -155,7 +296,7 @@ its SHA-256, local xz integrity and streamed decompressed SHA-256 all match the
 VM results. A separate full-output snapshot copy was also started; a `.partial`
 snapshot must never be treated as a completed export or a release image.
 
-## Changes and checks
+## Historical 6.12.108 changes and checks
 
 - Restored the full Armbian checkout; the earlier sparse checkout lacked required
   directories such as `config/templates`.
@@ -213,16 +354,22 @@ snapshot must never be treated as a completed export or a release image.
   E87N DTS. The generic GPT lacks factory; this prototype allows temporary random
   MAC addresses instead of deferring the Ethernet probe indefinitely.
 
-Repeat the checks with:
+## Re-running checks for the current LTS pin
+
+These commands use the current family pin and patch directory; their presence
+is not a record of a successful new build. Supply a Linux stable Git checkout
+containing the pinned 6.18.51 commit, rather than assuming the old BPI checkout
+contains it. To audit the historical series, explicitly pass its old commit and
+`edgepi-e87n-6.12` as the second and third arguments to the patch-check script.
 
 ```sh
 bash tests/test-launcher.sh
 # Bash 5 / builder container:
 bash tests/test-board-config.sh
 # Linux uses GNU patch; on macOS set PATCH_BIN to gpatch:
-bash scripts/check-kernel-patches.sh /path/to/BPI-Router-Linux
+bash scripts/check-kernel-patches.sh /path/to/linux-stable
 # Optional DTB compile (C preprocessor, dtc and fdtget required):
-CHECK_DTB=yes bash scripts/check-kernel-patches.sh /path/to/BPI-Router-Linux
+CHECK_DTB=yes bash scripts/check-kernel-patches.sh /path/to/linux-stable
 # Uses the checked-out Armbian parser; uv supplies isolated Python dependencies:
 uv run --script tests/test-patch-discovery.py
 ```
@@ -232,12 +379,18 @@ uv run --script tests/test-patch-discovery.py
 | Source | Revision |
 | --- | --- |
 | Armbian build | `7c1bb29eb0e7bd75b0703d86fe654b2680e646da` |
-| BPI Router Linux 6.12-main | `b864732ee285e7868fb0857d69a8ff349e37003e` |
+| Current official Linux 6.18.51 LTS | `f6388029ea9e2c9e807d73827658738ea131faee` |
+| Historical BPI Router Linux 6.12.108 | `b864732ee285e7868fb0857d69a8ff349e37003e` |
 | E87N reference source | `c51dcd733aeda3c24c730ddaff2c54440a72ca6d` |
 | Linux firmware | `c0af6c70df291701fdecf6402e47dd4564e6b718` |
 
-The kernel and default Armbian build checkout are pinned to the revisions above.
-Compilation, packaging and the real static image audit passed. Board boot,
-hardware validation and a safe eMMC installation plan are still required before
-calling this usable or production-ready. Prerequisites and destructive-write boundaries are in
+The current kernel and Armbian framework use the explicit pins above. Both the
+historical Bookworm / 6.12.108 candidate and the separate new Debian 13.6 Trixie /
+6.18.51 candidate have passed full compilation, packaging and real static image
+audits. The final LTS build completed at 23:25:03 CST; xz compression, full Mac
+export, xz integrity and the local compressed/decompressed SHA-256 checks have
+also completed successfully. The 7 legacy DTB structure warnings remain.
+Board boot, driver/hardware validation, isolated first-boot credential/key changes
+and a safe eMMC installation plan are still required. Neither candidate is
+certified production-ready. Prerequisites and destructive-write boundaries are in
 [first-boot.md](first-boot.md).

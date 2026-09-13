@@ -26,6 +26,11 @@ import zlib
 
 REPO = Path(sys.argv.pop(1))
 DTB_NAME = "mt7987a-edgepi-e87n.dtb"
+DEBIAN_RELEASES = {"bookworm": "12", "trixie": "13"}
+PHY_PROFILES = {
+    "6.12": {"symbol": "MEDIATEK_2P5G_PHY", "directory": "kernel/drivers/net/phy"},
+    "6.18": {"symbol": "MEDIATEK_2P5GE_PHY", "directory": "kernel/drivers/net/phy/mediatek"},
+}
 REQUIRED_Y = """ARM64 ARCH_MEDIATEK OF PINCTRL_MT7987 COMMON_CLK_MT7987
 WATCHDOG MEDIATEK_WATCHDOG MFD_SYSCON NVMEM NVMEM_MTK_EFUSE
 REGULATOR_FIXED_VOLTAGE MMC MMC_BLOCK MMC_MTK PARTITION_ADVANCED EFI_PARTITION
@@ -102,7 +107,10 @@ def check_kernel(data, name):
     ok("arm64 Image header; %s; sha256=%s" % (name, digest(data)))
 
 
-def check_config(data):
+def check_config(data, release):
+    series = re.fullmatch(r"(6\.(?:12|18))\.[0-9]+(?:[-+][A-Za-z0-9_.+\-]+)?", release)
+    require(series is not None, "unsupported kernel series for PHY validation: " + release)
+    profile = PHY_PROFILES[series[1]]
     options = {}
     for line in data.decode("utf-8").splitlines():
         match = re.fullmatch(r"CONFIG_([A-Z0-9_]+)=(.*)", line)
@@ -112,11 +120,30 @@ def check_config(data):
             require(key not in options, "duplicate config symbol: CONFIG_" + key)
             options[key] = value
     expected = dict.fromkeys(REQUIRED_Y, "y")
-    expected["MEDIATEK_2P5G_PHY"] = "m"
+    expected[profile["symbol"]] = "m"
     wrong = ["CONFIG_%s=%s (need %s)" % (key, options.get(key, "MISSING"), value)
              for key, value in expected.items() if options.get(key) != value]
     require(not wrong, "required kernel config: " + "; ".join(wrong))
-    ok("final kernel config: %d built-ins and CONFIG_MEDIATEK_2P5G_PHY=m" % len(REQUIRED_Y))
+    for other in PHY_PROFILES.values():
+        if other != profile:
+            require(options.get(other["symbol"]) in (None, "n"),
+                    "wrong PHY config for kernel %s: CONFIG_%s must be absent or disabled" %
+                    (release, other["symbol"]))
+    modules = ["mtk-2p5ge"]
+    if series[1] == "6.18":
+        # Kconfig selects this shared library: built-in consumers may promote it
+        # to y even though the 2.5G driver itself must remain modular.
+        require(options.get("MTK_NET_PHYLIB") in ("m", "y"),
+                "CONFIG_MTK_NET_PHYLIB must be m or y for Linux 6.18")
+        if options["MTK_NET_PHYLIB"] == "m":
+            modules.append("mtk-phy-lib")
+    ok("final kernel config: %d built-ins and CONFIG_%s=m for %s" %
+       (len(REQUIRED_Y), profile["symbol"], release))
+    return profile, modules
+
+
+def phy_module_pattern(name):
+    return re.escape(name) + r"\.ko(?:\.(?:xz|gz|zst))?"
 
 
 def fdt_properties(data):
@@ -208,7 +235,7 @@ def check_module(data, name):
     require(len(elf) >= 64 and elf[:6] == b"\x7fELF\x02\x01" and
             struct.unpack_from("<HH", elf, 16) == (1, 183),
             "PHY module is not an arm64 relocatable ELF: " + name)
-    ok("MT7987 PHY module arm64 ELF: " + name)
+    ok("PHY module arm64 ELF: " + name)
 
 
 def package_members(path):
@@ -275,7 +302,8 @@ def check_debs(directory):
         key = one([n for n in members if n == "data.tar" or n.startswith("data.tar.")], "deb data archive")
         wanted = lambda n: (n.startswith("boot/") and
                             (n.startswith(("boot/vmlinuz-", "boot/config-")) or n.endswith("/" + DTB_NAME))) or bool(
-                                re.search(r"/kernel/drivers/net/phy/mtk-2p5ge\.ko(?:\.(?:xz|gz|zst))?$", n))
+                                re.search(r"/kernel/drivers/net/phy/(?:mediatek/)?"
+                                          r"(?:mtk-2p5ge|mtk-phy-lib)\.ko(?:\.(?:xz|gz|zst))?$", n))
         for entry, data in tar_files(members[key], wanted):
             require(entry not in files, "duplicate package payload: " + entry)
             files[entry] = data
@@ -287,13 +315,19 @@ def check_debs(directory):
     config = "boot/config-" + release
     dtb = "boot/dtb-" + release + "/mediatek/" + DTB_NAME
     require(config in files and dtb in files, "packaged config/DTB do not match kernel release " + release)
-    module = one([n for n in files if re.fullmatch(
-        r"(?:usr/)?lib/modules/" + re.escape(release) + r"/kernel/drivers/net/phy/mtk-2p5ge\.ko(?:\.(?:xz|gz|zst))?", n)],
-        "packaged PHY module for " + release)
+    profile, modules = check_config(files[config], release)
+    for name in modules:
+        module = one([n for n in files if re.fullmatch(
+            r"(?:usr/)?lib/modules/" + re.escape(release) +
+            r"/kernel/drivers/net/phy/(?:mediatek/)?" + phy_module_pattern(name), n)],
+            "packaged PHY module %s for %s" % (name, release))
+        require(re.fullmatch(r"(?:usr/)?lib/modules/" + re.escape(release + "/" + profile["directory"]) +
+                             "/" + phy_module_pattern(name), module),
+                "wrong PHY module path for kernel %s: %s (need %s/)" %
+                (release, module, profile["directory"]))
+        check_module(files[module], module)
     check_kernel(files[kernel], kernel)
-    check_config(files[config])
     check_dtb(files[dtb])
-    check_module(files[module], module)
     print("SCOPE: kernel packages only; Debian rootfs, firmware, initrd and extlinux NOT VERIFIED")
 
 
@@ -328,22 +362,30 @@ def check_rootfs(args):
     config_path = Path(args.config) if args.config else config_dir / one(
         [p.name for p in config_dir.iterdir() if p.name.startswith("config-")], "boot config (or use --config)")
     config_data = read_file(config_path) if args.config else boot_read(config_path.name)
-    check_config(config_data)
     require(config_path.name.startswith("config-") or args.kernel_release,
             "unversioned --config requires --kernel-release to check module directory")
     release = args.kernel_release or config_path.name[len("config-"):]
     require(bool(re.fullmatch(r"[A-Za-z0-9_.+\-]+", release)), "invalid kernel release")
     if config_path.name.startswith("config-"):
         require(config_path.name == "config-" + release, "config filename/--kernel-release mismatch")
-    modules = root.resolve("lib/modules/" + release + "/kernel/drivers/net/phy")
+    profile, required_modules = check_config(config_data, release)
+    module_root = root.resolve("lib/modules/" + release)
     # Some extracted roots keep /usr/lib without a /lib compatibility symlink.
-    if not modules.is_dir():
-        modules = root.resolve("usr/lib/modules/" + release + "/kernel/drivers/net/phy")
-    require(modules.is_dir(), "PHY module directory missing for kernel release " + release)
-    module = one([p.name for p in modules.iterdir() if re.fullmatch(r"mtk-2p5ge\.ko(?:\.(?:xz|gz|zst))?", p.name)],
-                 "installed PHY module")
-    module_path = root.resolve(str((modules / module).relative_to(root.path)))
-    check_module(read_file(module_path), str(module_path))
+    if not module_root.is_dir():
+        module_root = root.resolve("usr/lib/modules/" + release)
+    for name in required_modules:
+        candidates = []
+        for candidate_profile in PHY_PROFILES.values():
+            directory = root.resolve(str((module_root / candidate_profile["directory"]).relative_to(root.path)))
+            if directory.is_dir():
+                candidates.extend(p for p in directory.iterdir() if re.fullmatch(phy_module_pattern(name), p.name))
+        module_path = one(candidates, "installed PHY module %s for %s" % (name, release))
+        expected_dir = root.resolve(str((module_root / profile["directory"]).relative_to(root.path)))
+        require(module_path.parent == expected_dir,
+                "wrong PHY module path for kernel %s: %s (need %s/)" %
+                (release, module_path, profile["directory"]))
+        module_path = root.resolve(str(module_path.relative_to(root.path)))
+        check_module(read_file(module_path), str(module_path))
     os_release = root.read("etc/os-release").decode("utf-8")
     fields = {}
     for line in os_release.splitlines():
@@ -354,9 +396,14 @@ def check_rootfs(args):
         values = shlex.split(match[2])
         require(len(values) <= 1, "invalid os-release value")
         fields[match[1]] = values[0] if values else ""
-    require(fields.get("ID") == "debian" and fields.get("VERSION_CODENAME") == "bookworm",
-            "target os-release must identify Debian Bookworm (not the build container OS)")
-    ok("target /etc/os-release: Debian Bookworm (parsed as data, not executed)")
+    expected = {"ID": "debian", "VERSION_ID": DEBIAN_RELEASES[args.release],
+                "VERSION_CODENAME": args.release}
+    wrong = ["%s=%r (need %r)" % (key, fields.get(key), value)
+             for key, value in expected.items() if fields.get(key) != value]
+    target_os = "Debian %s %s" % (expected["VERSION_ID"], args.release.capitalize())
+    require(not wrong, "target os-release must identify %s for --release %s: %s "
+            "(not the build container OS)" % (target_os, args.release, "; ".join(wrong)))
+    ok("target /etc/os-release: %s (parsed as data, not executed)" % target_os)
     manifest = {}
     for line in (REPO / "firmware/SHA256SUMS").read_text().splitlines():
         match = re.fullmatch(r"([0-9a-f]{64})  (.+)", line)
@@ -418,11 +465,16 @@ def main():
         epilog="""Examples:
   bash scripts/verify-artifacts.sh --debs source/armbian-build/output/debs
   bash scripts/verify-artifacts.sh --extracted-rootfs /path/to/root --boot-dir /path/to/boot
+  bash scripts/verify-artifacts.sh --release bookworm --extracted-rootfs /path/to/old-root
   bash scripts/verify-artifacts.sh --extracted-rootfs /path/to/root --config /path/to/.config --kernel-release 6.12.108-current-filogic
 Requires Python >=3.8; zstd executable only for zstd-compressed inputs.
 --debs checks one matching arm64 current-filogic image/DTB package set recursively,
 not rootfs/firmware/extlinux. Directory mode checks all self-contained extlinux
 labels against one config/release; boot paths are relative to the bootfs root.
+Rootfs checks require ID=debian and matching VERSION_ID/VERSION_CODENAME for
+--release (default: 13/trixie; bookworm: 12/bookworm). --debs does not verify the OS.
+PHY layouts are specific to Linux 6.12 (MEDIATEK_2P5G_PHY, flat phy directory)
+or 6.18 (MEDIATEK_2P5GE_PHY, phy/mediatek plus MTK_NET_PHYLIB). Other series fail.
 Absolute target symlinks are interpreted inside the extracted root (or --boot-dir).
 --kernel/--dtb cross-check the files actually selected by extlinux, not substitutes.
 These checks do NOT prove build provenance, initrd contents, U-Boot/extlinux/booti
@@ -433,6 +485,8 @@ Fixture input is synthetic and must be explicitly labelled --fixture.""",
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--debs", metavar="DIR", help="kernel packages only (no extraction)")
     mode.add_argument("--extracted-rootfs", metavar="DIR", help="already extracted target Debian root directory")
+    parser.add_argument("--release", choices=DEBIAN_RELEASES, default="trixie",
+                        help="target Debian rootfs release (default: trixie); not checked in --debs mode")
     parser.add_argument("--boot-dir", metavar="DIR", help="separately extracted bootfs; default ROOT/boot")
     parser.add_argument("--config", metavar="FILE", help="final kernel config; default unique boot/config-*")
     parser.add_argument("--kernel-release", help="module release for unversioned --config (e.g. .config)")

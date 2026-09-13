@@ -1,0 +1,67 @@
+Subject: [PATCH] pwm: mediatek: add MT7987 with the 6.18 channel layout
+
+Base: Linux 6.18.51 (f6388029ea9e2c9e807d73827658738ea131faee).
+
+Port the MT7987 register layout from the E87N 6.12 patch 821 to the
+chanreg_base/chanreg_width representation. Only the three documented
+channels are exposed, at offsets 0x100, 0x200 and 0x300. Do not enable
+the 26 MHz selection register, matching the original SoC data.
+
+Document the compatible and the five required clocks. Pin routing and
+waveform timing still require board validation.
+
+---
+
+--- a/drivers/pwm/pwm-mediatek.c
++++ b/drivers/pwm/pwm-mediatek.c
+@@ -486,6 +486,12 @@
+ 	.chanreg_width = 0x40,
+ };
+ 
++static const struct pwm_mediatek_of_data mt7987_pwm_data = {
++	.num_pwms = 3,
++	.chanreg_base = 0x100,
++	.chanreg_width = 0x100,
++};
++
+ static const struct pwm_mediatek_of_data mt7988_pwm_data = {
+ 	.num_pwms = 8,
+ 	.pwm45_fixup = false,
+@@ -535,6 +541,7 @@
+ 	{ .compatible = "mediatek,mt7629-pwm", .data = &mt7629_pwm_data },
+ 	{ .compatible = "mediatek,mt7981-pwm", .data = &mt7981_pwm_data },
+ 	{ .compatible = "mediatek,mt7986-pwm", .data = &mt7986_pwm_data },
++	{ .compatible = "mediatek,mt7987-pwm", .data = &mt7987_pwm_data },
+ 	{ .compatible = "mediatek,mt7988-pwm", .data = &mt7988_pwm_data },
+ 	{ .compatible = "mediatek,mt8183-pwm", .data = &mt8183_pwm_data },
+ 	{ .compatible = "mediatek,mt8365-pwm", .data = &mt8365_pwm_data },
+--- a/Documentation/devicetree/bindings/pwm/mediatek,mt2712-pwm.yaml
++++ b/Documentation/devicetree/bindings/pwm/mediatek,mt2712-pwm.yaml
+@@ -11,6 +11,19 @@
+ 
+ allOf:
+   - $ref: pwm.yaml#
++  - if:
++      properties:
++        compatible:
++          contains:
++            const: mediatek,mt7987-pwm
++    then:
++      properties:
++        clocks:
++          minItems: 5
++          maxItems: 5
++        clock-names:
++          minItems: 5
++          maxItems: 5
+ 
+ properties:
+   compatible:
+@@ -25,6 +38,7 @@
+           - mediatek,mt7629-pwm
+           - mediatek,mt7981-pwm
+           - mediatek,mt7986-pwm
++          - mediatek,mt7987-pwm
+           - mediatek,mt7988-pwm
+           - mediatek,mt8183-pwm
+           - mediatek,mt8365-pwm

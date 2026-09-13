@@ -3,3 +3,22 @@ output/
 source/
 .docker-buildx/
 
+# Host metadata, Python caches and local credentials do not belong in Git.
+.DS_Store
+._*
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+
+# Deliver binary artifacts separately, never as source commits.
+*.img
+*.img.xz
+*.img.gz
+*.img.zst
+*.deb

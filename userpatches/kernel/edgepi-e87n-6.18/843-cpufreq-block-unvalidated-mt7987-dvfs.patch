@@ -1,0 +1,36 @@
+Subject: [PATCH] cpufreq: block unsafe generic MT7987 DVFS
+
+Base: Linux 6.18.51 (f6388029ea9e2c9e807d73827658738ea131faee).
+
+Replace the E87N 6.12 fixed-voltage/MT7987 patches 843/844 with an
+explicitly disabled CPUFreq path pending validated board supply and OPP
+data. The old DTS has no proc-supply and gives all four frequencies,
+500 MHz through 2 GHz, the same 850 mV. Skipping set_voltage neither
+satisfies the mandatory proc regulator lookup nor proves voltage safety.
+The old platform data also leaves min_volt_shift zero, which the 6.18.51
+driver uses unconditionally as the voltage-tracking divisor.
+
+Linux 6.18.51 mediatek-cpufreq has no MT7987 match; deliberately do not
+add one. Block cpufreq-dt's OPP-v2 auto-registration too, so keeping an
+old OPP table cannot silently select a generic clock-only transition
+without the MediaTek intermediate-clock sequencing.
+
+The board DTS must retain the mediatek,mt7987 root compatible, omit
+unvalidated CPU OPP references/tables and CPUFreq cooling maps, and keep
+polled thermal zones and critical trips. CPU frequency/voltage remain
+under the existing firmware/clock setup, without Linux DVFS. This is a
+safety restriction, not functional CPUFreq support.
+
+---
+
+--- a/drivers/cpufreq/cpufreq-dt-platdev.c
++++ b/drivers/cpufreq/cpufreq-dt-platdev.c
+@@ -134,6 +134,8 @@
+ 	{ .compatible = "mediatek,mt2712", },
+ 	{ .compatible = "mediatek,mt7622", },
+ 	{ .compatible = "mediatek,mt7623", },
++	/* MT7987 has no validated CPU supply/OPPs or safe generic clock path. */
++	{ .compatible = "mediatek,mt7987", },
+ 	{ .compatible = "mediatek,mt8167", },
+ 	{ .compatible = "mediatek,mt817x", },
+ 	{ .compatible = "mediatek,mt8173", },

@@ -1,0 +1,3 @@
+#!/bin/sh
+# Ignore caller PYTHONPATH/user-site customizations even when invoked as root.
+exec /usr/bin/python3 -I -m e87n "$@"

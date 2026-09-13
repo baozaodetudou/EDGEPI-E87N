@@ -36,14 +36,21 @@ function post_family_config__edgepi_e87n_existing_uboot() {
 }
 
 function custom_kernel_config__edgepi_e87n_first_boot() {
-	# Armbian applies opts_m after opts_y. Remove any EXT4_FS module request
-	# before forcing the root filesystem driver built-in.
+	# Armbian applies opts_m after opts_y. Keep boot/thermal drivers built-in.
 	# Only mutate the hook arrays: Armbian also calls this before .config exists.
 	local option
 	local -a remaining_modules=()
+	local -a remaining_builtin=()
+	for option in "${opts_y[@]}"; do
+		case "${option#CONFIG_}" in
+			CPU_FREQ|CPU_THERMAL|FRAMEBUFFER_CONSOLE) ;;
+			*) remaining_builtin+=("${option}") ;;
+		esac
+	done
+	opts_y=("${remaining_builtin[@]}")
 	for option in "${opts_m[@]}"; do
 		case "${option#CONFIG_}" in
-			EXT4_FS) ;;
+			EXT4_FS|THERMAL|THERMAL_OF|MTK_THERMAL|MTK_LVTS_THERMAL|HWMON|PWM|PWM_MEDIATEK|SENSORS_PWM_FAN|NVMEM|NVMEM_MTK_EFUSE|CPU_FREQ|CPU_THERMAL|SPI|SPI_MASTER|SPI_MT65XX|STAGING|FB|FB_DEVICE|BACKLIGHT_CLASS_DEVICE|BACKLIGHT_PWM|FRAMEBUFFER_CONSOLE) ;;
 			*) remaining_modules+=("${option}") ;;
 		esac
 	done
@@ -58,7 +65,17 @@ function custom_kernel_config__edgepi_e87n_first_boot() {
 		DEVTMPFS DEVTMPFS_MOUNT BLK_DEV_INITRD RD_GZIP RD_ZSTD
 		EXT4_FS EXT4_FS_POSIX_ACL EXT4_FS_SECURITY
 		FW_LOADER
+		THERMAL THERMAL_OF THERMAL_GOV_STEP_WISE THERMAL_DEFAULT_GOV_STEP_WISE
+		MTK_THERMAL MTK_LVTS_THERMAL HWMON PWM PWM_MEDIATEK SENSORS_PWM_FAN
+		SPI SPI_MASTER SPI_MT65XX STAGING FB FB_DEVICE
+		BACKLIGHT_CLASS_DEVICE BACKLIGHT_PWM
 	)
-	# The MT7987 PHY firmware is installed in rootfs; keep its driver modular.
-	opts_m+=("MEDIATEK_2P5G_PHY")
+	# No validated MT7987 voltage/OPP data: retain the firmware CPU rate.
+	opts_n+=(CPU_FREQ CPU_THERMAL FRAMEBUFFER_CONSOLE)
+	# The serial console remains available; fbcon must not overwrite the dashboard.
+	# udev and modules-load load the board-specific SPI panel after rootfs is ready.
+	opts_m+=(FB_TFT FB_TFT_NV3007)
+	# Upstream 6.18 uses the mediatek/ PHY subdirectory and the 2P5GE symbol.
+	# Firmware is installed in rootfs; keep the matching PHY driver modular.
+	opts_m+=("MEDIATEK_2P5GE_PHY")
 }

@@ -8,8 +8,19 @@ export GIT_TERMINAL_PROMPT=0
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 framework_dir="$repo_dir/source/armbian-build"
 framework_pin=7c1bb29eb0e7bd75b0703d86fe654b2680e646da
-kernel_pin=b864732ee285e7868fb0857d69a8ff349e37003e
-cache_dir="$framework_dir/cache/git-bare/shallow-kernel-6.12"
+[[ $# -le 1 ]] || { printf 'Usage: %s [current]\n' "$0" >&2; exit 2; }
+BRANCH=${1:-current}
+[[ "$BRANCH" == current ]] || { printf 'E87N supports the current LTS track only\n' >&2; exit 2; }
+exit_with_error() { printf 'ERROR: %s\n' "$*" >&2; exit 2; }
+# Read the same trusted repository configuration as the builder; do not keep a
+# second, stale copy of the kernel commit/series here when updating the kernel.
+# shellcheck source=/dev/null
+source "$repo_dir/userpatches/config/sources/families/edgepi-e87n.conf"
+kernel_pin=${KERNELBRANCH#commit:}
+[[ "$KERNELBRANCH" == commit:* && "$kernel_pin" =~ ^[0-9a-f]{40}$ && "$KERNEL_MAJOR_MINOR" =~ ^[0-9]+\.[0-9]+$ ]] || {
+	printf 'Kernel cache seed requires an exact commit and numeric series\n' >&2; exit 2;
+}
+cache_dir="$framework_dir/cache/git-bare/shallow-kernel-$KERNEL_MAJOR_MINOR"
 
 [[ $(uname -s) == Linux ]] || { printf 'Run inside the Linux build host.\n' >&2; exit 2; }
 [[ $(git -C "$framework_dir" rev-parse HEAD) == "$framework_pin" ]] || {
@@ -34,7 +45,7 @@ fi
 seed_dir=$(mktemp -d "$framework_dir/cache/git-bare/e87n-kernel-seed.XXXXXX")
 printf 'Preparing %s (retained if interrupted)\n' "$seed_dir"
 git init --initial-branch=master "$seed_dir"
-git -C "$seed_dir" remote add origin https://github.com/frank-w/BPI-Router-Linux.git
+git -C "$seed_dir" remote add origin "$KERNELSOURCE"
 git -C "$seed_dir" fetch --no-tags --depth=1 origin "$kernel_pin"
 [[ $(git -C "$seed_dir" rev-parse 'FETCH_HEAD^{commit}') == "$kernel_pin" ]]
 git -C "$seed_dir" update-ref refs/heads/master "$kernel_pin"

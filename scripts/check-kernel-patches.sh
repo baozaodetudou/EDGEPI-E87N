@@ -2,10 +2,18 @@
 set -Eeuo pipefail
 export GIT_TERMINAL_PROMPT=0
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-kernel_repo=${1:?Usage: bash scripts/check-kernel-patches.sh /path/to/kernel/git [revision]}
-kernel_ref=${2:-b864732ee285e7868fb0857d69a8ff349e37003e}
+kernel_repo=${1:?Usage: bash scripts/check-kernel-patches.sh /path/to/kernel/git [revision] [patchset]}
+[[ $# -le 3 ]] || { printf 'Too many arguments\n' >&2; exit 2; }
+export BRANCH=current
+exit_with_error() { printf 'ERROR: %s\n' "$*" >&2; exit 2; }
+# shellcheck source=/dev/null
+source "$repo_dir/userpatches/config/sources/families/edgepi-e87n.conf"
+kernel_ref=${2:-${KERNELBRANCH#commit:}}
 patch_bin=${PATCH_BIN:-patch}
-patch_dir="$repo_dir/userpatches/kernel/edgepi-e87n-6.12"
+patchset=${3:-$KERNELPATCHDIR}
+[[ "$patchset" =~ ^edgepi-e87n-[0-9]+\.[0-9]+$ ]] || { printf 'Invalid patchset\n' >&2; exit 2; }
+patch_dir="$repo_dir/userpatches/kernel/$patchset"
+[[ -d "$patch_dir" ]] || { printf 'Missing patch directory: %s\n' "$patch_dir" >&2; exit 2; }
 
 if ! "$patch_bin" --version | head -1 | grep -q 'GNU patch'; then
 	echo 'GNU patch is required. On macOS set PATCH_BIN to gpatch.' >&2
