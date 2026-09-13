@@ -12,4 +12,3 @@ shellcheck scripts/ci-*.sh
 python3 tests/test-ci-workflow.py
 python3 tests/test-ci-prepare-release.py
 python3 tests/test-ci-publish-release.py
-python3 tests/test-ci-resolve-build.py

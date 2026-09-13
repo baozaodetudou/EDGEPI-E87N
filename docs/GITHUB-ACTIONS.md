@@ -1,32 +1,20 @@
 # GitHub Actions 手动构建与 tag 发布
 
-工作流位于 [build-e87n.yml](../.github/workflows/build-e87n.yml)（重新构建并发布）和 [publish-e87n.yml](../.github/workflows/publish-e87n.yml)（只发布已有成功构建）。**两者都只接受手动 `workflow_dispatch`；push、tag push、PR 和定时任务均不触发。** 全部验证成功才以指定 tag 发布 Debian 13 Trixie 最小镜像和独立 `e87n-display` Debian 包到 GitHub Releases。当前硬件未验收，因此发布为明确标记实验性的 **Pre-release**，不设为稳定 Latest，不执行刷写。
+唯一工作流是 [build-e87n.yml](../.github/workflows/build-e87n.yml)，名称为 **E87N Debian 13 release**。**`on.workflow_dispatch` 不声明任何 inputs，只能手动运行；push、tag push、PR 和定时任务均不触发。** 每次运行重新构建本次 main 提交，固定 Debian 13 Trixie / Linux 6.18.51；全部验证成功后由 release job 自动生成 tag，发布最小镜像和独立 `e87n-display` Debian 包到 GitHub Releases。当前硬件未验收，因此发布为明确标记实验性的 **Pre-release**，不设为稳定 Latest，不执行刷写。
 
-已知故障与复验：[2026-09-13 SSH keygen 审计误报修复](ci-keygen-fix-20260913.md)。原运行编译成功但审计失败，修复后的本地完整复验通过；新 [run 34737922588](https://github.com/baozaodetudou/EDGEPI-E87N/actions/runs/34737922588) 的验证、独立显示包、完整镜像构建及审计已全部成功。原失败 run 的状态不会因此改变。
+已知故障与复验：[2026-09-13 SSH keygen 审计误报修复](ci-keygen-fix-20260913.md)。原运行编译成功但审计失败，修复后的本地完整复验通过；历史 [run 34737922588](https://github.com/baozaodetudou/EDGEPI-E87N/actions/runs/34737922588) 的验证、独立显示包、完整镜像构建及审计已全部成功。它仅保留为历史构建证据和备用下载，不代表当前 main 已完成新构建或发布；原失败 run 的状态不会因此改变。**远端 Release 是否已成功发布尚未确认。**
 
-## 已有成功构建：不用重新编译
+## 唯一操作：无参数手动构建并发布
 
-打开 [Publish existing E87N build](https://github.com/baozaodetudou/EDGEPI-E87N/actions/workflows/publish-e87n.yml) → **Run workflow** → `main`。输入：
+1. 打开 [E87N Debian 13 release](https://github.com/baozaodetudou/EDGEPI-E87N/actions/workflows/build-e87n.yml)。
+2. 点击 **Run workflow**，保持默认分支 **main**。
+3. 直接点击 **Run workflow**，无需填写任何参数。
 
-- `build_run_id`：源构建 run ID，如已成功的 `34737922588`；留空则选择最近一次成功的 main 构建。
-- `release_tag`：新的 tag；留空则为 `e87n-trixie-6.18.51-<源构建 run-id>`，不是本次发布作业的 run ID。
+没有 tag、run ID 或内核输入框，也没有第二个发布工作流。新运行实际重建本次 main 提交，不查找或复用历史成功构建。其他分支在预检阶段拒绝；工作流必须已进入默认分支，操作者须有仓库写权限，见 [GitHub 手动运行说明](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)。本机能通过 SSH 推送 Git，不代表 GitHub CLI 的 API 账号也有发布/dispatch 权限；不需要把个人 token 放进仓库，云端使用作业自身的 `GITHUB_TOKEN`。
 
-这个入口不启动内核或镜像编译。它只接受本仓库 `build-e87n.yml` 的 main 分支成功运行，拒绝 fork/其他工作流/失败或未完成的运行，并核对对应 attempt 的 validate、display、image 三个 job 均成功。随后下载这次源构建的两个准确 artifact，执行同样的清单、元数据、审计和发布检查。目标仍固定 Debian 13/6.18.51，显示包版本必须匹配仓库当前 VERSION；不会随意重新命名不同版本的旧镜像。
+`validate` 根据本次手动运行的 ID 自动计算 tag 名称 `e87n-trixie-6.18.51-<GITHUB_RUN_ID>` 并预检，不创建远端 tag。验证成功后，`image` 与 `display` 并行构建；三者全部成功后，`release` 创建远端 tag 和 Release 并上传附件。整个过程只需这一次手动运行，不会由 tag push 触发构建。更换内核必须修改并审查源码 pin、补丁、验证器和工作流。
 
-发布使用当前 main 的受审查脚本，但 tag 指向**源构建的实际 SHA**。源 artifacts 已过期或删除时会失败，需要手动重新构建；已有 tag、Release 或失败遗留草稿不会被自动覆盖/删除，重试使用新的 tag。此入口仅在手动运行时执行，不会在源构建完成后自动触发。
-
-## 重新构建并发布：触发和输入
-
-从 Actions → **E87N Debian 13 release** → **Run workflow**，选择 **main** 后手动运行。其他分支在预检阶段拒绝；工作流必须已进入默认分支，操作者须有仓库写权限，见 [GitHub 手动运行说明](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)。本机能通过 SSH 推送 Git，不代表 GitHub CLI 的 API 账号也有发布/dispatch 权限；不需要把个人 token 放进仓库，云端使用作业自身的 `GITHUB_TOKEN`。
-
-手动输入有两个：
-
-- `kernel_version`：只有 `6.18.51` 的 choice，脚本也拒绝其他值。
-- `release_tag`：可填新的版本，例如 `v2026.09.13-1`；留空则生成 `e87n-trixie-6.18.51-<run-id>`。允许字母、数字、点、下划线、连字符等受限安全格式，不接受路径、空白或命令文本。已有同名 tag 或 Release 会在构建前拒绝；发布前再检查一次，绝不覆盖旧版本。
-
-更换内核必须修改并审查源码 pin、补丁、验证器和工作流；没有任意构建命令或发行版输入。自动生成 tag 仅发生在这次手动运行内，不是 tag push 触发构建。
-
-| 输入 | 固定来源 |
+| 构建配置 | 固定来源 |
 | --- | --- |
 | Debian / 桌面 | `RELEASE=trixie`、`BUILD_MINIMAL=yes`、`BUILD_DESKTOP=no` |
 | Linux | `6.18.51`，`f6388029ea9e2c9e807d73827658738ea131faee` |
@@ -39,7 +27,7 @@
 
 ## Runner、资源和权限
 
-`validate` 使用 `ubuntu-24.04`；成功后，独立显示包 job 在 x64 上打包 `Architecture: all` 的用户空间包，镜像 job 在 `ubuntu-24.04-arm` 上原生编译 ARM64。没有使用 QEMU 模拟内核编译。`PREFER_DOCKER=no` 很关键：固定 Armbian 框架检测到 Docker 时原本可能改用容器，该参数令框架走原生 sudo 路径；显式 `build` 子命令避免交互式选择。
+`validate` 使用 `ubuntu-24.04`；成功后两个构建 job 并行执行：独立显示包 job 在 x64 上打包 `Architecture: all` 的用户空间包，镜像 job 在 `ubuntu-24.04-arm` 上原生编译 ARM64。没有使用 QEMU 模拟内核编译。`PREFER_DOCKER=no` 很关键：固定 Armbian 框架检测到 Docker 时原本可能改用容器，该参数令框架走原生 sudo 路径；显式 `build` 子命令避免交互式选择。
 
 GitHub 为公开仓库列出了该 ARM64 标签、4 核、16 GB 内存及 **14 GB 存储**；其存储承诺不足以无条件保证本项目构建空间。见 [GitHub 托管 runner 规格](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)。
 
@@ -60,11 +48,15 @@ Release **只上传两个二进制附件**：
 
 两个下载链接和 SHA-256 直接写进 Release 正文，不需要另外下载校验文本。GitHub 自动附带的 Source code zip/tar.gz 是源码，不是额外的系统镜像。构建器仍会生成包含内核包归档、构建证据、元数据和校验清单的 8 文件临时 staging，用于发布前完整验证；发布器明确只上传其中的镜像和显示包。原始内核包、元数据和日志仍保留在源 run 的 Actions artifacts（14 天），不作为额外安装附件发布。
 
-先创建指向**实际构建提交 SHA** 的 draft pre-release，再上传明确列出的附件并核对远端文件；完成后才公开。不会给旧版本覆盖附件，也不会把 tag 指向后续漂移的 main。若上传/核对失败，作业报错并保留 draft/tag 供人工检查，不自动删除或假装成功；下次完整重建应使用新 tag，已发布版本保持原样。发布行为参考 [GitHub CLI release create](https://cli.github.com/manual/gh_release_create)。
+release job 使用预检输出的自动 tag 名称，再检查同名 tag/Release，创建指向**本次工作流实际构建提交 `GITHUB_SHA`** 的 draft pre-release，上传明确列出的附件并核对远端文件；完成后才公开。不会给旧版本覆盖附件，也不会把 tag 指向后续漂移的 main。若 tag 冲突或上传/核对失败，作业报错，已有 draft/tag 保留供人工检查，不自动删除。需要重试发布时，重新点击 **Run workflow** 发起新的手动运行，获得新的 run ID，重新构建并自动生成新 tag。不要通过重跑失败 job 重试发布：重跑沿用原 run ID，可能仍会遇到同名 tag，且不同 attempt 的产物不会混用。发布行为参考 [GitHub CLI release create](https://cli.github.com/manual/gh_release_create)。
 
-版本化下载在仓库 [Releases](https://github.com/baozaodetudou/EDGEPI-E87N/releases)，不受 Actions artifacts 的 14 天保留期约束。首次手动发布 job 尚待实际运行验证；已成功的 `34737922588` 使用旧的 artifact-only 流程，可以通过上面的“发布已有成功构建”入口发布，不会因更新工作流自动变成 Release。
+版本化下载在仓库 [Releases](https://github.com/baozaodetudou/EDGEPI-E87N/releases)，不受 Actions artifacts 的 14 天保留期约束。新的无参数工作流尚待实际手动运行验证，远端 Release 是否已成功发布尚未确认。已成功的 `34737922588` 使用旧的 artifact-only 流程，仅作历史证据和备用下载，不会因更新工作流自动变成 Release。
 
-2026-09-13 本地验证：两个工作流的 actionlint、CI ShellCheck 在 macOS 通过；工作流 19 项、发布准备 21 项、发布器 27 项、来源解析/手动发布契约 12 项，共 79 项测试在 macOS 与 ARM64 Debian 13 VM 均通过。使用 `34737922588` 的真实镜像/显示包 artifacts 完成 8 文件本地 staging，清单全数通过；发布器验证只有两个用户下载文件会上传，Release 正文的两个链接及摘要已核对。真实 GitHub 的显式 run ID、最近成功构建解析与只读发布预检均通过。没有调用真实发布或手动 dispatch，本地发布目录不等于远端 Release。
+另一次历史手动发布 [run 34740998259](https://github.com/baozaodetudou/EDGEPI-E87N/actions/runs/34740998259) 使用已移除的独立发布工作流。只读远端检查确认：来源解析、下载和发布准备均通过，但在 `gh release create` 阶段失败。旧发布器未显示具体错误，因此失败原因尚未证实；该结果不代表新工作流已经运行或 Release 已成功发布。
+
+历史验证记录（2026-09-13，简化前版本）：当时两个工作流的 actionlint、CI ShellCheck 在 macOS 通过；工作流 19 项、发布准备 21 项、发布器 27 项、来源解析/手动发布契约 12 项，共 79 项测试在 macOS 与 ARM64 Debian 13 VM 均通过。使用 `34737922588` 的真实镜像/显示包 artifacts 完成 8 文件本地 staging，清单全数通过；发布器验证只有两个用户下载文件会上传，Release 正文的两个链接及摘要已核对。当时真实 GitHub 的显式 run ID、最近成功构建解析与只读发布预检均通过。没有调用真实发布或手动 dispatch，本地发布目录不等于远端 Release。
+
+上述 79 项是历史结果；独立发布入口及其来源解析代码和 12 项测试现已移除，Git 历史可恢复，不再提供选择历史构建的功能。新增一项真实 Shell 展开测试，覆盖不同 run ID 的自动 tag、分支限制和发布预检失败，不调用真实 GitHub。当前三组测试为工作流 20 项、发布准备 21 项、发布器 27 项，合计 68 项，在 macOS 与 ARM64 Debian 13 VM 均通过；actionlint 和 CI ShellCheck 在 macOS 通过。这些检查不代表新工作流已实际运行或发布成功。
 
 ## 实际镜像审计与失败输出
 
@@ -104,7 +96,7 @@ logs/armbian/           框架日志（镜像 job）
 
 `validate` 安装 ShellCheck、PyYAML、Pillow、DejaVu 字体、设备树工具、GNU patch、压缩工具、dpkg 和 Debian 服务助手。actionlint 通过 Go 固定安装 `v1.7.12`，见 [actionlint 安装说明](https://github.com/rhysd/actionlint/blob/v1.7.12/docs/install.md)。
 
-`ci-validate.sh` 执行两个工作流的 actionlint、所有 `ci-*.sh` 的 Bash 语法/ShellCheck、`test-ci-workflow.py` 的工作流契约和模拟构建/收集测试，以及 `test-ci-prepare-release.py` / `test-ci-publish-release.py` / `test-ci-resolve-build.py` 的发布打包、来源解析与模拟 GitHub 测试。这部分不启动镜像或软件包构建，不调用真正的 sudo，也不会发布任何 Release。
+`ci-validate.sh` 执行唯一工作流 `build-e87n.yml` 的 actionlint、所有 `ci-*.sh` 的 Bash 语法/ShellCheck、`test-ci-workflow.py` 的工作流契约和模拟构建/收集测试，以及 `test-ci-prepare-release.py` / `test-ci-publish-release.py` 的发布打包与模拟 GitHub 测试。这部分不启动镜像或软件包构建，不调用真正的 sudo，也不会发布任何 Release。
 
 `ci-regressions.sh` 执行 hardware、display、doctor、network-policy、display-fan 验证器和 shell 启动器/产物/initramfs/镜像/LTS/采集器夹具。系统 rootfs 夹具明确使用 `sudo -n python3 -B tests/test-verify-system.py`；显示包测试同样以 sudo 运行，以覆盖临时 `dpkg --root` 中的安装、升级、删除、重装与 purge。包测试会生成测试包并模拟运行时服务命令，不安装到 runner 主系统。新增 `test-image-defaults.py` 或 `.sh` 后也会被纳入。每套测试独立保存日志，失败后继续收集其他测试结果，但 validation job 最终失败。依赖真实框架 checkout 的测试和实际系统 smoke 测试不属于此 fixture job。
 

@@ -2,17 +2,6 @@ name: E87N Debian 13 release
 
 on:
   workflow_dispatch:
-    inputs:
-      kernel_version:
-        description: Reviewed kernel pin (upgrades require source changes)
-        type: choice
-        options: ['6.18.51']
-        default: '6.18.51'
-        required: true
-      release_tag:
-        description: 'New tag; blank generates e87n-trixie-6.18.51-<run-id>'
-        type: string
-        required: false
 
 permissions:
   contents: read
@@ -29,7 +18,7 @@ defaults:
 env:
   GIT_TERMINAL_PROMPT: '0'
   DEBIAN_FRONTEND: noninteractive
-  E87N_KERNEL_VERSION: ${{ inputs.kernel_version || '6.18.51' }}
+  E87N_KERNEL_VERSION: '6.18.51'
 
 jobs:
   validate:
@@ -42,14 +31,16 @@ jobs:
         with:
           persist-credentials: false
           clean: false
-      - name: Check manual main-branch release and unused tag
+      - name: Generate release tag and check manual main-branch build
         id: release_tag
         env:
           GH_TOKEN: ${{ github.token }}
-          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "$GITHUB_REF" == refs/heads/main ]]
-          release_tag=${INPUT_RELEASE_TAG:-e87n-trixie-6.18.51-${GITHUB_RUN_ID}}
+          if ! [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "$GITHUB_REF" == refs/heads/main ]]; then
+            printf 'Only manual main-branch builds may publish.\n' >&2
+            exit 1
+          fi
+          release_tag="e87n-trixie-6.18.51-${GITHUB_RUN_ID}"
           python3 scripts/ci-publish-release.py preflight \
             --repository "$GITHUB_REPOSITORY" --source-commit "$GITHUB_SHA" --tag "$release_tag"
           printf 'release_tag=%s\n' "$release_tag" >> "$GITHUB_OUTPUT"

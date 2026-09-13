@@ -1,8 +1,8 @@
 # 镜像获取、发布状态与校验
 
 本仓库公开的是构建源码、板级补丁、Debian 小屏程序、测试与文档。
-**当前最小配置已在 [Actions 34737922588](https://github.com/baozaodetudou/EDGEPI-E87N/actions/runs/34737922588) 成功构建并上传 artifacts，尚未发布为 GitHub Release。**
-新的[手动发布流程](GITHUB-ACTIONS.md)提供“重新构建并发布”和“发布已有成功构建”两个入口，发布到 [Releases](https://github.com/baozaodetudou/EDGEPI-E87N/releases)；只在手动 Run workflow 后执行，不会因推送源码或 tag 自动运行。首次发布仍待手动运行。
+**最小配置曾在 [Actions 34737922588](https://github.com/baozaodetudou/EDGEPI-E87N/actions/runs/34737922588) 成功构建并上传 artifacts；该 run 仅作为历史证据和备用下载，远端 GitHub Release 是否已成功发布尚未确认。**
+唯一的[手动发布流程](GITHUB-ACTIONS.md)无需填写参数，每次重新构建本次运行选定的 main 提交，自动生成 tag 并发布到 [Releases](https://github.com/baozaodetudou/EDGEPI-E87N/releases)。只有手动 Run workflow 才执行；push、tag push 和定时任务均不触发。
 `git clone` 不会下载之前本地生成的 `.img.xz`、内核包、完整日志或构建缓存。
 可按 [构建指南](BUILDING.md) 自行生成，或在 [GitHub Actions](GITHUB-ACTIONS.md) 对应 run 成功并上传 artifacts 后取得文件，再校验。工作流文件存在、任务开始运行与成功产物上传是不同状态；artifacts 也不等同于 Release。
 
@@ -15,19 +15,21 @@
 
 Release 正文包含这两个文件的 SHA-256。下载后运行 `sha256sum 文件名`（macOS：`shasum -a 256 文件名`），与该版本正文比较。GitHub 自带的 **Source code (zip/tar.gz) 只是源码，不是镜像**。内核包和审计日志保留在 Actions artifacts，不增加普通用户需要下载的安装附件。
 
-如果 Releases 还是空的，仓库维护者只需手动发布一次现有产物，无需再次编译：
+需要发布新版本时，仓库维护者只需运行这一个工作流：
 
-1. 打开 [Publish existing E87N build](https://github.com/baozaodetudou/EDGEPI-E87N/actions/workflows/publish-e87n.yml)，点击 **Run workflow**，选择 `main`。
-2. `build_run_id` 填 `34737922588`（留空则取最近一次成功的 main 构建），`release_tag` 留空。
-3. 点击运行；全部校验和上传完成后，当前源构建会发布为 `e87n-trixie-6.18.51-34737922588`。
+1. 打开 [E87N Debian 13 release](https://github.com/baozaodetudou/EDGEPI-E87N/actions/workflows/build-e87n.yml)，点击 **Run workflow**。
+2. 保持默认分支 `main`；无需填写任何参数，没有 tag、run ID 或内核输入框。
+3. 点击 **Run workflow**。验证成功后，镜像和显示包并行构建；全部成功后由 release job 自动生成并发布 `e87n-trixie-6.18.51-<GITHUB_RUN_ID>`，其中 ID 是本次手动运行的 ID。
 
-这是操作说明，**不是该 tag 已经发布的声明**。如果 tag 已存在，不会覆盖，需另填新的 tag；如果源 artifacts 已过期或被删除，需在 [E87N Debian 13 release](https://github.com/baozaodetudou/EDGEPI-E87N/actions/workflows/build-e87n.yml) 手动重新构建并发布。tag 指向源镜像实际构建的提交，而不是执行发布时最新的 main。
+固定目标为 Debian 13 Trixie / Linux 6.18.51。每次手动运行实际重建当次 main 提交，不选择或复用历史成功构建；没有第二个发布入口。自动生成 tag 仅发生在这次手动运行内部，tag 指向镜像实际构建的提交，不会跟随运行期间更新的 main 移动。
+
+这是操作说明，**不是该 tag 已经发布的声明**。遇到同名 tag/Release 时不会覆盖；上传或核对失败时保留已有 draft/tag 供检查。需要重试发布时，重新点击 **Run workflow** 发起一次新的手动运行，以获取新的 run ID、重新构建并生成新 tag；不要通过重跑失败 job 重试发布，因为重跑沿用原 run ID。
 
 Release 下载不受 Actions 的 14 天保留期约束。候选仍标记为 Pre-release，硬件状态见下文；大镜像和 `.deb` 不进入 Git 源码历史。
 
-## 当前最小配置的交付状态与 Actions 备用下载
+## 历史最小配置构建证据与 Actions 备用下载
 
-新配置以 [DEFAULTS.md](DEFAULTS.md) 为准：`root` / `doumao`、SSH 22、DHCP、上海时区、中文 UTF-8、正常 APT 和预装版本化 `e87n-display` 包；额外存储默认 `E87N_EXTRA_STORAGE=no`。本轮源码为 `2a60011`，镜像校验值与审计证据见[本轮记录](ci-keygen-fix-20260913.md)。
+最小配置以 [DEFAULTS.md](DEFAULTS.md) 为准：`root` / `doumao`、SSH 22、DHCP、上海时区、中文 UTF-8、正常 APT 和预装版本化 `e87n-display` 包；额外存储默认 `E87N_EXTRA_STORAGE=no`。历史 run `34737922588` 的源码为 `2a60011`，镜像校验值与审计证据见[当次记录](ci-keygen-fix-20260913.md)，不代表当前 main 已完成新构建或发布。
 
 在上述成功 run 页面的 **Artifacts** 下载：
 
@@ -36,9 +38,9 @@ Release 下载不受 Actions 的 14 天保留期约束。候选仍标记为 Pre-
 
 Artifacts 保留 14 天，下载通常需要登录 GitHub；它们不是永久 Release 附件。下载并解开 artifact 后，在其根目录运行 `shasum -a 256 -c SHA256SUMS`（Linux：`sha256sum -c SHA256SUMS`），同时核对 `build-metadata.json` 的源码提交、成功结果和静态审计状态。实体板卡仍未验收，不可直接整盘覆盖原 eMMC。
 
-VM 用户空间集成只操作可丢弃 rootfs 副本，见 [TESTING.md](TESTING.md)，不能把这些经测试修改的副本作为交付镜像。本轮可下载镜像是成功 Actions 的原始产物。2026-09-13 11:10:49 CST 完成的旧配置 VM 构建已被替代，不代表新最小配置构建完成。
+VM 用户空间集成只操作可丢弃 rootfs 副本，见 [TESTING.md](TESTING.md)，不能把这些经测试修改的副本作为交付镜像。这里的备用镜像是该历史成功 Actions 的原始产物，能否下载取决于 artifacts 是否仍保留。2026-09-13 11:10:49 CST 完成的旧配置 VM 构建已被替代，不代表新最小配置构建完成。
 
-只有成功 run 中与目标提交、配置、日志及校验清单一致的 artifacts 才能作为该次构建产物下载。显示包的独立版本与升级方法见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)；云端运行与获取方式见 [GITHUB-ACTIONS.md](GITHUB-ACTIONS.md)。本轮是 Actions 候选产物，不是已通过实机验收的发行版。
+只有成功 run 中与目标提交、配置、日志及校验清单一致的 artifacts 才能作为该次构建产物下载。显示包的独立版本与升级方法见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)；云端运行与获取方式见 [GITHUB-ACTIONS.md](GITHUB-ACTIONS.md)。上述历史文件是 Actions 候选产物，不是已通过实机验收的发行版。
 
 ## 历史本地屏幕/风扇候选（旧配置）
 
