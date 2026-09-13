@@ -2,6 +2,8 @@
 
 工作流位于 [build-e87n.yml](../.github/workflows/build-e87n.yml)。面向公开仓库，生成 Debian 13 Trixie 最小镜像，以及独立、带版本号的 `e87n-display` Debian 包。输出是 Actions artifacts，不自动创建 GitHub Release、标签或执行刷写。通过构建与静态审计不代表 E87N 已启动或硬件已经验收。
 
+已知故障与复验：[2026-09-13 SSH keygen 审计误报修复](ci-keygen-fix-20260913.md)。原运行编译成功但审计失败，修复后的本地完整复验通过；不要将原失败 artifact 的校验值等同于云端 run 成功。
+
 ## 触发和输入
 
 工作流进入默认分支后，可从 Actions → **E87N Debian 13 candidate** → Run workflow 手动运行。推送到 `main`，且修改构建脚本、板级文件、补丁、固件、打包、测试、文档或 `.github/` 时也会运行。具体路径清单以 YAML 为准；不会因普通其他分支推送或 PR 自动构建。GitHub 要求分支和路径过滤条件同时匹配，手动入口要求工作流存在于默认分支，见 [工作流语法](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax)。

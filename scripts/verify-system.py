@@ -104,8 +104,29 @@ def check(root, boot):
     require("OPENSSHD_REGENERATE_HOST_KEYS=false" in data("/etc/default/armbian-firstrun").decode().splitlines(),
             "late Armbian SSH key replacement remains enabled")
     keygen = data("/usr/lib/systemd/system/sshd-keygen.service").decode()
-    require(re.search(r'^ExecStart=/usr/bin/ssh-keygen -A$', keygen, re.M) is not None,
-            "SSH host-key generation base unit is missing its command")
+    # Debian 13 openssh-server uses a bare executable; systemd resolves it in
+    # its standard binary search path. Audit only the two reviewed command
+    # forms, in [Service], not a substring in a comment or another section.
+    # This is intentionally not a general systemd unit parser: unexpected
+    # wrappers, prefixes, continuations, resets and extra commands fail closed.
+    section = None
+    commands = []
+    for line in keygen.splitlines():
+        line = line.strip()
+        if not line or line.startswith(("#", ";")):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            section = line
+        elif section == "[Service]" and "=" in line:
+            name, value = line.split("=", 1)
+            if name.strip() == "ExecStart":
+                commands.append(value.split())
+    require(commands in ([["ssh-keygen", "-A"]], [["/usr/bin/ssh-keygen", "-A"]]),
+            "SSH host-key generation base unit is missing its command or has unexpected ExecStart")
+    binary = path("/usr/bin/ssh-keygen").stat()
+    require(stat.S_ISREG(binary.st_mode) and binary.st_uid == 0 and
+            binary.st_mode & 0o111 and not binary.st_mode & 0o022,
+            "SSH key generator is not a root-owned, non-writable executable")
     for unit in ("sshd-keygen.service", "ssh.service"):
         for directory in ("etc/systemd/system", "run/systemd/system"):
             require(not os.path.lexists(root / directory / unit),
