@@ -44,6 +44,14 @@ cp -a "$ROOT_DIR/userpatches" "$ARMBIAN_DIR/userpatches"
 mkdir -p "$ARMBIAN_DIR/userpatches/overlay"
 cp -a "$ROOT_DIR/firmware" "$ARMBIAN_DIR/userpatches/overlay/e87n-firmware"
 cp -a "$ROOT_DIR/board-support" "$ARMBIAN_DIR/userpatches/overlay/e87n-board-support"
+mkdir -p "$ARMBIAN_DIR/userpatches/overlay/e87n-board-support/docs"
+for manual in DEFAULTS DIAGNOSTICS SYSTEM-READINESS NETWORKING DISPLAY-PACKAGE; do
+	cp "$ROOT_DIR/docs/$manual.md" "$ARMBIAN_DIR/userpatches/overlay/e87n-board-support/docs/"
+done
+mkdir -p "$ARMBIAN_DIR/userpatches/overlay/e87n-package/scripts"
+cp "$ROOT_DIR/scripts/build-display-deb.sh" "$ARMBIAN_DIR/userpatches/overlay/e87n-package/scripts/"
+cp -a "$ROOT_DIR/packaging" "$ARMBIAN_DIR/userpatches/overlay/e87n-package/"
+cp -a "$ROOT_DIR/board-support" "$ARMBIAN_DIR/userpatches/overlay/e87n-package/"
 
 cd "$ARMBIAN_DIR"
 ARGS=(
@@ -52,6 +60,8 @@ ARGS=(
 	RELEASE=trixie
 	BUILD_DESKTOP=no
 	BUILD_MINIMAL=yes
+	TZDATA=Asia/Shanghai
+	DEST_LANG=zh_CN.UTF-8
 	# Official Filogic packages do not carry this experimental E87N port.
 	BSPFREEZE=yes
 	KERNEL_BTF=no

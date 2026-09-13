@@ -19,8 +19,8 @@ the integer refresh interval 2..60. Its missing-file defaults are enabled=true,
 brightness_percent=20, screen=overview, refresh_seconds=2.
 Invalid configuration and I/O errors are fatal (stderr, status 1); systemd
 should use Restart=on-failure to reopen/revalidate the device after failure.
-The hardware/control service owns brightness and fan policy: this module
-NEVER writes backlight, fan or sysfs files.
+The control service owns brightness; the kernel alone controls the fan.
+This module NEVER writes backlight, fan or sysfs files.
 Disabling skips drawing; physical blanking is the control service's job.
 An offline host may supply --preview-font-dir containing DejaVuSans.ttf and
 DejaVuSans-Bold.ttf. This override is unavailable in daemon mode.
@@ -34,6 +34,7 @@ import ctypes
 from dataclasses import dataclass
 import fcntl
 from functools import lru_cache, partial
+import ipaddress
 import math
 import os
 from pathlib import Path
@@ -308,6 +309,56 @@ def _items(snapshot, key):
     return [item for item in value if isinstance(item, Mapping)] if isinstance(value, (list, tuple)) else []
 
 
+def _overview_address(snapshot):
+    """Prefer carrier-up interfaces, then primary IPv4, then global IPv6.
+
+    Link-local addresses are a last resort, with their interface shown above.
+    This is an assigned address, not a claim about routing/Internet access.
+    """
+    candidates = []
+    for index, item in enumerate(_items(snapshot, "network")[:32]):
+        carrier = item.get("carrier")
+        if type(carrier) in (bool, int) and carrier == 0:
+            continue
+        ipv6 = item.get("ipv6")
+        values = [(item.get("ipv4"), 4)]
+        if isinstance(ipv6, (list, tuple)):
+            values.extend((value, 6) for value in ipv6[:8])
+        for value, version in values:
+            if not isinstance(value, str) or len(value) > 39:
+                continue
+            try:
+                address = ipaddress.ip_address(value)
+            except ValueError:
+                continue
+            if (address.version != version or address.is_loopback or address.is_multicast
+                    or address.is_unspecified or "%" in value):
+                continue
+            up = type(carrier) in (bool, int) and carrier == 1
+            kind = (2 if address.is_link_local else 0) + (version == 6)
+            candidates.append((not up, kind, index, str(address), _safe_text(item.get("name"))))
+    if candidates and min(candidates)[1] < 2:
+        *_, address, name = min(candidates)
+        return name, address
+    # fib_trie supplies real local IPv4 even under AF_UNIX-only systemd
+    # restrictions. It cannot tell us the interface, so label it honestly.
+    local = snapshot.get("local_ipv4")
+    if isinstance(local, (list, tuple)):
+        for value in local[:32]:
+            if not isinstance(value, str) or len(value) > 15:
+                continue
+            try:
+                address = ipaddress.IPv4Address(value)
+            except ValueError:
+                continue
+            if not (address.is_loopback or address.is_unspecified or address.is_multicast):
+                return "LOCAL IPv4", str(address)
+    if candidates:
+        *_, address, name = min(candidates)
+        return name, address
+    return "NO IP", "--"
+
+
 @lru_cache(maxsize=32)
 def _font(size, bold=False, font_directory=None):
     name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
@@ -333,7 +384,8 @@ def _text(draw, xy, text, size=16, color=FOREGROUND, width=None, bold=False, fon
 def render(snapshot, screen="overview", *, font_directory=None):
     """Pure 428x142 RGB renderer: snapshot data + packaged fonts only.
 
-    Temperatures are millidegrees C; memory KiB; network counters cumulative
+    CPU usage is a sampled percentage, not load average. IPs are assigned local
+    addresses. Temperatures are millidegrees C; memory KiB; network counters cumulative
     bytes, NOT rates. Fan state, raw PWM (0..255) and actual RPM stay distinct.
     Missing/invalid readings render as '--', including absent tachometer RPM.
     """
@@ -349,32 +401,51 @@ def render(snapshot, screen="overview", *, font_directory=None):
     text(draw, (10, 7), titles[screen], 15, ACCENT, width=315, bold=True)
     items = _items(snapshot, screen) if screen in ("network", "storage") else []
     tag = "+{} more".format(len(items) - 3) if len(items) > 3 else "E87N"
-    text(draw, (340, 8), tag, 12, MUTED, width=78)
+    if screen == "overview":
+        interface, address = _overview_address(snapshot)
+        text(draw, (292, 8), interface, 13, MUTED, width=126)
+    else:
+        text(draw, (340, 8), tag, 12, MUTED, width=78)
     draw.line((10, 28, 417, 28), fill="#344354")
     fan = snapshot.get("fan")
     fan = fan if isinstance(fan, Mapping) else {}
 
     if screen == "overview":
+        # Keep the complete address visible, including IPv6, without ellipsis.
+        address = "IP  " + address
+        size = 24
+        while size > 14 and draw.textbbox((0, 0), address, font=_font(size, True, font_directory))[2] > 408:
+            size -= 1
+        text(draw, (10, 36), address, size, ACCENT, bold=True)
         total, available = snapshot.get("mem_total_kib"), snapshot.get("mem_available_kib")
-        memory = "--"
+        memory, memory_detail = "--", "RAM --"
         if _nonnegative(total) and total > 0 and _nonnegative(available) and available <= total:
             memory = "{:.0f}%".format((total - available) * 100 / total)
+            memory_detail = "RAM " + _bytes((total - available) * 1024) + " / " + _bytes(total * 1024)
+        usage = snapshot.get("cpu_usage_percent")
+        usage = "{:.0f}%".format(usage) if _nonnegative(usage) and usage <= 100 else "--"
+        rpm = fan.get("rpm")
+        rpm = _integer(rpm) if type(rpm) is int and 0 <= rpm <= 200000 else "--"
         for x, label, value in (
-            (10, "CPU", _temperature(snapshot.get("cpu_temp_mc"))),
-            (152, "PHY", _temperature(snapshot.get("phy_temp_mc"))),
-            (294, "MEM USED", memory),
+            (10, "CPU USED", usage),
+            (114, "RAM USED", memory),
+            (218, "CPU TEMP", _temperature(snapshot.get("cpu_temp_mc"))),
+            (322, "FAN RPM", rpm),
         ):
-            text(draw, (x, 38), label, 13, MUTED)
-            text(draw, (x, 57), value, 25, width=125, bold=True)
-        load = snapshot.get("loadavg")
-        load = load[0] if isinstance(load, (list, tuple)) and load else None
-        for x, label, value in (
-            (10, "LOAD 1m", "{:.2f}".format(load) if _nonnegative(load) else "--"),
-            (152, "FAN RPM", _integer(fan.get("rpm"))),
-            (294, "UPTIME", _uptime(snapshot.get("uptime_seconds"))),
-        ):
-            text(draw, (x, 97), label, 12, MUTED)
-            text(draw, (x, 116), value, 17, width=124)
+            text(draw, (x, 72), label, 13, MUTED)
+            value_size = 24
+            while value_size > 18 and draw.textbbox(
+                    (0, 0), value, font=_font(value_size, True, font_directory))[2] > 96:
+                value_size -= 1
+            text(draw, (x, 92), value, value_size, width=96, bold=True)
+        pwm, state, maximum = fan.get("pwm"), fan.get("state"), fan.get("max_state")
+        fan_detail = "PWM --"
+        if type(pwm) is int and 0 <= pwm <= 255:
+            fan_detail = "PWM {}/255".format(pwm)
+        elif type(state) is int and type(maximum) is int and 0 <= state <= maximum <= 255:
+            fan_detail = "LEVEL {}/{}".format(state, maximum)
+        text(draw, (10, 123), memory_detail, 12, MUTED, width=264)
+        text(draw, (282, 123), fan_detail, 12, MUTED, width=136)
     elif screen == "thermal":
         for x, label, value in (
             (10, "CPU", snapshot.get("cpu_temp_mc")),
@@ -416,12 +487,13 @@ def render(snapshot, screen="overview", *, font_directory=None):
 def preview_snapshot():
     """Deterministic sample data, explicitly not measurements of a live board."""
     return {
-        "cpu_temp_mc": 58750, "phy_temp_mc": 43250,
+        "cpu_usage_percent": 24.0, "cpu_temp_mc": 58750, "phy_temp_mc": 43250,
         "fan": {"state": 2, "max_state": 3, "pwm": 192, "rpm": None, "policy": "kernel"},
         "loadavg": [0.42, 0.31, 0.28], "mem_total_kib": 1048576,
         "mem_available_kib": 655360, "uptime_seconds": 183845.0,
         "network": [
-            {"name": "eth0", "rx_bytes": 34123456789, "tx_bytes": 8123456789, "carrier": True},
+            {"name": "end0", "ipv4": "192.0.2.87", "ipv6": ["2001:db8::87"],
+             "rx_bytes": 34123456789, "tx_bytes": 8123456789, "carrier": True},
             {"name": "eth1", "rx_bytes": 1234567890, "tx_bytes": 345678901, "carrier": False},
             {"name": "br-lan", "rx_bytes": None, "tx_bytes": None, "carrier": None},
         ],

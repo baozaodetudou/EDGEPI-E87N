@@ -19,6 +19,9 @@ SERIALCON="ttyS0:115200"
 HAS_VIDEO_OUTPUT="no"
 # Armbian supplies root=UUID=... when it completes extlinux.conf.
 SRC_CMDLINE="console=ttyS0,115200n8 earlycon=uart8250,mmio32,0x11000000 rootwait rootfstype=ext4"
+# Opt in with ./build.sh E87N_EXTRA_STORAGE=yes; see docs/OPTIONAL-STORAGE.md.
+# Only an unset option defaults to no; empty/unknown values are errors.
+E87N_EXTRA_STORAGE="${E87N_EXTRA_STORAGE-no}"
 
 function add_host_dependencies__edgepi_e87n_image_validation() {
 	# Supplies host-side lsinitramfs for the final read-only image audit.
@@ -36,6 +39,14 @@ function post_family_config__edgepi_e87n_existing_uboot() {
 }
 
 function custom_kernel_config__edgepi_e87n_first_boot() {
+	# Validate before changing any requests (including during artifact hashing).
+	case "${E87N_EXTRA_STORAGE-no}" in
+		yes|no) ;;
+		*)
+			exit_with_error 'E87N_EXTRA_STORAGE must be yes or no' "${E87N_EXTRA_STORAGE}"
+			return 1
+			;;
+	esac
 	# Armbian applies opts_m after opts_y. Keep boot/thermal drivers built-in.
 	# Only mutate the hook arrays: Armbian also calls this before .config exists.
 	local option
@@ -78,4 +89,47 @@ function custom_kernel_config__edgepi_e87n_first_boot() {
 	# Upstream 6.18 uses the mediatek/ PHY subdirectory and the 2P5GE symbol.
 	# Firmware is installed in rootfs; keep the matching PHY driver modular.
 	opts_m+=("MEDIATEK_2P5GE_PHY")
+
+	# Linux 6.18: optional data-volume targets, not a new rootfs path.
+	local -a storage_y=() storage_m=()
+	local -a storage_drivers=(
+		BLK_DEV_DM DM_CRYPT DM_SNAPSHOT DM_THIN_PROVISIONING
+		DM_MIRROR DM_ZERO DM_MULTIPATH BLK_DEV_MD
+		MD_LINEAR MD_RAID0 MD_RAID1 MD_RAID10 MD_RAID456
+	)
+	local -a storage_n=(MD_AUTODETECT DM_INIT)
+	if [[ "${E87N_EXTRA_STORAGE-no}" == yes ]]; then
+		# Preserve generic crypto built-ins; add LUKS/legacy-volume modes
+		# and the explicit XFRM userspace/interface requests only on opt-in.
+		storage_y=(
+			MODULES BLOCK MD NET INET IPV6 XFRM CRYPTO DM_UEVENT
+			CRYPTO_AES CRYPTO_CBC CRYPTO_HMAC CRYPTO_SHA256 CRYPTO_SHA512
+		)
+		storage_m=("${storage_drivers[@]}" CRYPTO_XTS CRYPTO_ESSIV XFRM_USER XFRM_INTERFACE)
+	else
+		# Override enabled seed/family requests too: merely omitting opts_m
+		# would leave unwanted DM/RAID drivers in the final kernel config.
+		storage_n+=(MD DM_UEVENT "${storage_drivers[@]}" XFRM_INTERFACE)
+		# Keep inherited networking and crypto (including XFRM_USER, XTS,
+		# ESSIV and WireGuard). This switch does not prune the entire base.
+	fi
+	local storage_options=" ${storage_y[*]} ${storage_m[*]} ${storage_n[*]} "
+	local -a remaining_disabled=()
+	remaining_builtin=()
+	remaining_modules=()
+	# Normalize all three inherited arrays (including CONFIG_ aliases) so
+	# repeated hooks have one unambiguous request per storage/VPN option.
+	for option in "${opts_y[@]}"; do
+		[[ "$storage_options" == *" ${option#CONFIG_} "* ]] || remaining_builtin+=("$option")
+	done
+	for option in "${opts_m[@]}"; do
+		[[ "$storage_options" == *" ${option#CONFIG_} "* ]] || remaining_modules+=("$option")
+	done
+	for option in "${opts_n[@]}"; do
+		[[ "$storage_options" == *" ${option#CONFIG_} "* ]] || remaining_disabled+=("$option")
+	done
+	opts_y=("${remaining_builtin[@]}" "${storage_y[@]}")
+	opts_m=("${remaining_modules[@]}" "${storage_m[@]}")
+	# No kernel RAID autodetection or command-line DM device creation.
+	opts_n=("${remaining_disabled[@]}" "${storage_n[@]}")
 }

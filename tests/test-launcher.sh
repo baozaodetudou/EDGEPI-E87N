@@ -7,10 +7,13 @@ mkdir -p "$test_dir/source/armbian-build/.git" "$test_dir/source/armbian-build/u
 cp "$repo_dir/build.sh" "$repo_dir/build-armbian.sh" "$test_dir/"
 mkdir -p "$test_dir/scripts" "$test_dir/patches"
 cp "$repo_dir/scripts/prepare-framework.sh" "$test_dir/scripts/"
+cp "$repo_dir/scripts/build-display-deb.sh" "$test_dir/scripts/"
+cp -a "$repo_dir/packaging" "$test_dir/packaging"
 cp -a "$repo_dir/patches/armbian-build" "$test_dir/patches/"
 cp -a "$repo_dir/userpatches" "$test_dir/userpatches"
 cp -a "$repo_dir/firmware" "$test_dir/firmware"
 cp -a "$repo_dir/board-support" "$test_dir/board-support"
+cp -a "$repo_dir/docs" "$test_dir/docs"
 cp "$repo_dir/README.md" "$test_dir/source/armbian-build/userpatches/local-marker"
 
 # Exported shell functions mock the external runtime; no Docker/git changes.
@@ -45,6 +48,8 @@ grep -qx kernel "$test_dir/docker-args"
 grep -qx TEST_MARKER=passed "$test_dir/docker-args"
 grep -qx RELEASE=trixie "$test_dir/docker-args"
 grep -qx BSPFREEZE=yes "$test_dir/docker-args"
+grep -qx TZDATA=Asia/Shanghai "$test_dir/docker-args"
+grep -qx DEST_LANG=zh_CN.UTF-8 "$test_dir/docker-args"
 if grep -qx RELEASE=bookworm "$test_dir/docker-args"; then
 	printf 'FAIL: launcher still defaults to Debian 12\n' >&2
 	exit 1

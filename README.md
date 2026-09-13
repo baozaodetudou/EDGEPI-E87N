@@ -4,33 +4,39 @@
 
 **这是 Debian 系统，不是 OpenWrt 固件，也不是官方 Armbian 支持板卡。** OpenWrt/E87N 源码仅作为板级驱动、设备树和硬件接口参考；目标用户空间不包含 LuCI、UCI、procd 或原厂 musl 显示程序。
 
-> 完整镜像构建、离线测试和真实镜像静态检查已通过，**尚未在 E87N 上完成启动或硬件验收**。不要通过 LuCI 上传本镜像，不要直接整盘覆盖原 eMMC。跳过 U-Boot 构建不等于保留原盘启动数据。
+> 当前源码采用[最小系统默认配置](docs/DEFAULTS.md)，已有 VM 用户空间副本集成结果，新完整镜像构建与产物验证仍待记录。旧候选的成功记录不适用于新配置；**尚未在 E87N 上完成启动或硬件验收**。不要通过 LuCI 上传，不要直接整盘覆盖原 eMMC。跳过 U-Boot 构建不等于保留原盘启动数据。
 
 ## 从这里开始
 
+- [最小系统默认配置](docs/DEFAULTS.md)：`root` / `doumao`、SSH 22、DHCP、上海时区与中文 UTF-8；默认值以此为准。
+- [系统范围与验证状态](docs/SYSTEM-READINESS.md)：最小配置、实际验证状态和硬件证据缺口。
+- [只读诊断](docs/DIAGNOSTICS.md)与[网口稳定身份](docs/NETWORKING.md)。
 - [获取镜像与校验](docs/DOWNLOADS.md)：本仓库只提交源码和文档，镜像尚未发布为 GitHub Release 附件。
 - [构建指南](docs/BUILDING.md)：Linux、macOS/Docker、Lima 说明及版本固定方式。
 - [测试与验收](docs/TESTING.md)：区分代码夹具、镜像静态检查和实机测试。
 - [屏幕与风扇使用](docs/display-fan.md)：亮度、页面、开关、配置及服务。
+- [小屏独立软件包](docs/DISPLAY-PACKAGE.md)、[云端构建](docs/GITHUB-ACTIONS.md)与[可选存储模块](docs/OPTIONAL-STORAGE.md)。
 - [首启与刷写边界](docs/first-boot.md)：U-Boot 能力、备份、测试介质、账户与 SSH 风险。
-- [2026-09-13 候选构建记录](docs/candidate-display-fan-20260913.md)：实际版本、SHA-256、验证结果及未完成项目。
+- [2026-09-13 历史屏幕/风扇候选记录](docs/candidate-display-fan-20260913.md)：仅对应当次旧配置的版本、SHA-256 与验证结果。
 
 ## 功能与边界
 
 | 功能 | 当前实现 | 实机状态 |
 | --- | --- | --- |
-| 系统 | Debian 13 最小命令行；已生成候选实际为 13.6 | 待首启 |
-| 内核 | 固定 Linux 6.18.51，13 个 E87N 移植补丁 | 待首启 |
-| 小屏 | NV3007、428×142 RGB565、四页状态界面 | 待验证颜色、方向及显示 |
+| 系统 | Debian 13 Trixie 最小命令行；`Asia/Shanghai`、`zh_CN.UTF-8`；正常使用 APT | 新配置待构建验证与首启 |
+| 内核 | 固定 Linux 6.18.51，14 个 E87N 移植补丁 | 待首启 |
+| 小屏 | 预装独立、版本化 `e87n-display` Debian 包；NV3007、428×142 RGB565、四页状态界面 | 待验证颜色、方向及显示 |
 | 背光 | 0–100% 亮度、开关、持久化；默认 20% | 待验证实际亮度和关闭 |
 | 风扇 | 内核独占自动温控；温度、PWM 和冷却档位读取 | 待验证起转和散热 |
 | 有线网络与存储 | MT7987 PHY 固件；MMC、USB-root、PCIe 等移植 | 网口/eMMC/USB/NVMe 待测 |
+| 额外存储 | `E87N_EXTRA_STORAGE=no`；DM/LUKS/LVM/RAID 等额外模块按需构建，管理工具按需安装 | 不自动部署数据盘；使用前单独验收 |
+| 登录与诊断 | `root` / `doumao`，SSH 22 密码登录；首次 SSH 前生成独立 host keys；`e87nctl doctor` | 登录、密钥生成与完整启动待测 |
 
 四个页面为 `overview`、`thermal`、`network`、`storage`，默认每 2 秒刷新。没有真实测速反馈就显示 `--`，不会把 PWM 百分比当作 RPM。
 
 风扇使用四级 PWM `0/128/192/255`，50/65/75℃触发档位 1/2/3，迟滞 2℃。这些是软件策略，不是芯片额定温度或异常情况下的安全保证。显示服务不会写风扇节点，关屏不停止内核自动温控；当前不提供任意手动停扇或原 LuCI 网页。
 
-以下限制仍然存在：CPU DVFS/CPU cooling 禁用；MT7987 WED 不支持；原固定 MAC 未恢复，可能使用不持久的随机地址；RAM fixup、原 U-Boot 加载能力及断电重启未经上板确认。完整编译不能证明全部驱动正常。
+以下限制仍然存在：CPU DVFS/CPU cooling 禁用；MT7987 WED 不支持；factory MAC 未恢复；GMAC 别名供 systemd 持久地址策略使用，但跨重启仍待测。DTS 默认内存仍为 256 MiB，原 OpenWrt 记录的这台设备为 1 GiB；新系统的 RAM fixup、原 U-Boot 加载能力及断电重启未经上板确认。完整编译不能证明全部驱动正常。
 
 ## 快速构建
 
@@ -58,29 +64,39 @@ Debian 包仍从签名软件源更新，容器工具链也不是完整快照，�
 
 ## 登录新 Armbian 后
 
-仅在新系统已经成功启动后使用：
+仅在按当前最小配置构建的新系统已经成功启动后使用；先从路由器 DHCP 租约或小屏读取实际 IP：
 
 ```sh
+ssh root@<设备IP>
+passwd
+apt update
+apt install --no-install-recommends curl
+e87nctl doctor
 e87nctl status
 e87nctl fan status
-sudo e87nctl display brightness 20
-sudo e87nctl display screen thermal
-sudo e87nctl display off
-sudo e87nctl display on
+e87nctl display config
+e87nctl display brightness 20
+e87nctl display screen thermal
+e87nctl display refresh 2
+e87nctl display off
+e87nctl display on
 ```
 
-配置位于 `/etc/e87n/display.json`，显示服务是 `e87n-display.service`。此镜像是 Debian 主机，不预设原厂 LAN/WAN、NAT、固定管理地址或路由防火墙策略。
+密码为 `doumao`；它是公开默认值，首次仅接可信内网，登录后用 `passwd` 改密。没有首次创建用户向导或强制公钥门槛；串口需要正常认证。两个有线网口通过 networkd/netplan 请求 DHCP，没有固定管理地址或预设 LAN/WAN、NAT、路由防火墙策略。
 
-**隔离首启并立即改密。** 当前候选沿用已记录的默认 `root/1234`、串口自动登录和初始共享 SSH host key 风险；先改密，确认主机密钥再生和唯一指纹后，再开放网络。不要以登录向导替代安全配置。详见 [首启指南](docs/first-boot.md)。
+显示配置位于 `/etc/e87n/display.json`，服务为 `e87n-display.service`；默认总览、20% 亮度、每 2 秒刷新。`display config` 只读查看配置，`display refresh` 接受整数 2–60 秒。小屏包可独立升级，见[软件包说明](docs/DISPLAY-PACKAGE.md)。最小系统不预装桌面、Web 后台、Docker、LuCI 或 RAID/LVM 管理套件。
+
+**先确认文件所属配置。** 历史屏幕/风扇候选仍有旧默认口令、串口自动登录和构建时 SSH host keys 风险，详见[历史记录](docs/candidate-display-fan-20260913.md)；仓库更新不会修改这些旧文件。
 
 ## 仓库结构
 
 ```text
 build.sh / build-armbian.sh     Armbian 构建入口
 build-lima.sh                   已有 Lima VM 的受限状态/构建/导出工具
-board-support/                 Debian 原生小屏、背光 CLI、systemd 服务
+board-support/                 Debian 小屏、诊断、镜像默认配置与 systemd 服务
+packaging/e87n-display/         独立版本化显示包与维护脚本
 userpatches/config/            板卡、family 和内核配置
-userpatches/kernel/edgepi-e87n-6.18/  当前 13 个内核补丁
+userpatches/kernel/edgepi-e87n-6.18/  当前 14 个内核补丁
 patches/armbian-build/          固定框架的主机兼容修补
 firmware/                      有独立许可的 MT7987 PHY 微码
 scripts/                       补丁、内核包、镜像和实机证据检查工具
@@ -88,7 +104,7 @@ tests/                         代码夹具和模拟回归测试
 docs/                          构建、使用、验收及历史记录
 ```
 
-`output/`、`source/`、镜像、内核包、构建日志、设备参考件和本地凭证不进入 Git。保留的 `edgepi-e87n-6.12/` 仅用于历史对照，不是当前默认配置。当前没有配置 GitHub Actions 自动构建或自动发布镜像。
+`output/`、`source/`、镜像、内核包、构建日志、设备参考件和本地凭证不进入 Git。保留的 `edgepi-e87n-6.12/` 仅用于历史对照，不是当前默认配置。[GitHub Actions 构建入口](docs/GITHUB-ACTIONS.md)的存在不代表已有成功运行；应从成功 run 获取并校验 artifacts，不能将其当作已发布的 Release。本次文档更新没有可报告的新配置成功 run 或 Release 镜像。
 
 ## 来源、许可与反馈
 

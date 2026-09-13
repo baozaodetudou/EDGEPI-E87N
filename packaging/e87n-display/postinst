@@ -1,0 +1,32 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+	configure)
+		# Only removes masks owned by the helper, never an administrator's mask.
+		deb-systemd-helper unmask e87n-display.service
+		if deb-systemd-helper --quiet was-enabled e87n-display.service; then
+			deb-systemd-helper enable e87n-display.service
+		else
+			deb-systemd-helper update-state e87n-display.service
+		fi
+		;;
+esac
+
+case "$1" in
+	configure|abort-upgrade|abort-remove|abort-deconfigure)
+		# DPKG_ROOT is nonempty for dpkg --root --force-script-chrootless.
+		# Ordinary image chroots have no running systemd. Even with /run mounted,
+		# deb-systemd-invoke consults the image's policy-rc.d before activation.
+		if [ -z "${DPKG_ROOT:-}" ] && [ -d /run/systemd/system ]; then
+			systemctl --system daemon-reload || true
+			action=start
+			if [ "$1" != configure ] || [ -n "${2:-}" ]; then
+				action=restart
+			fi
+			# A display/hardware failure must not leave dpkg half-configured.
+			deb-systemd-invoke "$action" e87n-display.service || true
+		fi
+		;;
+esac
+exit 0

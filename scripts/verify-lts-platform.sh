@@ -32,6 +32,16 @@ REQUIRED_Y = """ARM64 ARCH_MEDIATEK OF PINCTRL_MT7987 COMMON_CLK_MT7987
 THERMAL THERMAL_OF MTK_THERMAL MTK_LVTS_THERMAL THERMAL_GOV_STEP_WISE
 THERMAL_DEFAULT_GOV_STEP_WISE PWM PWM_MEDIATEK HWMON SENSORS_PWM_FAN
 NVMEM NVMEM_MTK_EFUSE""".split()
+# Opt-in contract for rebuilt images; legacy releases remain auditable without
+# this flag. Names/select dependencies checked against the 6.18.51 headers'
+# drivers/md/Kconfig, drivers/md/persistent-data/Kconfig and net/xfrm/Kconfig.
+STORAGE_Y = "MODULES BLOCK MD NET INET IPV6 XFRM CRYPTO DM_UEVENT".split()
+STORAGE_M = """BLK_DEV_DM DM_CRYPT DM_SNAPSHOT DM_THIN_PROVISIONING
+DM_MIRROR DM_ZERO DM_MULTIPATH BLK_DEV_MD MD_LINEAR MD_RAID0 MD_RAID1
+MD_RAID10 MD_RAID456 XFRM_USER XFRM_INTERFACE""".split()
+STORAGE_ENABLED = """CRYPTO_AES CRYPTO_CBC CRYPTO_XTS CRYPTO_ESSIV CRYPTO_HMAC
+CRYPTO_SHA256 CRYPTO_SHA512 CRC32 DM_BUFIO DM_BIO_PRISON DM_PERSISTENT_DATA
+RAID6_PQ ASYNC_MEMCPY ASYNC_XOR ASYNC_PQ ASYNC_RAID6_RECOV""".split()
 
 
 class Invalid(Exception):
@@ -54,7 +64,7 @@ def read_input(path, limit):
     return path.read_bytes()
 
 
-def check_config(data):
+def check_config(data, require_storage=False):
     text = data.decode("utf-8")
     versions = re.findall(r"^# Linux/arm64 (\S+) Kernel Configuration$", text, re.M)
     require(len(versions) == 1 and
@@ -77,6 +87,18 @@ def check_config(data):
     # Kconfig may omit CPU_THERMAL entirely when its CPU_FREQ dependency is off.
     require(options.get("CPU_THERMAL", "n") == "n", "CONFIG_CPU_THERMAL must be disabled")
     ok("config %s: thermal/PWM/efuse built-in; CPU_FREQ/CPU_THERMAL disabled" % versions[0])
+    if require_storage:
+        for key in STORAGE_Y:
+            require(options.get(key) == "y", "CONFIG_%s must be built-in (=y)" % key)
+        for key in STORAGE_M:
+            require(options.get(key) == "m", "CONFIG_%s must be modular (=m)" % key)
+        for key in STORAGE_ENABLED:
+            require(options.get(key) in ("y", "m"), "CONFIG_%s must be enabled (=y or =m)" % key)
+        # These hidden bools can disappear when their built-in-only parents
+        # are modular. An absent symbol is disabled, not a missing feature.
+        for key in ("MD_AUTODETECT", "DM_INIT"):
+            require(options.get(key, "n") == "n", "CONFIG_%s must be disabled" % key)
+        ok("storage: MD enabled; DM/RAID/XFRM targets modular; crypto and selected dependencies enabled; MD_AUTODETECT/DM_INIT disabled")
 
 
 class Fdt:
@@ -296,13 +318,15 @@ def main():
     parser = argparse.ArgumentParser(prog="verify-lts-platform.sh", description="Read-only E87N Linux 6.18 DTB/config platform policy checks; no mounts or target execution.")
     parser.add_argument("--dtb", type=Path, required=True, help="final mt7987a-edgepi-e87n.dtb")
     parser.add_argument("--config", type=Path, required=True, help="final kernel .config or installed config file")
+    parser.add_argument("--require-storage", action="store_true",
+                        help="require modular DM/RAID/XFRM, crypto dependencies and disabled early assembly (new builds)")
     args = parser.parse_args()
     tool = shutil.which("fdtget")
     require(tool is not None, "host fdtget is required (device-tree-compiler package)")
     dtb_path, config_path = args.dtb.resolve(strict=True), args.config.resolve(strict=True)
     dtb = read_input(dtb_path, 16 * 1024 * 1024)
     config = read_input(config_path, 2 * 1024 * 1024)
-    check_config(config)
+    check_config(config, require_storage=args.require_storage)
     check_dtb(Fdt(tool, dtb_path))
     require(dtb_path.read_bytes() == dtb and config_path.read_bytes() == config,
             "input changed during verification; retry with stable artifacts")

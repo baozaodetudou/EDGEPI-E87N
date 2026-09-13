@@ -14,30 +14,48 @@ def _percent(value):
     return int(value)
 
 
+def _refresh(value):
+    if not re.fullmatch(r"[0-9]{1,2}", value) or not 2 <= int(value) <= 60:
+        raise argparse.ArgumentTypeError("SECONDS must be an integer in 2..60")
+    return int(value)
+
+
 def _parser():
     parser = argparse.ArgumentParser(prog="python3 -m e87n")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("status", help="read hardware status as JSON")
+    commands.add_parser("doctor", help="read-only system readiness report; not hardware validation")
     fan = commands.add_parser("fan", help="read-only kernel fan status")
     fan.add_subparsers(dest="fan_command", required=True).add_parser("status")
-    display = commands.add_parser("display", help="persist and apply E87N display settings")
+    display = commands.add_parser("display", help="view or change E87N display settings")
     setters = display.add_subparsers(dest="display_command", required=True)
-    setters.add_parser("brightness").add_argument("percent", type=_percent, metavar="PERCENT")
-    setters.add_parser("screen").add_argument("screen", choices=_SCREENS)
-    setters.add_parser("on")
-    setters.add_parser("off")
+    setters.add_parser("config", help="read validated saved/default settings as JSON; no writes")
+    setters.add_parser("brightness", help="save brightness in 0..100 percent").add_argument(
+        "percent", type=_percent, metavar="PERCENT")
+    setters.add_parser("screen", help="save the active screen").add_argument("screen", choices=_SCREENS)
+    setters.add_parser("refresh", help="save refresh interval in seconds (2..60)").add_argument(
+        "seconds", type=_refresh, metavar="SECONDS")
+    setters.add_parser("on", help="enable display using saved brightness")
+    setters.add_parser("off", help="disable display, preserving brightness and screen")
     setters.add_parser("apply", help="apply saved/default settings once (systemd ExecStartPre)")
     return parser
 
 
 def _main(argv=None, *, _hardware=None):
     args = _parser().parse_args(argv)
+    if args.command == "doctor":
+        from .doctor import doctor
+        result = doctor()
+        print(json.dumps(result, sort_keys=True, allow_nan=False))
+        return result["exit_code"]
     hardware = _Hardware() if _hardware is None else _hardware
     try:
         if args.command == "status":
             result = hardware.snapshot()
         elif args.command == "fan":
             result = hardware.snapshot()["fan"]
+        elif args.display_command == "config":
+            result = hardware.load_display_config()
         else:
             command = args.display_command
             changes = None
@@ -45,6 +63,8 @@ def _main(argv=None, *, _hardware=None):
                 changes = {"brightness_percent": args.percent}
             elif command == "screen":
                 changes = {"screen": args.screen}
+            elif command == "refresh":
+                changes = {"refresh_seconds": args.seconds}
             elif command in ("on", "off"):
                 changes = {"enabled": command == "on"}
             result = hardware.display(changes)

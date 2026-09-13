@@ -1,0 +1,28 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+	remove)
+		# Retain enablement state for reinstall; purge is the only reset.
+		if command -v deb-systemd-helper >/dev/null 2>&1; then
+			deb-systemd-helper mask e87n-display.service
+		fi
+		;;
+	purge)
+		# Dependencies may already be absent by postrm time.
+		if command -v deb-systemd-helper >/dev/null 2>&1; then
+			deb-systemd-helper purge e87n-display.service
+			deb-systemd-helper unmask e87n-display.service
+		fi
+		;;
+esac
+case "$1" in
+	remove|purge|disappear)
+		if [ -z "${DPKG_ROOT:-}" ] && [ -d /run/systemd/system ] \
+			&& command -v systemctl >/dev/null 2>&1; then
+			systemctl --system daemon-reload || true
+		fi
+		;;
+esac
+# dpkg alone owns conffile removal. Do not remove /etc/e87n or other board data.
+exit 0

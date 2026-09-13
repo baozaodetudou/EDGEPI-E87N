@@ -1,0 +1,174 @@
+name: E87N Debian 13 candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_version:
+        description: Reviewed kernel pin (upgrades require source changes)
+        type: choice
+        options: ['6.18.51']
+        default: '6.18.51'
+        required: true
+  push:
+    branches: [main]
+    paths:
+      - '.github/**'
+      - 'build.sh'
+      - 'build-armbian.sh'
+      - 'scripts/**'
+      - 'tests/**'
+      - 'packaging/**'
+      - 'board-support/**'
+      - 'userpatches/**'
+      - 'patches/armbian-build/**'
+      - 'firmware/**'
+      - 'docs/**'
+      - 'LICENSE'
+      - 'NOTICE.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e87n-candidate-${{ github.workflow }}-${{ github.ref }}
+  # Let the current image finish and upload its evidence.
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  GIT_TERMINAL_PROMPT: '0'
+  DEBIAN_FRONTEND: noninteractive
+  E87N_KERNEL_VERSION: ${{ inputs.kernel_version || '6.18.51' }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          clean: false
+      - name: Install validation tools
+        run: |
+          sudo -n apt-get update
+          sudo -n apt-get install -y --no-install-recommends \
+            shellcheck python3-yaml python3-pil fonts-dejavu-core device-tree-compiler \
+            patch zstd xz-utils dpkg-dev init-system-helpers python3-minimal libcrypt1
+          GOBIN="$RUNNER_TEMP/e87n-tools" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          echo "$RUNNER_TEMP/e87n-tools" >> "$GITHUB_PATH"
+      - name: Validate workflow and CI helpers without building
+        run: |
+          mkdir -p output/ci/logs
+          bash scripts/ci-validate.sh 2>&1 | tee output/ci/logs/validation.log
+      - name: Run userspace, auditor and isolated package regressions
+        timeout-minutes: 10
+        run: bash scripts/ci-regressions.sh
+      - name: Upload validation log
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e87n-validation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/ci/logs/
+          if-no-files-found: warn
+          retention-days: 14
+
+  display:
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          clean: false
+      - name: Prepare package tools
+        run: |
+          mkdir -p output/ci/logs
+          sudo -n apt-get update
+          sudo -n apt-get install -y --no-install-recommends dpkg-dev xz-utils
+      - name: Build versioned e87n-display package
+        id: build
+        timeout-minutes: 10
+        run: bash scripts/ci-build.sh display
+      - name: Collect package, checksums and logs
+        if: ${{ always() }}
+        env:
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+        run: python3 scripts/ci-collect-artifacts.py --kind display --status "$BUILD_OUTCOME"
+      - name: Upload display candidate
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e87n-display-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/ci/artifacts/
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 14
+      - name: Upload package build logs independently
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e87n-display-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/ci/logs/
+          if-no-files-found: warn
+          retention-days: 14
+
+  image:
+    needs: validate
+    # Native ARM64 on GitHub's disposable public-repository runner.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 360
+    env:
+      E87N_REPOSITORY_VISIBILITY: ${{ github.event.repository.visibility }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          clean: false
+      - name: Prepare native runner and check disk budget
+        timeout-minutes: 15
+        env:
+          E87N_RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        run: |
+          mkdir -p output/ci/logs
+          bash scripts/ci-prepare-runner.sh 2>&1 | tee output/ci/logs/runner.log
+      - name: Build pinned Trixie minimal image
+        id: build
+        # Reserve time for hashing and uploads below, including build failures.
+        timeout-minutes: 285
+        run: bash scripts/ci-build.sh image
+      - name: Collect images, packages, checksums and build evidence
+        if: ${{ always() }}
+        timeout-minutes: 15
+        env:
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+        run: |
+          sudo -n env \
+            GITHUB_SHA="$GITHUB_SHA" GITHUB_RUN_ID="$GITHUB_RUN_ID" \
+            GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
+            python3 scripts/ci-collect-artifacts.py --kind image --status "$BUILD_OUTCOME"
+      - name: Upload image candidate and packages
+        if: ${{ always() }}
+        timeout-minutes: 25
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e87n-trixie-6.18.51-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/ci/artifacts/
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 14
+      - name: Upload build logs independently
+        if: ${{ always() }}
+        timeout-minutes: 10
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e87n-image-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            output/ci/logs/
+            source/armbian-build/output/logs/
+          if-no-files-found: warn
+          retention-days: 14

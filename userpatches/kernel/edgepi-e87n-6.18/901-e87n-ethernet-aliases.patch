@@ -1,0 +1,26 @@
+From: E87N Armbian port <local>
+Subject: [PATCH] arm64: dts: mediatek: give E87N GMACs stable Ethernet aliases
+
+The MTK driver assigns each netdev its MAC node as dev.of_node. With the
+v257 naming scheme, systemd net_id can use aliases of these per-port nodes
+to produce distinct ID_NET_NAME_ONBOARD values (end0 and end1). The existing
+persistent MAC policy can then use board port identity instead of the
+enumeration-dependent ethN fallback.
+
+Keep net.ifnames=0 in the image's existing boot arguments to retain primary
+interface names. No fixed MAC, extra link policy or runtime writer is added.
+This supplies source-level identity support; board boot validation is pending.
+
+---
+diff --git a/arch/arm64/boot/dts/mediatek/mt7987a-edgepi-e87n.dts b/arch/arm64/boot/dts/mediatek/mt7987a-edgepi-e87n.dts
+--- a/arch/arm64/boot/dts/mediatek/mt7987a-edgepi-e87n.dts
++++ b/arch/arm64/boot/dts/mediatek/mt7987a-edgepi-e87n.dts
+@@ -14,6 +14,8 @@
+ 
+ 	aliases {
+ 		serial0 = &uart0;
++		ethernet0 = &gmac0;
++		ethernet1 = &gmac1;
+ 	};
+ 
+ 	chosen {

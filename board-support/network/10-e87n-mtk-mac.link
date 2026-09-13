@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: MIT-0
+# Optional explicit policy: identical Link settings to the audited 99-default.link.
+# Not a MAC-persistence fix; supplies no missing per-port identity. See audit.
+# Requires a unique, persistent machine-id before udev handles the NICs.
+# Persistent policy preserves kernel permanent MACs when applied successfully.
+# See docs/NETWORKING.md for naming, cloning and initramfs dependencies.
+
+[Match]
+Driver=mtk_soc_eth
+Type=ether
+
+[Link]
+NamePolicy=keep kernel database onboard slot path
+AlternativeNamesPolicy=database onboard slot path mac
+MACAddressPolicy=persistent

@@ -34,6 +34,16 @@ NVMEM NVMEM_MTK_EFUSE""".split()
 CONFIG = "# Linux/arm64 6.18.51 Kernel Configuration\n" + "".join(
     "CONFIG_%s=y\n" % name for name in BUILTIN) + (
     "# CONFIG_CPU_FREQ is not set\n# CONFIG_CPU_THERMAL is not set\n")
+STORAGE_Y = "MODULES BLOCK MD NET INET IPV6 XFRM CRYPTO DM_UEVENT".split()
+STORAGE_M = """BLK_DEV_DM DM_CRYPT DM_SNAPSHOT DM_THIN_PROVISIONING
+DM_MIRROR DM_ZERO DM_MULTIPATH BLK_DEV_MD MD_LINEAR MD_RAID0 MD_RAID1
+MD_RAID10 MD_RAID456 XFRM_USER XFRM_INTERFACE""".split()
+STORAGE_ENABLED = """CRYPTO_AES CRYPTO_CBC CRYPTO_XTS CRYPTO_ESSIV CRYPTO_HMAC
+CRYPTO_SHA256 CRYPTO_SHA512 CRC32 DM_BUFIO DM_BIO_PRISON DM_PERSISTENT_DATA
+RAID6_PQ ASYNC_MEMCPY ASYNC_XOR ASYNC_PQ ASYNC_RAID6_RECOV""".split()
+STORAGE_CONFIG = CONFIG + "".join("CONFIG_%s=y\n" % name for name in STORAGE_Y) + "".join(
+    "CONFIG_%s=m\n" % name for name in STORAGE_M + STORAGE_ENABLED) + (
+    "# CONFIG_MD_AUTODETECT is not set\n# CONFIG_DM_INIT is not set\n")
 DTS = r'''
 /dts-v1/;
 / {
@@ -123,7 +133,7 @@ with tempfile.TemporaryDirectory(prefix="e87n-lts-platform-tests.") as scratch:
     command(["dtc", "-q", "-I", "dts", "-O", "dtb", "-o", str(baseline), str(source)])
 
     def run_case(entry):
-        number, (name, edits, config, error, data) = entry
+        number, (name, edits, config, error, data, storage) = entry
         # Include spaces to exercise quoting; never touch the input real build.
         case = root / ("case %d" % number)
         case.mkdir()
@@ -140,7 +150,8 @@ with tempfile.TemporaryDirectory(prefix="e87n-lts-platform-tests.") as scratch:
                 args = ["fdtput", "-t", mode, str(dtb), node, prop, *map(str, values)]
             command(args)
         before = (dtb.read_bytes(), conf.read_bytes())
-        result = subprocess.run(["bash", str(SCRIPT), "--dtb", str(dtb), "--config", str(conf)],
+        flags = ["--require-storage"] if storage else []
+        result = subprocess.run(["bash", str(SCRIPT), "--dtb", str(dtb), "--config", str(conf), *flags],
                                 capture_output=True, text=True, timeout=120)
         assert (dtb.read_bytes(), conf.read_bytes()) == before, "validator mutated inputs: " + name
         output = result.stdout + result.stderr
@@ -150,8 +161,11 @@ with tempfile.TemporaryDirectory(prefix="e87n-lts-platform-tests.") as scratch:
             assert result.returncode != 0 and "FAIL:" in output and error in output, name + "\n" + output
         return "PASS fixture: " + name
 
-    def check(name, edits=(), config=CONFIG, error=None, data=None):
-        cases.append((name, edits, config, error, data))
+    def check(name, edits=(), config=CONFIG, error=None, data=None, storage=False):
+        cases.append((name, edits, config, error, data, storage))
+
+    def check_storage(name, config=STORAGE_CONFIG, error=None):
+        check(name, config=config, error=error, storage=True)
 
     def cells(node, prop, *values):
         return ("u", node, prop, values)
@@ -249,6 +263,33 @@ with tempfile.TemporaryDirectory(prefix="e87n-lts-platform-tests.") as scratch:
     for symbol in BUILTIN:
         check("modular " + symbol, config=CONFIG.replace("CONFIG_%s=y" % symbol, "CONFIG_%s=m" % symbol), error="CONFIG_" + symbol)
     check("missing efuse symbol", config=CONFIG.replace("CONFIG_NVMEM_MTK_EFUSE=y\n", ""), error="CONFIG_NVMEM_MTK_EFUSE")
+
+    check_storage("valid optional storage profile")
+    check_storage("legacy config rejected only with storage flag", config=CONFIG, error="CONFIG_MODULES")
+    check("storage profile accepted by legacy checker", config=STORAGE_CONFIG)
+    for name in STORAGE_Y + STORAGE_M + STORAGE_ENABLED:
+        value = "y" if name in STORAGE_Y else "m"
+        line = "CONFIG_%s=%s\n" % (name, value)
+        check_storage("missing storage " + name, config=STORAGE_CONFIG.replace(line, ""), error="CONFIG_" + name)
+        check_storage("disabled storage " + name,
+                      config=STORAGE_CONFIG.replace(line, "# CONFIG_%s is not set\n" % name), error="CONFIG_" + name)
+        replacement = "m" if name in STORAGE_Y else "y"
+        # Selected crypto/parity helpers may be promoted to y by other users.
+        error = None if name in STORAGE_ENABLED else "CONFIG_" + name
+        check_storage("changed storage linkage " + name,
+                      config=STORAGE_CONFIG.replace(line, "CONFIG_%s=%s\n" % (name, replacement)), error=error)
+    for name in ("MD_AUTODETECT", "DM_INIT"):
+        line = "# CONFIG_%s is not set\n" % name
+        check_storage("hidden disabled " + name, config=STORAGE_CONFIG.replace(line, ""))
+        for value in ("y", "m"):
+            check_storage("early assembly %s=%s" % (name, value),
+                          config=STORAGE_CONFIG.replace(line, "CONFIG_%s=%s\n" % (name, value)), error="CONFIG_" + name)
+    for name in ("CPU_FREQ", "CPU_THERMAL"):
+        check_storage("storage must not relax " + name,
+                      config=STORAGE_CONFIG.replace("# CONFIG_%s is not set" % name, "CONFIG_%s=y" % name),
+                      error="CONFIG_" + name)
+    check_storage("duplicate storage config", config=STORAGE_CONFIG + "CONFIG_DM_CRYPT=m\n", error="duplicate config symbol")
+    check_storage("malformed storage config", config=STORAGE_CONFIG + "CONFIG_DM_BAD=banana\n", error="malformed config assignment")
 
     # fdtget processes are host-only and each worker has its own fixture files.
     with ThreadPoolExecutor(max_workers=4) as workers:

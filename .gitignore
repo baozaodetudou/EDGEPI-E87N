@@ -15,6 +15,7 @@ __pycache__/
 *.key
 id_rsa*
 id_ed25519*
+e87n-provision.json
 
 # Deliver binary artifacts separately, never as source commits.
 *.img

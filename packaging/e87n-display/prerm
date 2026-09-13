@@ -1,0 +1,19 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+	remove|deconfigure)
+		if [ -z "${DPKG_ROOT:-}" ] && [ -d /run/systemd/system ]; then
+			deb-systemd-invoke stop e87n-display.service || true
+		fi
+		;;
+esac
+# Keep the old process alive during unpack; postinst restarts after upgrade.
+case "$1" in
+	remove|upgrade|deconfigure)
+		if command -v py3clean >/dev/null 2>&1; then
+			py3clean "${DPKG_ROOT:-}/usr/lib/python3/dist-packages/e87n"
+		fi
+		;;
+esac
+exit 0

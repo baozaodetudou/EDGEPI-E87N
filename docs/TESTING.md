@@ -1,6 +1,10 @@
 # 测试与验证 E87N Armbian
 
-2026-09-13 的 **Debian 13.6 Trixie / Linux 6.18.51 屏幕/风扇候选**已完成完整构建、真实镜像只读审计和导出校验，尚未上板启动或测试。已有结果与精确哈希见[候选记录](candidate-display-fan-20260913.md)。本文提供复跑入口，不把命令示例当作新的通过记录。
+当前测试目标是 [DEFAULTS.md](DEFAULTS.md) 中的最小配置；已有可丢弃 rootfs 副本的用户空间集成结果，新内核和完整镜像仍需另行构建验证。诊断、网络与系统静态检查分别使用 `tests/test-doctor.py`、`tests/test-network-policy.py` 和 `tests/test-verify-system.py`；最后一项需要专用 Linux 构建环境的 root 身份来创建临时 root-owned 夹具，不挂载设备。网络测试要求 GNU patch，macOS 可用 `gpatch`，并会打印实际工具版本。
+
+新镜像必须执行 `verify-image.sh --release trixie --require-usb-root --require-display-fan --require-system candidate.img`。`--require-system` 核对 `root` / `doumao` 密码登录配置、首次 SSH 前生成独立身份的服务依赖、无串口自动登录、无旧初始化服务、networkd/netplan DHCP、上海时区、中文 UTF-8、签名 APT 源、预装 `e87n-display` 包和真实 DTB 的 GMAC aliases。它不要求默认安装 RAID/LVM 管理套件，也不自动调用 `verify-lts-platform.sh --require-storage`。这些都是静态检查，不执行镜像程序，也不能证明 SSH 已能登录。
+
+历史上，2026-09-13 的 **Debian 13.6 Trixie / Linux 6.18.51 屏幕/风扇候选**已完成完整构建、真实镜像只读审计和导出校验，尚未上板启动或测试。已有结果与精确哈希见[历史候选记录](candidate-display-fan-20260913.md)。2026-09-13 11:10:49 CST 完成的旧配置 VM 构建也已被当前最小配置取代，不能作为当前测试结果。本文提供复跑入口，不把命令示例当作新的通过记录。
 
 所有仓库命令从根目录执行。测试主机与 E87N 目标板应明确区分：名称中的 `test-hardware.py` 是假硬件夹具测试，不是上板测试程序。
 
@@ -9,9 +13,10 @@
 | 检查 | 输入与范围 | 不能据此认定 |
 | --- | --- | --- |
 | Python / shell fixture 回归 | 临时文件、假 sysfs、模拟设备及进程状态 | 真实内核、镜像或板卡通过 |
-| 框架加载 / 补丁发现与应用 | 固定框架、13 个补丁、指定 Linux 基线；可选实际 DTB 编译 | 完整内核已编译或设备可启动 |
+| 框架加载 / 补丁发现与应用 | 固定框架、14 个补丁、指定 Linux 基线；可选实际 DTB 编译 | 完整内核已编译或设备可启动 |
 | 真实包 / 配置 / DTB 静态检查 | 本轮实际生成的文件 | rootfs、initramfs 或所有硬件正常 |
-| `verify-image.sh` | 完成的 raw 镜像、真实只读 loop/GPT/ext4/UUID/initramfs；可选 USB-root 与显示/风扇检查 | U-Boot 能加载、首启成功或 eMMC 写入安全 |
+| `verify-image.sh` | 完成的 raw 镜像、真实只读 loop/GPT/ext4/UUID/initramfs；显式启用 USB-root、显示/风扇与最小系统检查 | U-Boot 能加载、首启成功或 eMMC 写入安全 |
+| `smoke-minimal-userspace.sh` | 旧候选的可丢弃 rootfs 副本执行最新 customize、APT、locale 与隔离 loopback SSH/PAM | 新内核/镜像构建、完整 PID 1 启动、实体网口或板卡通过 |
 | 上板证据采集 | 已经启动的 Linux 板卡日志和只读状态 | 屏幕效果、风扇起转、负载稳定性或完整硬件验收 |
 
 ## 不需要构建源码或设备的 fixture 测试
@@ -48,6 +53,8 @@ sudo apt-get install -y bash python3 python3-pil fonts-dejavu-core \
   python3 -B tests/test-hardware.py
   python3 -B tests/test-display.py
   python3 -B tests/test-verify-display-fan.py
+  python3 -B tests/test-doctor.py
+  python3 -B tests/test-network-policy.py
 
   for test in \
     tests/test-launcher.sh \
@@ -65,13 +72,24 @@ sudo apt-get install -y bash python3 python3-pil fonts-dejavu-core \
 
 这是调用现有脚本的 shell 示例，仓库没有另一个统一测试运行器。通常不需要 sudo；Python hardware 测试在临时目录中注入模拟身份，生产硬件接口不会被调用。
 
-明确使用 `umask 022`，使夹具中普通目录/文件的创建权限符合配置校验预期。继承 `umask 002` 会产生组可写配置目录并触发拒绝；应修正测试环境，不应为了夹具通过而放宽生产校验。候选记录中的三组 Python 测试在 Python 3.13.5 下分别通过 42、38、32 项，共 112 项；这个计数属于当时输入，新改动应记录自己的测试输出。
+系统配置的 root-owned 夹具应在专用 Linux 构建环境中单独运行，需要主机 `libcrypt` 以核对公开默认密码，不读取设备密码：
+
+```sh
+sudo python3 -B tests/test-verify-system.py
+```
+
+该测试不挂载镜像、不启动 SSH，也不验证真实登录。显示包的构建与维护脚本验证另见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)。
+
+明确使用 `umask 022`，使夹具中普通目录/文件的创建权限符合配置校验预期。继承 `umask 002` 会产生组可写配置目录并触发拒绝；应修正测试环境，不应为了夹具通过而放宽生产校验。历史候选记录中的三组 Python 测试在 Python 3.13.5 下分别通过 42、38、32 项，共 112 项；这个计数属于当时输入，新改动应记录自己的测试输出。
 
 | 入口 | 主要覆盖 |
 | --- | --- |
 | `tests/test-hardware.py` | 假 sysfs 遥测、反向背光、配置验证/持久化、失败传播及无风扇写入 |
 | `tests/test-display.py` | 模拟 framebuffer ABI、像素打包、边界与四页渲染；预览使用固定数据 |
 | `tests/test-verify-display-fan.py` | 合成 rootfs/config/DTB、静态验证器的拒绝条件；可选真实主机 `dtc`/`fdtget` 集成 |
+| `tests/test-doctor.py` | 假 proc/sys 中的身份、内存、遥测与隐私边界；始终不宣称硬件验收 |
+| `tests/test-network-policy.py` | 用 GNU patch 重建 DTS 别名；可选精简 DTB 夹具，不测试真实网口 |
+| `tests/test-verify-system.py` | 专用 Linux/root 夹具中的最小配置、服务、软件包与旧初始化残留拒绝条件 |
 | `tests/test-launcher.sh` / `tests/test-lima-launcher.sh` | Git/Docker/Lima/systemd 等外部动作均模拟，检查启动协议、状态码和导出条件 |
 | `tests/test-verify-artifacts.sh` | 合成 Debian 包、ELF/DTB/rootfs、版本与 UUID/路径拒绝条件 |
 | `tests/test-verify-initramfs.sh` | 合成内核配置、initramfs 文件清单和模块依赖图 |
@@ -80,6 +98,22 @@ sudo apt-get install -y bash python3 python3-pil fonts-dejavu-core \
 | `tests/test-collect-board-evidence.sh` | 注入 FakeHost；不在本机或板卡上运行真实采集流程 |
 
 缺少 `dtc`/`fdtget` 时，显示/风扇验证器测试会跳过集成项；LTS 平台 fixture 则要求 `dtc`、`fdtget`、`fdtput` 齐全并会报错。缺少 `zstd` 时，包验证 fixture 会跳过 zstd 场景。报告应保留 `SKIP`，不能将跳过项写成通过。有些 shell 测试保留临时目录以便诊断，路径会打印出来。
+
+## 可丢弃 rootfs 副本的用户空间集成
+
+同日原生 ARM64 Debian 13 VM 回归结果：`tests/test-hardware.py` 53 项、`tests/test-display.py` 43 项、`tests/test-display-package.py` 19 项、`tests/test-ci-workflow.py` 17 项全部通过。这些分别是硬件夹具、显示代码、软件包与工作流测试，不是实体硬件测试或 GitHub Actions 成功 run。
+
+2026-09-13 已在原生 ARM64 Debian 13 VM 完成：16 项 `test-verify-system.py` 夹具通过；最新 customize hook 在旧候选的可丢弃 rootfs 副本中安装版本化 `e87n-display` 包、设置 root 密码 `doumao`，实际副本的 `verify-system.py` 静态检查通过。签名 APT 源更新、安装并执行 `hello` 成功，`locale charmap` 返回 `UTF-8`。独立网络 namespace 的 loopback SSH/PAM 真实 root 密码登录成功；新生成密钥彼此唯一，重复生成保持已有密钥。原始输入镜像测试前后内容未变。
+
+重复此集成检查需要可丢弃的原生 ARM64 Linux 构建 VM、root、loop/mount、mount/PID/network namespace、chroot、SSH 客户端及静态验证器所需工具，并需要访问签名 Debian 软件源和足够空间复制 rootfs。从仓库根目录运行，输入为可信、构建已结束且不再变化的普通 raw 镜像文件：
+
+```sh
+sudo bash tests/smoke-minimal-userspace.sh /absolute/path/to/existing-candidate.img
+```
+
+脚本只读挂载输入后复制 bootfs/rootfs；所有 customize、软件安装和密钥生成写入专用副本，使用 `policy-rc.d` 抑制安装过程启动服务。SSH 单独在新网络 namespace 的 `127.0.0.1:22222` 测试，镜像默认 SSH 端口仍为 22。脚本比较输入镜像测试前后的哈希，结束时释放自身挂载并保留打印出的副本目录供检查；它不是纯静态验证器。
+
+这不是完整系统启动：测试使用 VM 内核，副本保留旧候选的内核与布局，也可能保留旧软件包。通过结果不证明新内核裁剪、最终最小包集合、新镜像构建、PID 1 服务启动顺序、真实 DHCP/DNS/NTP、显示或风扇。没有新的镜像 SHA-256 或物理启动结果；不要把该副本当作可交付新镜像。相关状态同时记录于 [SYSTEM-READINESS.md](SYSTEM-READINESS.md)。
 
 ## 需要已准备框架或 Linux 基线的检查
 
@@ -92,7 +126,7 @@ bash tests/test-board-config.sh
 bash tests/test-python-path.sh
 ```
 
-两者均可用第一个参数指定已有框架目录。`test-board-config.sh` 检查当前 pin、13 个补丁、启动配置与内核配置 hook；它没有编译内核。`test-python-path.sh` 执行框架中的真实 Python 环境赋值，并实际调用 `git --version`，检查最小环境的 PATH 修补，不是纯 mock 测试。
+两者均可用第一个参数指定已有框架目录。`test-board-config.sh` 检查当前 pin、14 个补丁、启动配置与内核配置 hook；它没有编译内核。`test-python-path.sh` 执行框架中的真实 Python 环境赋值，并实际调用 `git --version`，检查最小环境的 PATH 修补，不是纯 mock 测试。
 
 补丁发现测试使用框架自己的 Python parser：
 
@@ -100,7 +134,7 @@ bash tests/test-python-path.sh
 uv run --script tests/test-patch-discovery.py
 ```
 
-需要已安装 `uv` 和 Python >= 3.12；脚本声明的依赖为 `GitPython==3.1.62`、`unidiff==1.0.0`、`Unidecode==1.4.0`、`rich==15.0.0`、`PyYAML==6.0.3`。`uv` 首次准备环境可能下载依赖。已有满足要求的构建 Python 环境也可直接运行 `python3 -B tests/test-patch-discovery.py`。可依次传入框架目录和 userpatches 目录；默认读取本仓库。此项验证 13 个文件的发现、排序及解析，不执行补丁应用或编译。
+需要已安装 `uv` 和 Python >= 3.12；脚本声明的依赖为 `GitPython==3.1.62`、`unidiff==1.0.0`、`Unidecode==1.4.0`、`rich==15.0.0`、`PyYAML==6.0.3`。`uv` 首次准备环境可能下载依赖。已有满足要求的构建 Python 环境也可直接运行 `python3 -B tests/test-patch-discovery.py`。可依次传入框架目录和 userpatches 目录；默认读取本仓库。此项验证 14 个文件的发现、排序及解析，不执行补丁应用或编译。
 
 若已准备包含固定提交及所需对象的 Linux stable Git 仓库，可实际应用补丁：
 
@@ -146,6 +180,8 @@ python3 -B scripts/verify-display-fan.py \
 
 前者检查 Linux 6.18 的 DTB/config 板级策略，包括以太网资源、LVTS/PWM/efuse 和禁用 CPU DVFS；后者检查当前 6.18.51 显示/风扇配置、DTB、模块/依赖文件、Python 语法、默认 JSON 和服务启用关系。不会导入目标程序、运行显示服务或测试实体面板。`verify-image.sh` 的显示/风扇开关会调用后者，**不会自动调用 `verify-lts-platform.sh`**。
 
+额外存储默认 `E87N_EXTRA_STORAGE=no`，最终配置须核对可选 DM/RAID 等驱动未启用。`verify-lts-platform.sh --require-storage` 仅用于显式以 `E87N_EXTRA_STORAGE=yes` 构建的配置；不要对默认最小镜像强制要求额外模块。开关、配置检查和实际模块验收边界见 [OPTIONAL-STORAGE.md](OPTIONAL-STORAGE.md)。
+
 ## 完整 raw 镜像只读审计
 
 在 Linux 构建主机上运行，需要 root、loop 和 mount 权限。macOS 不能直接运行实际镜像审计；脚本不会自动启动容器或 VM。Debian 13 审计主机的工具包为：
@@ -155,7 +191,7 @@ sudo apt-get install -y bash coreutils python3 util-linux fdisk mount gdisk \
   e2fsprogs u-boot-tools initramfs-tools-core device-tree-compiler zstd xz-utils
 ```
 
-其中 `fdisk` 提供 `sfdisk`，`gdisk` 提供 `sgdisk`，`u-boot-tools` 提供 `dumpimage`，`initramfs-tools-core` 提供 `lsinitramfs`；显示/风扇检查还需要 `device-tree-compiler` 中的 `fdtget`。仅安装 fixture 依赖不能满足真实镜像审计的全部要求。
+其中 `fdisk` 提供 `sfdisk`，`gdisk` 提供 `sgdisk`，`u-boot-tools` 提供 `dumpimage`，`initramfs-tools-core` 提供 `lsinitramfs`；显示/风扇与系统检查需要 `device-tree-compiler` 中的 `fdtget`。`--require-system` 还需要主机 `libcrypt`。仅安装 fixture 依赖不能满足真实镜像审计的全部要求。
 
 输入必须是构建已经结束、来源可信且检查期间不再改动的普通 raw `.img` 文件，不能是符号链接、压缩包、块设备或字符设备。若手上只有 `.img.xz`，先校验并保留压缩原件解压；已有完整 raw 文件时跳过解压步骤：
 
@@ -167,15 +203,15 @@ sudo apt-get install -y bash coreutils python3 util-linux fdisk mount gdisk \
 )
 ```
 
-不要用强制覆盖来处理已有同名 raw 文件，应先确认所属候选。对当前屏幕/风扇候选使用完整参数：
+不要用强制覆盖来处理已有同名 raw 文件，应先确认所属候选。对当前最小配置使用完整参数：
 
 ```sh
 sudo bash scripts/verify-image.sh --release trixie \
-  --require-usb-root --require-display-fan \
+  --require-usb-root --require-display-fan --require-system \
   ./artifacts/current/candidate.img
 ```
 
-普通 Trixie 镜像可省略两个附加要求；历史 Debian 12 镜像需明确 `--release bookworm`，不能用其结果替代新版显示/风扇候选的检查。
+审计历史镜像时，应使用其原记录对应的参数；历史 Debian 12 镜像需明确 `--release bookworm`。省略当前配置要求或检查旧文件，都不能产生新最小配置的通过记录。
 
 实际检查流程包括：
 
@@ -183,7 +219,7 @@ sudo bash scripts/verify-image.sh --release trixie \
 2. 对打开的镜像文件新建专属只读 loop，确认分区只读、ext4 类型，并执行 `e2fsck -fn`，不修复文件系统。
 3. 在专用临时目录中以 `ro,noload,nodev,nosuid,noexec` 挂载，读取真实 root UUID 并调用产物检查。
 4. 用主机 `dumpimage`/`lsinitramfs` 检查 extlinux 选择的 initramfs，确认 `/init` 存在，不执行它。`--require-usb-root` 另外依据最终配置及 `modules.dep` 核对对应版本的 USB/SCSI/T-PHY 模块和递归依赖。
-5. `--require-display-fan` 调用当前版本的显示/风扇静态验证器。结束时只释放本次创建的挂载和 loop，保留审计文件。
+5. `--require-display-fan` 调用当前版本的显示/风扇静态验证器，`--require-system` 调用最小系统静态验证器。结束时只释放本次创建的挂载和 loop，保留审计文件。
 
 检查或清理失败都会返回非零结果。若清理失败，按打印的所属路径人工检查；脚本不会强制卸载、全局清理 loop，或拆除来源不符的挂载。`PASS` 只代表上述静态范围，不证明真实 U-Boot 能读取 USB、识别 extlinux、执行 `booti` 或启动这张镜像。
 
@@ -215,7 +251,7 @@ macOS 对应命令为 `shasum -a 256 -c SHA256SUMS`。同时检查 xz 完整性�
 
 ## 后续上板验收范围
 
-当前候选的实机启动、面板 probe/颜色/方向、亮度与设置持久化、风扇实际起转、温度校准与负载温升仍未验证。网口、eMMC、USB、NVMe、RAM fixup、固定 MAC 持久化和重启也不能从 fixture 或镜像静态结果推断为通过。CPU DVFS 仍禁用，MT7987 WED 仍不支持。
+副本中的 APT、locale、SSH/PAM 和密钥检查已通过上述限定范围；当前配置在实体 E87N 上的启动、SSH 与 host keys 首启时序、DHCP/DNS/NTP、时区与 locale、APT 安装、显示包升级、面板 probe/颜色/方向、亮度与设置持久化、风扇实际起转、温度校准与负载温升仍待验证。网口、eMMC、USB、NVMe、MAC 持久化和重启也不能从 fixture 或镜像静态结果推断为通过。DTS 默认 256 MiB 与原 OpenWrt 记录的实际 1 GiB 之间的 RAM fixup 仍需核对。CPU DVFS 仍禁用，MT7987 WED 仍不支持；没有测速反馈就不能报告 RPM。
 
 先按[首启与写入边界](first-boot.md)准备隔离、可恢复的启动方式。下列采集命令只供后续**已经启动的 Linux 板卡**手动运行，不属于主机 fixture 组，也不负责启动板卡：
 

@@ -6,6 +6,7 @@ import io
 import json
 import os
 from pathlib import Path
+import socket
 import stat
 import struct
 import sys
@@ -135,17 +136,20 @@ class HardwareTests(unittest.TestCase):
     def test_snapshot_exact_worker_contract(self):
         self.populate_samples()
         self.assertEqual(self.hw.snapshot(), {
-            "cpu_temp_mc": 62000, "phy_temp_mc": 43500,
+            "cpu_usage_percent": None, "cpu_temp_mc": 62000, "phy_temp_mc": 43500,
             "fan": {"state": 2, "max_state": 3, "pwm": 192, "rpm": None, "policy": "step_wise"},
             "loadavg": [0.5, 1.25, 2.75], "mem_total_kib": 1011132,
             "mem_available_kib": 750000, "uptime_seconds": 123.75,
-            "network": [{"name": "end0", "rx_bytes": 123456, "tx_bytes": 987654, "carrier": 1}],
+            "network": [{"name": "end0", "ipv4": None, "ipv6": [],
+                         "rx_bytes": 123456, "tx_bytes": 987654, "carrier": 1}],
+            "local_ipv4": [],
             "storage": [{"name": "nvme0", "temp_mc": 37000}],
         })
 
     def test_empty_and_missing_sensors(self):
         result = self.hw.snapshot()
-        self.assertEqual(set(result), {"cpu_temp_mc", "phy_temp_mc", "fan", "loadavg", "mem_total_kib",
+        self.assertEqual(set(result), {"cpu_usage_percent", "cpu_temp_mc", "phy_temp_mc", "fan", "loadavg", "mem_total_kib",
+                                       "local_ipv4",
                                        "mem_available_kib", "uptime_seconds", "network", "storage"})
         self.assertEqual(result["loadavg"], [None, None, None])
         self.assertTrue(all(value is None for value in result["fan"].values()))
@@ -153,6 +157,142 @@ class HardwareTests(unittest.TestCase):
         self.assertIsNone(result["phy_temp_mc"])
         self.assertEqual(result["network"], [])
         self.assertEqual(result["storage"], [])
+
+    def test_cpu_interval_excludes_guest_and_counts_iowait_as_idle(self):
+        self.put("proc/stat", "cpu 100 20 30 700 50 10 20 5 10 2\ncpu0 50 0 0 300\n")
+        self.assertIsNone(self.hw.snapshot()["cpu_usage_percent"])
+        self.put("proc/stat", "cpu 120 25 45 740 60 15 25 5 30 5\n")
+        self.assertEqual(self.hw.snapshot()["cpu_usage_percent"], 50.0)
+        self.put("proc/stat", "cpu 120 25 45 840 60 15 25 5 30 5\n")
+        self.assertEqual(self.hw.snapshot()["cpu_usage_percent"], 0.0)
+        self.put("proc/stat", "cpu 220 25 45 840 60 15 25 5 30 5\n")
+        self.assertEqual(self.hw.snapshot()["cpu_usage_percent"], 100.0)
+        self.assertIsNone(self.hw.snapshot()["cpu_usage_percent"])
+
+    def test_cpu_bad_missing_and_reset_counters_discard_baseline(self):
+        for bad in ("", "cpu0 1 2 3 4", "cpu 1 2 3", "cpu -1 2 3 4",
+                    "cpu nan 2 3 4", "cpu 18446744073709551616 2 3 4",
+                    "cpu 1 2 3 4 " + "0 " * 7, "cpu 1 2 3 4\n" + "x" * hardware._MAX_BYTES):
+            with self.subTest(bad=bad[:80]):
+                self.put("proc/stat", "cpu 10 20 30 400\n")
+                self.hw.snapshot()
+                self.put("proc/stat", bad)
+                self.assertIsNone(self.hw.snapshot()["cpu_usage_percent"])
+                self.put("proc/stat", "cpu 20 20 30 410\n")
+                self.assertIsNone(self.hw.snapshot()["cpu_usage_percent"])
+        self.put("proc/stat", "cpu 1 2 3 4\n")
+        self.assertIsNone(self.hw.snapshot()["cpu_usage_percent"])
+        self.put("proc/stat", "cpu 2 2 3 5\n")
+        self.assertEqual(self.hw.snapshot()["cpu_usage_percent"], 50.0)
+        (self.root / "proc/stat").unlink()
+        self.assertIsNone(self.hw.snapshot()["cpu_usage_percent"])
+
+    def test_public_snapshot_preserves_cpu_baseline_between_frames(self):
+        with mock.patch.object(hardware, "_snapshot_backend", None), \
+                mock.patch.object(hardware, "_Hardware", return_value=self.hw) as factory:
+            self.put("proc/stat", "cpu 10 0 0 10\n")
+            self.assertIsNone(hardware.snapshot()["cpu_usage_percent"])
+            self.put("proc/stat", "cpu 15 0 0 15\n")
+            self.assertEqual(hardware.snapshot()["cpu_usage_percent"], 50.0)
+            factory.assert_called_once_with()
+
+    def test_ipv4_ioctl_is_local_read_only_and_closes_socket(self):
+        reader = hardware._Hardware()
+        reply = bytearray(256)
+        struct.pack_into("H", reply, 16, socket.AF_INET)
+        reply[20:24] = bytes((192, 0, 2, 87))
+        with mock.patch.object(hardware.socket, "socket") as factory, \
+                mock.patch.object(hardware.fcntl, "ioctl", return_value=bytes(reply)) as ioctl:
+            channel = factory.return_value.__enter__.return_value
+            channel.fileno.return_value = 87
+            self.assertEqual(reader._ipv4_address("end0"), "192.0.2.87")
+            factory.assert_called_once_with(socket.AF_INET, socket.SOCK_DGRAM)
+            ioctl.assert_called_once_with(87, 0x8915, struct.pack("256s", b"end0"))
+            factory.return_value.__exit__.assert_called_once()
+            for action in (channel.bind, channel.connect, channel.send, channel.sendto):
+                action.assert_not_called()
+            for address in ((127, 0, 0, 1), (0, 0, 0, 0), (224, 0, 0, 1)):
+                reply[20:24] = bytes(address)
+                ioctl.return_value = bytes(reply)
+                self.assertIsNone(reader._ipv4_address("end0"))
+            ioctl.return_value = b"short"
+            self.assertIsNone(reader._ipv4_address("end0"))
+            ioctl.side_effect = OSError("no IPv4 assigned")
+            self.assertIsNone(reader._ipv4_address("end0"))
+        with mock.patch.object(hardware.socket, "socket", side_effect=OSError("AF_INET blocked")):
+            self.assertIsNone(reader._ipv4_address("end0"))
+        with mock.patch.object(hardware.socket, "socket", side_effect=AssertionError("host query")):
+            self.assertIsNone(self.hw._ipv4_address("end0"))
+            self.assertIsNone(reader._ipv4_address("end0;bad"))
+
+    def test_production_proc_net_uses_current_pid_without_following_symlinks(self):
+        reader = hardware._Hardware()
+        with mock.patch.object(hardware.os, "getpid", return_value=123), \
+                mock.patch.object(reader, "_directory", return_value=contextlib.nullcontext(87)) as directory, \
+                mock.patch.object(reader, "_read_at", return_value=b"fixture") as read:
+            self.assertEqual(reader._text("proc/net/fib_trie"), "fixture")
+            directory.assert_called_once_with(Path("proc/123/net"))
+            read.assert_called_once_with(87, "fib_trie")
+        self.put("outside/fib_trie", " |-- 192.0.2.87\n /32 host LOCAL\n")
+        self.link("proc/net", "outside")
+        self.assertEqual(self.hw._local_ipv4_addresses(), [])
+
+    def test_ipv6_validated_bounded_and_resampled_with_interfaces(self):
+        self.populate_samples()
+        self.put("proc/net/if_inet6", "\n".join((
+            "20010db8000000000000000000000087 02 40 00 80 end0",
+            "fe800000000000000000000000000087 02 40 20 80 end0",
+            "20010db8000000000000000000000087 02 40 00 80 end0",  # duplicate
+            "20010db8000000000000000000000001 02 40 00 40 end0",  # tentative
+            "20010db8000000000000000000000002 02 40 00 08 end0",  # DAD failed
+            "20010db8000000000000000000000003 02 40 00 20 end0",  # deprecated
+            "20010db8000000000000000000000004 02 ff 00 80 end0",  # invalid prefix
+            "00000000000000000000000000000001 01 80 10 80 lo",
+            "00000000000000000000000000000000 02 40 00 80 end0",
+            "ff020000000000000000000000000001 02 40 00 80 end0", "bad")))
+        with mock.patch.object(self.hw, "_ipv4_address", return_value="192.0.2.87"):
+            net = self.hw.snapshot()["network"][0]
+        self.assertEqual(net["ipv4"], "192.0.2.87")
+        self.assertEqual(net["ipv6"], ["2001:db8::87", "fe80::87"])
+        self.put("proc/net/if_inet6", "\n".join(
+            f"20010db800000000000000000000{index:04x} 02 40 00 80 end0" for index in range(20)))
+        self.assertEqual(len(self.hw.snapshot()["network"][0]["ipv6"]), 8)
+        self.put("proc/net/if_inet6", "x" * (hardware._MAX_BYTES + 1))
+        self.assertEqual(self.hw.snapshot()["network"][0]["ipv6"], [])
+        self.assertIsNone(self.hw.snapshot()["network"][0]["ipv4"])
+
+    def test_local_ipv4_fallback_only_host_routes_no_socket_or_writes(self):
+        self.populate_samples()
+        self.put("proc/net/fib_trie", """Main:
+  +-- 0.0.0.0/0 2 0 2
+     |-- 0.0.0.0
+        /0 universe UNICAST
+     |-- 127.0.0.1
+        /32 host LOCAL
+     |-- 192.0.2.87
+        /32 host LOCAL
+     |-- 192.0.2.255
+        /32 link BROADCAST
+     |-- 198.51.100.1
+        /32 universe UNICAST
+Local:
+     |-- 192.0.2.87
+        /32 host LOCAL
+     |-- 999.0.0.1
+        /32 host LOCAL
+     |-- 169.254.1.2
+        /32 host LOCAL
+     |-- 0.0.0.0
+        /32 host LOCAL
+""")
+        with mock.patch.object(hardware.socket, "socket", side_effect=AssertionError("host socket")), \
+                mock.patch.object(hardware.os, "write", side_effect=AssertionError("device write")):
+            self.assertEqual(self.hw.snapshot()["local_ipv4"], ["192.0.2.87", "169.254.1.2"])
+        self.put("proc/net/fib_trie", "\n".join(
+            f" |-- 192.0.2.{index}\n /32 host LOCAL" for index in range(1, 65)))
+        self.assertEqual(len(self.hw.snapshot()["local_ipv4"]), 32)
+        self.put("proc/net/fib_trie", " |-- 192.0.2.87\n /32 host LOCAL\n" + "x" * hardware._MAX_BYTES)
+        self.assertEqual(self.hw.snapshot()["local_ipv4"], [])
 
     def test_only_real_rpm_and_measured_pwm(self):
         self.populate_samples()
@@ -236,7 +376,8 @@ class HardwareTests(unittest.TestCase):
                 self.assertIsInstance(json.loads(output), dict)
 
     def test_public_api_uses_shared_backend_without_import_io(self):
-        with mock.patch.object(hardware, "_Hardware", return_value=self.hw):
+        with mock.patch.object(hardware, "_snapshot_backend", None), \
+                mock.patch.object(hardware, "_Hardware", return_value=self.hw):
             self.assertEqual(e87n.snapshot(), self.hw.snapshot())
             self.assertEqual(e87n.load_display_config(), DEFAULT)
 
@@ -272,7 +413,7 @@ class HardwareTests(unittest.TestCase):
 
     def test_off_preserves_brightness_and_setters_preserve_off(self):
         self.config_data(brightness_percent=35)
-        for args in (("off",), ("brightness", "80"), ("screen", "network")):
+        for args in (("off",), ("brightness", "80"), ("screen", "network"), ("refresh", "5")):
             self.assertEqual(self.cli("display", *args)[0], 0)
             self.assertEqual(self.brightness(), 26)
             self.assertFalse(self.hw.load_display_config()["enabled"])
@@ -299,6 +440,8 @@ class HardwareTests(unittest.TestCase):
                  ("-1", "101", "1.0", "true", "nan", "1e2", "20;touch nope", "$(id)", " 20", "２０")]
         cases += [("fan", "set", "2"), ("fan", "off"), ("fan", "speed", "50"),
                   ("display", "screen", "shell"), ("--root", str(self.root), "status")]
+        cases += [("display", "refresh", value) for value in
+                  ("0", "1", "61", "-2", "2.0", "nan", "true", "２", " 2", "2;id", "1e1")]
         with mock.patch.object(self.hw, "display") as setter:
             for args in cases:
                 with self.subTest(args=args), contextlib.redirect_stderr(io.StringIO()):
@@ -306,6 +449,48 @@ class HardwareTests(unittest.TestCase):
                         _main(list(args), _hardware=self.hw)
                     self.assertEqual(raised.exception.code, 2)
             setter.assert_not_called()
+
+    def test_display_config_cli_is_read_only_without_root_or_board(self):
+        self.hw.euid = lambda: 1000
+        self.put(f"{DT}/compatible", b"other,board\0")
+        with mock.patch.object(self.hw, "display", side_effect=AssertionError("apply")), \
+                mock.patch.object(hardware.os, "write", side_effect=AssertionError("write")), \
+                mock.patch.object(hardware.os, "mkdir", side_effect=AssertionError("mkdir")), \
+                mock.patch.object(hardware.os, "replace", side_effect=AssertionError("replace")):
+            code, output, errors = self.cli("display", "config")
+            self.assertEqual(code, 0, errors)
+            self.assertEqual(json.loads(output), DEFAULT)
+        self.assertFalse(self.config.exists())
+        saved = self.config_data(enabled=False, brightness_percent=73, screen="network", refresh_seconds=60)
+        self.assertEqual(json.loads(self.cli("display", "config")[1]), saved)
+        self.put("etc/e87n/display.json", "invalid")
+        code, output, errors = self.cli("display", "config")
+        self.assertEqual(code, 1)
+        self.assertEqual(output, "")
+        self.assertIn("invalid display config", errors)
+
+    def test_refresh_cli_persists_and_preserves_other_settings(self):
+        saved = self.config_data(enabled=False, brightness_percent=73, screen="network")
+        for seconds in (2, 5, 60):
+            code, output, errors = self.cli("display", "refresh", str(seconds))
+            self.assertEqual(code, 0, errors)
+            saved["refresh_seconds"] = seconds
+            self.assertEqual(json.loads(output), saved)
+            self.assertEqual(self.hw.load_display_config(), saved)
+            self.assertEqual(self.brightness(), 26)
+
+    def test_display_help_documents_settings_without_hardware(self):
+        with mock.patch.object(self.hw, "display", side_effect=AssertionError("apply")), \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            with self.assertRaises(SystemExit) as raised:
+                _main(["display", "--help"], _hardware=self.hw)
+        self.assertEqual(raised.exception.code, 0)
+        for command in ("config", "refresh", "brightness", "screen", "on", "off", "apply"):
+            self.assertIn(command, output.getvalue())
+
+    def test_shipped_config_matches_overview_defaults(self):
+        shipped = Path(__file__).resolve().parents[1] / "board-support/display.json"
+        self.assertEqual(json.loads(shipped.read_text()), DEFAULT)
 
     def test_invalid_config_fails_closed(self):
         invalid = ["null", "[]", "{}", "invalid", '{"enabled":true,"enabled":false}',
@@ -538,6 +723,7 @@ class HardwareTests(unittest.TestCase):
         with mock.patch.object(hardware.os, "write", side_effect=write):
             for args in (("status",), ("fan", "status"), ("display", "off"),
                          ("display", "brightness", "20"), ("display", "screen", "thermal"),
+                         ("display", "config"), ("display", "refresh", "5"),
                          ("display", "on"), ("display", "apply")):
                 self.assertEqual(self.cli(*args)[0], 0)
         self.assertTrue(writes)

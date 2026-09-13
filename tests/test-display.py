@@ -427,12 +427,88 @@ class RendererTests(unittest.TestCase):
         self.assertIn("1234", texts)
 
     def test_zero_values_are_real_and_absent_values_stay_missing(self):
-        snapshot = {"cpu_temp_mc": 0, "phy_temp_mc": None, "loadavg": [0, 0, 0],
+        snapshot = {"cpu_usage_percent": 0, "cpu_temp_mc": 0, "phy_temp_mc": None, "loadavg": [0, 0, 0],
                     "fan": {"rpm": 0}, "mem_total_kib": 1024, "mem_available_kib": 1024,
                     "uptime_seconds": 0}
         _, texts, _ = self.capture_render(snapshot, "overview")
-        for text in ("0.0 C", "--", "0.00", "0", "0%", "0h 00m"):
+        for text in ("0.0 C", "IP  --", "0", "0%", "PWM --"):
             self.assertIn(text, texts)
+
+    def test_overview_shows_assigned_ip_usage_ram_temperature_and_fan(self):
+        snapshot = display.preview_snapshot()
+        _, texts, _ = self.capture_render(snapshot, "overview")
+        for text in ("end0", "IP  192.0.2.87", "CPU USED", "24%", "RAM USED", "38%",
+                     "CPU TEMP", "58.8 C", "FAN RPM", "--", "PWM 192/255",
+                     "RAM 384.0 MiB / 1.0 GiB"):
+            self.assertIn(text, texts)
+        self.assertNotIn("0.42", texts)  # Load average is not CPU usage.
+        snapshot.pop("cpu_usage_percent")
+        _, texts, _ = self.capture_render(snapshot, "overview")
+        self.assertEqual(texts[texts.index("CPU USED") + 1], "--")
+
+    def test_overview_fan_tachometer_and_pwm_remain_distinct(self):
+        snapshot = display.preview_snapshot()
+        for fan, rpm, detail in (
+            ({"rpm": 0, "pwm": 0}, "0", "PWM 0/255"),
+            ({"rpm": 1234, "pwm": 192}, "1234", "PWM 192/255"),
+            ({"state": 2, "max_state": 3}, "--", "LEVEL 2/3"),
+            ({"rpm": -1, "pwm": 256, "state": 4, "max_state": 3}, "--", "PWM --"),
+            ({"rpm": True, "pwm": True}, "--", "PWM --"),
+        ):
+            with self.subTest(fan=fan):
+                snapshot["fan"] = fan
+                _, texts, _ = self.capture_render(snapshot, "overview")
+                self.assertEqual(texts[texts.index("FAN RPM") + 1], rpm)
+                self.assertIn(detail, texts)
+
+    def test_overview_prefers_up_ipv4_then_ipv6_and_marks_socket_free_fallback(self):
+        data = {"network": [
+            {"name": "down0", "carrier": 0, "ipv4": "192.0.2.1"},
+            {"name": "unknown0", "ipv4": "192.0.2.2"},
+            {"name": "end0", "carrier": 1, "ipv4": "192.0.2.87", "ipv6": ["2001:db8::87"]},
+        ]}
+        self.assertEqual(display._overview_address(data), ("end0", "192.0.2.87"))
+        data["network"][2]["ipv4"] = None
+        self.assertEqual(display._overview_address(data), ("end0", "2001:db8::87"))
+        data["network"] = [{"name": "br-lan", "carrier": 1, "ipv6": ["fe80::87"]}]
+        data["local_ipv4"] = ["192.0.2.87"]
+        self.assertEqual(display._overview_address(data), ("LOCAL IPv4", "192.0.2.87"))
+        data["local_ipv4"] = []
+        self.assertEqual(display._overview_address(data), ("br-lan", "fe80::87"))
+        data["network"][0]["carrier"] = 0
+        self.assertEqual(display._overview_address(data), ("NO IP", "--"))
+
+    def test_overview_invalid_addresses_and_percentages_are_unknown(self):
+        for value in (None, [], True, 1234, "", "0.0.0.0", "127.0.0.1", "224.0.0.1",
+                      "192.0.2.87\n", "999.1.2.3", "x" * 500):
+            with self.subTest(value=value):
+                data = {"network": [{"name": "end0", "carrier": 1, "ipv4": value}],
+                        "local_ipv4": [value]}
+                self.assertEqual(display._overview_address(data), ("NO IP", "--"))
+        for value in ("::", "::1", "ff02::1", "fe80::1%end0", "192.0.2.87", "bad"):
+            data = {"network": [{"name": "end0", "ipv6": [value]}]}
+            self.assertEqual(display._overview_address(data), ("NO IP", "--"))
+        for value in (None, -1, 101, float("nan"), float("inf"), True, "50"):
+            _, texts, _ = self.capture_render({"cpu_usage_percent": value}, "overview")
+            self.assertEqual(texts[texts.index("CPU USED") + 1], "--")
+
+    def test_overview_full_addresses_and_extreme_values_do_not_clip_or_overlap(self):
+        snapshot = display.preview_snapshot()
+        snapshot.update(cpu_usage_percent=100, mem_available_kib=0, cpu_temp_mc=200000)
+        snapshot["fan"] = {"rpm": 200000, "pwm": 255}
+        for address in ("192.168.100.200", "2001:db8:abcd:abcd:abcd:abcd:abcd:abcd"):
+            snapshot["network"] = [{"name": "enx0123456789ab", "carrier": 1,
+                                    "ipv4": address if "." in address else None,
+                                    "ipv6": [address] if ":" in address else []}]
+            _, texts, boxes = self.capture_render(snapshot, "overview")
+            self.assertIn("IP  " + address, texts)
+            self.assertIn("200000", texts)
+            self.assertIn("200.0 C", texts)
+            for index, (left, top, right, bottom) in enumerate(boxes):
+                self.assertTrue(0 <= left <= right <= 428 and 0 <= top <= bottom <= 142)
+                for other_left, other_top, other_right, other_bottom in boxes[index + 1:]:
+                    self.assertFalse(left < other_right and other_left < right
+                                     and top < other_bottom and other_top < bottom, texts)
 
     def test_network_is_totals_and_link_unknown_is_not_down(self):
         _, texts, _ = self.capture_render(display.preview_snapshot(), "network")

@@ -1,8 +1,10 @@
 # E87N Debian Armbian 首启验证
 
-本移植处于实验阶段。当前为 [2026-09-13 Debian 13 Trixie + Linux 6.18.51 屏幕/风扇候选](candidate-display-fan-20260913.md)：完整镜像构建于 **2026-09-13 09:15:45 CST** 成功结束，当天真实 raw 镜像的 `verify-image --release trixie --require-usb-root --require-display-fan` 已全部通过。压缩和本机导出、33 项文件清单、xz 完整性及解压后 raw 校验均已完成，具体入口见本轮候选记录。**本轮没有访问或测试实体板卡，尚无此候选的实机首启、屏幕或风扇验收结果。** 本文是首启操作的前置条件和验收方法，不是刷机脚本，也不证明镜像已能在实机启动。
+**当前默认配置：** [DEFAULTS.md](DEFAULTS.md) 定义 `root` / `doumao`、SSH 22 密码登录、networkd/netplan DHCP、`Asia/Shanghai`、`zh_CN.UTF-8`、正常 APT 和预装版本化 `e87n-display` 包。没有首次创建用户向导或强制公钥门槛，串口需要正常认证。旧文件不会自动获得这些配置。
 
-[9 月 12 日 Trixie 历史候选](candidate-trixie-6.18.51-20260912.md) 和 [同日 Bookworm 历史候选](candidate-20260912.md) 单独保留；它们已有的构建、只读检查和导出记录不适用于本轮新增显示功能。参考仓库中的 OpenWrt 文件和此前只读核对仅用于硬件及旧启动链接口参考。
+本移植处于实验阶段。新最小配置已有 VM 中可丢弃 rootfs 副本的用户空间集成结果，范围见 [SYSTEM-READINESS.md](SYSTEM-READINESS.md)；新内核、新完整镜像及实体 E87N 首启仍待验证。本文是首启操作的前置条件和验收方法，不是刷机脚本，也不证明镜像已能在实机启动。
+
+[9 月 13 日屏幕/风扇历史候选](candidate-display-fan-20260913.md)、[9 月 12 日 Trixie 历史候选](candidate-trixie-6.18.51-20260912.md) 和 [同日 Bookworm 历史候选](candidate-20260912.md) 的原构建、检查与导出记录单独保留，不适用于当前最小配置。2026-09-13 11:10:49 CST 完成的旧配置 VM 构建也不是新配置交付。参考仓库中的 OpenWrt 文件和此前只读核对仅用于硬件及旧启动链接口参考。
 
 ## 1. 隔离 family 与设备树检查
 
@@ -11,9 +13,9 @@
 - **独立 family：** 板卡使用 `BOARDFAMILY=edgepi-e87n`。`lib/functions/main/config-prepare.sh:141` 先据此设置 `LINUXFAMILY`，`lib/functions/configuration/main-config.sh:582–590` 再按这个名字选取存在的 family 文件，因此只加载 userpatches 中的 `config/sources/families/edgepi-e87n.conf`，避免进入上游 filogic 对其他 SoC 的分支。独立 family 内部再设 `LINUXFAMILY=filogic`，保持内核配置和包名兼容。更新上游时需重新验证文件选择与最终变量。
 - **Board hook：** `lib/functions/general/extensions.sh:167–173` 识别双下划线 hook 名；`main-config.sh:362–369` 在 family 加载后注册并调用 `post_family_config`。此时板卡 hook 设置 `ATF_COMPILE=no`、`BOOTCONFIG=none`，跳过 bootloader 产物。
 - **DTS bootargs：** [DTS 补丁](../userpatches/kernel/edgepi-e87n-6.18/0000-add-mt7987-e87n-dts.patch) 的 `/chosen/bootargs` 已改为 `console=ttyS0,115200n8`、`rootfstype=ext4`，并移除旧的 `root=PARTLABEL=rootfs` 和 squashfs/f2fs 参数。具体 root 设备由 Armbian 的启动配置提供；临时启动还应显式设置完整 bootargs，并核对生成 DTB 与最终 `/chosen/bootargs`。
-- **内存：** 已补齐 `device_type = "memory"`，但容量仍保留参考 DTS 的 256 MiB 范围。实际板载 RAM 容量、保留区及 U-Boot 是否正确修正 DTB，需要从串口日志确认；不能把该默认值当成已测硬件规格。
+- **内存：** 已补齐 `device_type = "memory"`，但容量仍保留参考 DTS 的 256 MiB 范围。[原 OpenWrt 历史记录](openwrt-hardware-reference-20260913.md)显示这台设备为 1 GiB，`MemTotal=1011132 kB`。新启动路径中的 RAM 容量、保留区及 U-Boot 是否正确修正 DTB，需要从串口日志确认；不能把 DTS 默认值当成硬件规格，也不能把原系统结果当成 Debian 已识别全部内存。
 
-当前候选已经完成完整构建及镜像静态验证；仅有配置加载、补丁无 fuzz 应用和 DTB 检查结果不能单独证明这些后续步骤。上述离线结果仍不代表实机首启已经通过。
+配置加载、补丁无 fuzz 应用、DTB 检查和 VM 用户空间集成都不能证明新内核或完整镜像已经构建，也不代表实机首启通过。新产物必须按 [TESTING.md](TESTING.md) 单独验证。
 
 ## 2. 确认实际 U-Boot 能力
 
@@ -80,7 +82,7 @@ Linux 6.18 板卡请求 `CONFIG_MEDIATEK_2P5GE_PHY=m`，其模块路径为 `kern
 
 当前 6.18 候选仍要求温控、PWM fan 和 efuse 链路内建，`CPU_FREQ`、`CPU_THERMAL` 禁用。设备树没有 CPU OPP、CPU cooling-map 或旧 `pcs-handle`；MAC0 通过 `mediatek,sgmiisys` 使用 PCS。风扇四级为 0/128/192/255，50/65/75℃对应状态 1/2/3；LVTS 使用 1000 ms 软件轮询，无硬件 IRQ 保证。CPU 保持固件启动频率，不提供调压调频或 CPU 降频散热；**WED 仍不受支持**。上板首先确认风扇与温度读数，未确认前不要进行长时间压力测试。
 
-9 月 13 日候选的 **13 个内核补丁**已包含 NV3007 fbtft 驱动，镜像安装 Debian 原生显示程序和背光 CLI。本轮真实镜像已按 `--require-display-fan` 通过对应配置、DTB、模块及用户空间检查；这不等于物理屏幕已经点亮或背光控制已实测。内核默认背光索引为 26（暗），显示服务启动前应用保存的状态，首次默认亮度为 20%；具体控制与验收项目见 [屏幕与风扇支持](display-fan.md)。
+当前 **14 个内核补丁**包含 NV3007 fbtft 驱动与 GMAC aliases；新配方预装版本化 `e87n-display` 包，提供 Debian 原生显示程序和背光 CLI。必须对新镜像执行 `--require-display-fan --require-system` 静态检查；通过也不等于物理屏幕已经点亮或背光控制已实测。内核默认背光索引为 26（暗），显示服务启动前应用保存的状态，首次默认亮度为 20%；具体控制与验收项目见 [屏幕与风扇支持](display-fan.md)。额外 DM/RAID 等存储模块默认 `E87N_EXTRA_STORAGE=no`，详见 [OPTIONAL-STORAGE.md](OPTIONAL-STORAGE.md)。
 
 配置应用顺序的本地依据是 `lib/functions/compilation/kernel-config.sh:108–131` 和 `lib/functions/compilation/armbian-kernel.sh:745–781`。MT7987 时钟与 pinctrl 的默认启用条件分别在项目 `361-clk-...patch:32–36`、`360-pinctrl-...patch:20–25`；显式请求仍需通过最终 Kconfig 结果核实。
 
@@ -88,7 +90,7 @@ DTS 的 MMC 节点使用 `mediatek,mt7986-mmc`，板级启用 8 位、48 MHz、3
 
 通用 Armbian GPT 没有 factory 分区。DTS 的两个 GMAC 已移除指向 factory 的 `nvmem-cells` / `nvmem-cell-names`，留下临时随机 MAC 的说明，避免因不存在的 provider 持续返回 `-EPROBE_DEFER`。`drivers/net/ethernet/mediatek/mtk_eth_soc.c` 的 `mtk_mac_assign_address()` 在地址查询返回 `-EPROBE_DEFER` 时直接延迟探测；在最终赋址阶段遇到其他查询错误时则调用 `eth_hw_addr_random()`。
 
-这只是允许驱动使用临时随机 MAC 的首启措施，尚未保留原固定 MAC，也未实现地址持久化。重启或重新创建设备后地址可能变化，DHCP 租约或基于原 MAC 的绑定也可能不再匹配。DTS 中保留 factory 布局描述并不代表镜像保存了 factory 数据；恢复原固定地址仍需单独核对原数据、NVMEM 支持及持久化方案，网口行为仍待上板验证。
+驱动允许临时随机 MAC 回退；当前补丁另提供两个 GMAC 的 DT 别名，配合 systemd 默认 persistent 策略生成持久地址，但实机跨重启仍待验证，原 factory MAC 也未恢复。DHCP 租约或基于原 MAC 的绑定可能不再匹配。DTS 中保留 factory 布局描述并不代表镜像保存了 factory 数据；恢复原固定地址仍需单独核对原数据、NVMEM 支持及持久化方案，见 [NETWORKING.md](NETWORKING.md)。
 
 ## 5. 临时启动 Debian
 
@@ -124,29 +126,34 @@ label Armbian
 首次网络测试只连接一个网口到现有 DHCP 路由器，同时保留串口。
 这是 Debian 主机镜像，不预设原厂 LAN/WAN、网桥或 NAT 行为；不要按 OpenWrt
 的默认管理地址访问。先从串口用 `ip -br link`、`ip -br addr` 读取实际网口、MAC
-和地址，再验证 SSH。新版镜像内 `/etc/netplan/10-dhcp-all-interfaces.yaml`
-已核实使用 networkd，并对 `e*`、`lan*`、`wan*` 接口请求 IPv4/IPv6 DHCP。
-这是静态配置检查，不等于实机已取得 DHCP 租约，仍须检查实际网口与地址。
+和地址，再验证 SSH。当前配置 `/etc/netplan/10-e87n-dhcp.yaml`
+使用 networkd，对 `e*` 有线接口请求 IPv4/IPv6 DHCP，并接受 IPv6 RA。
+这是配置要求，不等于实机已取得 DHCP 租约，仍须检查实际网口与地址。
 首次测试应放在可信、隔离的内网，不直接接入公网，也不做路由器端口转发。
-首次登录完成账户初始化并设置独立强密码后，再按实际需求开放 SSH；
+SSH 默认在 22 端口允许 `root` 使用密码 `doumao` 登录；串口也使用正常认证。
+首次登录后运行 `passwd` 更改公开默认密码，再按实际需求配置管理用户与公钥。
 此镜像没有原厂路由固件的 LAN/WAN 防火墙隔离策略。
 
-本项目保留 Armbian 默认首启账户流程：初始 `root` 密码为 `1234`，串口
-自动登录默认开启，SSH 允许 root 登录。它不是已加固的生产账户配置。
-首次交互登录会提示修改密码，但该向导不是所有 SSH 会话的强制密码过期
-屏障。请先在隔离内网或串口设置独立强密码、创建管理用户，再配置 SSH
-密钥并按需要关闭 root 密码登录；不要使用空口令。
+当前最小配置没有首次创建用户向导、强制改密提示或公钥初始化门槛。时区为
+`Asia/Shanghai`，locale 为 `zh_CN.UTF-8`；登录后可用 `apt update` 和
+`apt install --no-install-recommends curl` 检查软件源与安装路径。
 
 Armbian 默认会扩容**当前根分区所在磁盘**，不会自动把系统迁移到另一块
 eMMC。这意味着首启并非完全只读：必须保证根 UUID 唯一且指向测试介质。
-本候选含缓存生成的初始 SSH host keys，默认首启重建发生在 SSH 服务启动后，
-不能假定最早一次监听已使用重建后的唯一密钥；应在隔离环境完成再生并核对
-指纹，再对外提供服务。批量克隆时应逐台核验密钥唯一性。
+当前配方清除镜像 SSH host keys，并要求 SSH 启动前生成设备自己的密钥。
+VM 副本已验证密钥唯一性和重复生成的持久性，完整系统首启依赖顺序仍待实机
+核对。批量克隆已启动系统会复制身份，应逐台核验 machine-id 和密钥唯一性。
+
+**历史文件边界：** 旧屏幕/风扇候选使用 `root/1234`、串口自动登录，并带有缓存
+生成的初始 SSH host keys；其首启重建时序不能保证最早一次监听使用独立密钥。
+这些旧风险不会因更新仓库消失。取得历史文件时应遵照对应[历史记录](candidate-display-fan-20260913.md)
+隔离首启并处理账户、自动登录和密钥，而不是套用当前默认值。
 
 保存完整串口日志，并在测试系统内核对：
 
 - `/proc/cmdline` 只有一个 root 参数，根设备与 `/etc/fstab` 均指向预期测试 rootfs；`/etc/os-release` 确认为 Debian，Armbian 包与发行信息一致。
 - MMC 枚举、GPT 识别、ext4 挂载和串口登录正常；没有持续 probe defer、时钟、引脚或 regulator 错误。
+- 核对运行时 DT 内存范围、保留区和 `MemTotal`，确认 U-Boot 是否把 DTS 的 256 MiB 修正为本机实际 1 GiB 对应的可用范围；保留区会使 `MemTotal` 小于物理容量。
 - 记录各网口本次使用的 MAC 和 DHCP 租约，核对随机地址回退与 PHY 固件加载后再逐项验证网口；不要把临时随机地址记为已恢复的原固定 MAC。随后验证 NVMe、USB、温度与风扇。
 - 屏幕/风扇候选还需核对 NV3007 probe、面板颜色/方向、0/20/100%亮度、开关及配置持久化；观察内核风扇档位与实际起转。缺少测速反馈时不把 PWM 或档位写成 RPM。
 - 复核原设备分区表和启动链备份，确认测试未改变原盘；一次临时启动成功不等于 eMMC 安装方案或断电重启已验证。

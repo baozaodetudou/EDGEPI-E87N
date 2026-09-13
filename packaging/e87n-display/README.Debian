@@ -1,0 +1,32 @@
+e87n-display for Debian
+======================
+
+This architecture-independent Python package targets the EdgePi E87N and
+requires the board's NV3007 framebuffer and backlight kernel support.
+The kernel remains the sole fan controller. No provisioning, account,
+network, firmware or kernel installation is performed by this package.
+
+Commands:
+  e87nctl status
+  e87nctl doctor
+  e87nctl fan status
+  e87nctl display brightness 20
+  e87nctl display screen thermal
+  e87nctl display off
+  e87nctl display on
+
+Display settings: /etc/e87n/display.json
+Module configuration: /etc/modules-load.d/e87n-display.conf
+Both are dpkg conffiles. Use --force-confdef --force-confold with unattended
+dpkg upgrades when existing local settings must take precedence.
+
+The service e87n-display.service is enabled at installation, respecting
+administrator disable/mask choices on upgrades. Image builds must supply
+an executable /usr/sbin/policy-rc.d returning 101 to inhibit activation.
+An ordinary image chroot has no running systemd. The package neither starts
+hardware directly nor creates or replaces policy-rc.d.
+
+Removal stops the display and preserves conffiles; purge removes the package's
+conffiles and helper state. Other board data and administrator overrides
+are not recursively deleted. Service errors do not block package configuration;
+inspect systemctl status e87n-display.service and its journal after boot.

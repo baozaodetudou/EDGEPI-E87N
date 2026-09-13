@@ -1,0 +1,5 @@
+// Deliberate operator-controlled maintenance: no unattended upgrade or reboot
+// while the experimental boot/kernel port still requires board validation.
+APT::Periodic::Update-Package-Lists "0";
+APT::Periodic::Unattended-Upgrade "0";
+Unattended-Upgrade::Automatic-Reboot "false";

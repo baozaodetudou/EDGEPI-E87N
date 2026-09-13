@@ -29,10 +29,10 @@ patch_dir = PatchDir(
     str(source),
 )
 files = patch_dir.find_files_patch_files()
-expected_prefixes = ["0000", "360", "361", "740", "750", "752", "790", "791", "792", "821", "830", "843", "900"]
+expected_prefixes = ["0000", "360", "361", "740", "750", "752", "790", "791", "792", "821", "830", "843", "900", "901"]
 files = sorted(files, key=lambda item: item.file_name)
 if len(files) != len(expected_prefixes):
-    raise SystemExit(f"FAIL: Armbian discovered {len(files)} patches, expected 13")
+    raise SystemExit(f"FAIL: Armbian discovered {len(files)} patches, expected {len(expected_prefixes)}")
 prefixes = [Path(item.file_name).name.split("-", 1)[0] for item in files]
 if prefixes != expected_prefixes:
     raise SystemExit(f"FAIL: missing, duplicate or unexpected patch prefixes: {prefixes}; expected {expected_prefixes}")
@@ -57,4 +57,4 @@ for required in ("drivers/net/phy/mediatek/mtk-2p5ge.c", "drivers/net/phy/realte
 legacy = touched & {"drivers/net/phy/mtk-2p5ge.c", "drivers/net/phy/realtek.c"}
 if legacy:
     raise SystemExit(f"FAIL: legacy flat PHY paths in Linux 6.18 patchset: {sorted(legacy)}")
-print("PASS: Armbian discovered and parsed all 13 Linux 6.18 patches; no compilation performed.")
+print(f"PASS: Armbian discovered and parsed all {len(expected_prefixes)} Linux 6.18 patches; no compilation performed.")
