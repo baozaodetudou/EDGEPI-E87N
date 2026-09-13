@@ -1,17 +1,25 @@
 # 镜像获取、发布状态与校验
 
 本仓库公开的是构建源码、板级补丁、Debian 小屏程序、测试与文档。
-**当前没有可报告的新最小配置成功构建 run 或 GitHub Release 镜像附件。**
+**当前最小配置已在 [Actions 34737922588](https://github.com/baozaodetudou/EDGEPI-E87N/actions/runs/34737922588) 成功构建并上传 artifacts，尚未发布为 GitHub Release。**
+新的[手动构建流程](GITHUB-ACTIONS.md)已改为全部成功后按 tag 发布到 [Releases](https://github.com/baozaodetudou/EDGEPI-E87N/releases)；只在手动 Run workflow 后执行，不会因推送源码或 tag 自动运行。首次新发布流程的实际结果仍待手动运行，以下保留现有成功 artifact 的下载方式。
 `git clone` 不会下载之前本地生成的 `.img.xz`、内核包、完整日志或构建缓存。
 可按 [构建指南](BUILDING.md) 自行生成，或在 [GitHub Actions](GITHUB-ACTIONS.md) 对应 run 成功并上传 artifacts 后取得文件，再校验。工作流文件存在、任务开始运行与成功产物上传是不同状态；artifacts 也不等同于 Release。
 
 ## 当前最小配置的交付状态
 
-新配置以 [DEFAULTS.md](DEFAULTS.md) 为准：`root` / `doumao`、SSH 22、DHCP、上海时区、中文 UTF-8、正常 APT 和预装版本化 `e87n-display` 包；额外存储默认 `E87N_EXTRA_STORAGE=no`。新完整镜像及其 SHA-256 尚待记录。
+新配置以 [DEFAULTS.md](DEFAULTS.md) 为准：`root` / `doumao`、SSH 22、DHCP、上海时区、中文 UTF-8、正常 APT 和预装版本化 `e87n-display` 包；额外存储默认 `E87N_EXTRA_STORAGE=no`。本轮源码为 `2a60011`，镜像校验值与审计证据见[本轮记录](ci-keygen-fix-20260913.md)。
 
-已通过的 VM 用户空间集成只转换可丢弃的旧候选 rootfs 副本，见 [TESTING.md](TESTING.md)，不能把副本或原镜像作为新配置交付。2026-09-13 11:10:49 CST 完成的旧配置 VM 构建也已被替代，不代表新最小配置构建完成。
+在上述成功 run 页面的 **Artifacts** 下载：
 
-只有成功 run 中与目标提交、配置、日志及校验清单一致的 artifacts 才能作为该次构建产物下载。显示包的独立版本与升级方法见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)；云端运行与获取方式见 [GITHUB-ACTIONS.md](GITHUB-ACTIONS.md)。目前没有据此宣称新的已发布镜像。
+- `e87n-trixie-6.18.51-candidate-34737922588-1`：完整镜像、内核/DTB/BSP 包、校验清单、元数据和日志。
+- `e87n-display-candidate-34737922588-1`：独立 `e87n-display_1.0.0-1_all.deb`、校验清单和日志。
+
+Artifacts 保留 14 天，下载通常需要登录 GitHub；它们不是永久 Release 附件。下载并解开 artifact 后，在其根目录运行 `shasum -a 256 -c SHA256SUMS`（Linux：`sha256sum -c SHA256SUMS`），同时核对 `build-metadata.json` 的源码提交、成功结果和静态审计状态。实体板卡仍未验收，不可直接整盘覆盖原 eMMC。
+
+VM 用户空间集成只操作可丢弃 rootfs 副本，见 [TESTING.md](TESTING.md)，不能把这些经测试修改的副本作为交付镜像。本轮可下载镜像是成功 Actions 的原始产物。2026-09-13 11:10:49 CST 完成的旧配置 VM 构建已被替代，不代表新最小配置构建完成。
+
+只有成功 run 中与目标提交、配置、日志及校验清单一致的 artifacts 才能作为该次构建产物下载。显示包的独立版本与升级方法见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)；云端运行与获取方式见 [GITHUB-ACTIONS.md](GITHUB-ACTIONS.md)。本轮是 Actions 候选产物，不是已通过实机验收的发行版。
 
 ## 历史本地屏幕/风扇候选（旧配置）
 
@@ -50,11 +58,9 @@ Linux 可用 `sha256sum` 替代 `shasum -a 256`。若同时收到完整交付目
 压缩 SHA-256 是 `32474999d280d4a9057985c6ba6985b1ed5f223584b7f8fe1809f9e4f48cb33e`。
 它也不是上面记录的 9 月 13 日历史屏幕/风扇候选。
 
-## 未来公开镜像时
+## tag Release 下载
 
-应使用单独的版本化 Release 附件，而不是强行将大镜像、`.deb` 或私有日志塞入 Git。
-发布前必须重新核验附件、提供对应源代码/构建输入与许可证，并核对当前默认密码说明及独立 SSH 密钥首启配置，
-并在标题和说明中显著标注实验性及实机验收状态。此文不代表这些发布步骤已经完成。
+手动构建成功后，新的版本化 Release 提供镜像、显示包、内核包归档、构建证据和 `SHA256SUMS`，tag 固定到实际构建源码提交。未经验收的候选标为 Pre-release，不宣称稳定可刷。具体上传校验及失败保留草稿的规则见[发布流程](GITHUB-ACTIONS.md)。本次工作流调整不等于已执行首次发布；大镜像和 `.deb` 仍不进入 Git 源码历史。
 
 ## 禁止当作直接刷机指南
 

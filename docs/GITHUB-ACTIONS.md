@@ -1,14 +1,19 @@
-# GitHub Actions 候选构建
+# GitHub Actions 手动构建与 tag 发布
 
-工作流位于 [build-e87n.yml](../.github/workflows/build-e87n.yml)。面向公开仓库，生成 Debian 13 Trixie 最小镜像，以及独立、带版本号的 `e87n-display` Debian 包。输出是 Actions artifacts，不自动创建 GitHub Release、标签或执行刷写。通过构建与静态审计不代表 E87N 已启动或硬件已经验收。
+工作流位于 [build-e87n.yml](../.github/workflows/build-e87n.yml)。**只接受手动 `workflow_dispatch`；push、tag push、PR 和定时任务均不触发。** 手动运行后，生成 Debian 13 Trixie 最小镜像和独立 `e87n-display` Debian 包，全部验证成功才以指定 tag 发布到 GitHub Releases。当前硬件未验收，因此发布为明确标记实验性的 **Pre-release**，不设为稳定 Latest，不执行刷写。
 
-已知故障与复验：[2026-09-13 SSH keygen 审计误报修复](ci-keygen-fix-20260913.md)。原运行编译成功但审计失败，修复后的本地完整复验通过；不要将原失败 artifact 的校验值等同于云端 run 成功。
+已知故障与复验：[2026-09-13 SSH keygen 审计误报修复](ci-keygen-fix-20260913.md)。原运行编译成功但审计失败，修复后的本地完整复验通过；新 [run 34737922588](https://github.com/baozaodetudou/EDGEPI-E87N/actions/runs/34737922588) 的验证、独立显示包、完整镜像构建及审计已全部成功。原失败 run 的状态不会因此改变。
 
 ## 触发和输入
 
-工作流进入默认分支后，可从 Actions → **E87N Debian 13 candidate** → Run workflow 手动运行。推送到 `main`，且修改构建脚本、板级文件、补丁、固件、打包、测试、文档或 `.github/` 时也会运行。具体路径清单以 YAML 为准；不会因普通其他分支推送或 PR 自动构建。GitHub 要求分支和路径过滤条件同时匹配，手动入口要求工作流存在于默认分支，见 [工作流语法](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax)。
+从 Actions → **E87N Debian 13 release** → **Run workflow**，选择 **main** 后手动运行。其他分支在预检阶段拒绝；工作流必须已进入默认分支，操作者须有仓库写权限，见 [GitHub 手动运行说明](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)。本机能通过 SSH 推送 Git，不代表 GitHub CLI 的 API 账号也有发布/dispatch 权限；不需要把个人 token 放进仓库，云端使用作业自身的 `GITHUB_TOKEN`。
 
-唯一手动输入 `kernel_version` 是只有 `6.18.51` 的 choice，脚本也拒绝其他值。更换内核必须修改并审查源码 pin、补丁、验证器和工作流；没有任意内核版本、构建命令或发行版输入。
+手动输入有两个：
+
+- `kernel_version`：只有 `6.18.51` 的 choice，脚本也拒绝其他值。
+- `release_tag`：可填新的版本，例如 `v2026.09.13-1`；留空则生成 `e87n-trixie-6.18.51-<run-id>`。允许字母、数字、点、下划线、连字符等受限安全格式，不接受路径、空白或命令文本。已有同名 tag 或 Release 会在构建前拒绝；发布前再检查一次，绝不覆盖旧版本。
+
+更换内核必须修改并审查源码 pin、补丁、验证器和工作流；没有任意构建命令或发行版输入。自动生成 tag 仅发生在这次手动运行内，不是 tag push 触发构建。
 
 | 输入 | 固定来源 |
 | --- | --- |
@@ -31,7 +36,24 @@ GitHub 为公开仓库列出了该 ARM64 标签、4 核、16 GB 内存及 **14 G
 
 安装依赖后要求 workspace 至少有 **30 GiB 可用空间**，不足则在编译前失败，并留下 `runner.log`。这只是预检门槛，峰值还取决于内核、rootfs、压缩和 raw 审计副本。若托管 runner 无法满足，需要重新评估有足够磁盘的原生 ARM64 runner；不要直接删除门槛或扩大清理范围。检查失败时显示包 job 仍可独立完成。
 
-全局仅有 `contents: read`，checkout 不持久保存凭证。同一工作流/ref 使用 concurrency 分组，`cancel-in-progress: false` 让正在构建的 job 有机会完成和上传；GitHub 仍可能替换尚未开始的等待项。镜像 job 总限时 360 分钟，准备 15、构建及审计 285、收集 15、候选上传 25、独立日志上传 10 分钟，为收尾留出时间。
+全局仅有 `contents: read`，checkout 不持久保存凭证；只有成功后的 `release` job 获得 `contents: write` 和 `actions: read`，用于下载当前运行的附件并创建 tag/Release。构建与测试 job 没有仓库写权限。同一工作流/ref 使用 concurrency 分组，`cancel-in-progress: false` 保留正在运行的构建；GitHub 仍可能替换尚未开始的等待项。镜像 job 总限时 360 分钟，准备 15、构建及审计 285、收集 15、候选上传 25、独立日志上传 10 分钟，为收尾留出时间；发布 job 限时 30 分钟。
+
+## 成功后按 tag 发布
+
+`release` 必须等待 `validate`、`display`、`image` 全部成功；失败或取消不会进入发布。它下载**当前 run 和 attempt** 的两个准确 artifact 名称，先逐文件核对 SHA-256，再确认源码提交、run/attempt、Debian/内核/显示包版本、审计结果和退出码均匹配。缺文件、哈希不符、符号链接、越界路径或混入其他运行的产物都会失败。
+
+Release 附件包括：
+
+- 完整 `.img.xz` 镜像与独立 `e87n-display_*_all.deb`。
+- `kernel-packages.tar.xz`：匹配的内核、DTB、BSP 等 Debian 包。
+- `build-evidence.tar.xz`：两个原始 artifact 的元数据、清单和构建/审计日志。
+- `image-build-metadata.json`、`display-build-metadata.json`、`RELEASE-NOTES.md` 和顶层 `SHA256SUMS`。
+
+先创建指向**实际构建提交 SHA** 的 draft pre-release，再上传明确列出的附件并核对远端文件；完成后才公开。不会给旧版本覆盖附件，也不会把 tag 指向后续漂移的 main。若上传/核对失败，作业报错并保留 draft/tag 供人工检查，不自动删除或假装成功；下次完整重建应使用新 tag，已发布版本保持原样。发布行为参考 [GitHub CLI release create](https://cli.github.com/manual/gh_release_create)。
+
+版本化下载在仓库 [Releases](https://github.com/baozaodetudou/EDGEPI-E87N/releases)，不受 Actions artifacts 的 14 天保留期约束。首次手动发布 job 尚待实际运行验证；已成功的 `34737922588` 使用旧的 artifact-only 流程，不会因更新工作流自动变成 Release。
+
+2026-09-13 本地验证：actionlint、ShellCheck 通过；工作流 19 项、发布附件准备 21 项、发布器 27 项测试在 macOS 与 ARM64 Debian 13 VM 均通过。使用 `34737922588` 的真实镜像/显示包 artifacts 完成 8 个本地发布附件准备，清单全数通过，内核包与证据归档的成员已核对；发布器的实际文件契约和 GitHub **只读**预检也通过。没有调用真实发布或手动 dispatch，本地发布目录不等于远端 Release。
 
 ## 实际镜像审计与失败输出
 
@@ -71,7 +93,7 @@ logs/armbian/           框架日志（镜像 job）
 
 `validate` 安装 ShellCheck、PyYAML、Pillow、DejaVu 字体、设备树工具、GNU patch、压缩工具、dpkg 和 Debian 服务助手。actionlint 通过 Go 固定安装 `v1.7.12`，见 [actionlint 安装说明](https://github.com/rhysd/actionlint/blob/v1.7.12/docs/install.md)。
 
-`ci-validate.sh` 执行 actionlint、所有 `ci-*.sh` 的 Bash 语法/ShellCheck，以及 `test-ci-workflow.py` 的工作流契约和模拟构建/收集测试。这部分不启动镜像或软件包构建，也不调用真正的 sudo。
+`ci-validate.sh` 执行 actionlint、所有 `ci-*.sh` 的 Bash 语法/ShellCheck、`test-ci-workflow.py` 的工作流契约和模拟构建/收集测试，以及 `test-ci-prepare-release.py` / `test-ci-publish-release.py` 的发布打包与模拟 GitHub 测试。这部分不启动镜像或软件包构建，不调用真正的 sudo，也不会发布任何 Release。
 
 `ci-regressions.sh` 执行 hardware、display、doctor、network-policy、display-fan 验证器和 shell 启动器/产物/initramfs/镜像/LTS/采集器夹具。系统 rootfs 夹具明确使用 `sudo -n python3 -B tests/test-verify-system.py`；显示包测试同样以 sudo 运行，以覆盖临时 `dpkg --root` 中的安装、升级、删除、重装与 purge。包测试会生成测试包并模拟运行时服务命令，不安装到 runner 主系统。新增 `test-image-defaults.py` 或 `.sh` 后也会被纳入。每套测试独立保存日志，失败后继续收集其他测试结果，但 validation job 最终失败。依赖真实框架 checkout 的测试和实际系统 smoke 测试不属于此 fixture job。
 

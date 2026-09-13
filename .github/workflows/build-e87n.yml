@@ -1,4 +1,4 @@
-name: E87N Debian 13 candidate
+name: E87N Debian 13 release
 
 on:
   workflow_dispatch:
@@ -9,22 +9,10 @@ on:
         options: ['6.18.51']
         default: '6.18.51'
         required: true
-  push:
-    branches: [main]
-    paths:
-      - '.github/**'
-      - 'build.sh'
-      - 'build-armbian.sh'
-      - 'scripts/**'
-      - 'tests/**'
-      - 'packaging/**'
-      - 'board-support/**'
-      - 'userpatches/**'
-      - 'patches/armbian-build/**'
-      - 'firmware/**'
-      - 'docs/**'
-      - 'LICENSE'
-      - 'NOTICE.md'
+      release_tag:
+        description: 'New tag; blank generates e87n-trixie-6.18.51-<run-id>'
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -47,11 +35,24 @@ jobs:
   validate:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    outputs:
+      release_tag: ${{ steps.release_tag.outputs.release_tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           clean: false
+      - name: Check manual main-branch release and unused tag
+        id: release_tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "$GITHUB_REF" == refs/heads/main ]]
+          release_tag=${INPUT_RELEASE_TAG:-e87n-trixie-6.18.51-${GITHUB_RUN_ID}}
+          python3 scripts/ci-publish-release.py preflight \
+            --repository "$GITHUB_REPOSITORY" --source-commit "$GITHUB_SHA" --tag "$release_tag"
+          printf 'release_tag=%s\n' "$release_tag" >> "$GITHUB_OUTPUT"
       - name: Install validation tools
         run: |
           sudo -n apt-get update
@@ -75,6 +76,48 @@ jobs:
           path: output/ci/logs/
           if-no-files-found: warn
           retention-days: 14
+
+  release:
+    needs: [validate, display, image]
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && needs.validate.result == 'success' && needs.display.result == 'success' && needs.image.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          clean: false
+      - name: Download this run's successful artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh auth status --hostname github.com >/dev/null 2>&1
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "e87n-trixie-6.18.51-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --dir output/release-input/image
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "e87n-display-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --dir output/release-input/display
+      - name: Verify and prepare release assets
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.release_tag }}
+        run: |
+          python3 scripts/ci-prepare-release.py \
+            --image-artifact output/release-input/image --display-artifact output/release-input/display \
+            --output output/release-assets --source-commit "$GITHUB_SHA" \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --tag "$RELEASE_TAG" --repository "$GITHUB_REPOSITORY"
+      - name: Publish verified assets as a tagged experimental release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.validate.outputs.release_tag }}
+        run: |
+          python3 scripts/ci-publish-release.py publish \
+            --repository "$GITHUB_REPOSITORY" --source-commit "$GITHUB_SHA" \
+            --tag "$RELEASE_TAG" --assets output/release-assets
 
   display:
     needs: validate

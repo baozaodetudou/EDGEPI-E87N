@@ -4,7 +4,7 @@
 
 **这是 Debian 系统，不是 OpenWrt 固件，也不是官方 Armbian 支持板卡。** OpenWrt/E87N 源码仅作为板级驱动、设备树和硬件接口参考；目标用户空间不包含 LuCI、UCI、procd 或原厂 musl 显示程序。
 
-> 当前源码采用[最小系统默认配置](docs/DEFAULTS.md)，已有 VM 用户空间副本集成结果，新完整镜像构建与产物验证仍待记录。旧候选的成功记录不适用于新配置；**尚未在 E87N 上完成启动或硬件验收**。不要通过 LuCI 上传，不要直接整盘覆盖原 eMMC。跳过 U-Boot 构建不等于保留原盘启动数据。
+> 当前[最小系统默认配置](docs/DEFAULTS.md)已通过 [Actions 34737922588](https://github.com/baozaodetudou/EDGEPI-E87N/actions/runs/34737922588) 的完整构建、真实镜像静态审计和产物上传，另有 VM 用户空间副本的 SSH/APT 集成结果，见[本轮记录](docs/ci-keygen-fix-20260913.md)。**尚未在 E87N 上完成启动或硬件验收**。不要通过 LuCI 上传，不要直接整盘覆盖原 eMMC。跳过 U-Boot 构建不等于保留原盘启动数据。
 
 ## 从这里开始
 
@@ -23,7 +23,7 @@
 
 | 功能 | 当前实现 | 实机状态 |
 | --- | --- | --- |
-| 系统 | Debian 13 Trixie 最小命令行；`Asia/Shanghai`、`zh_CN.UTF-8`；正常使用 APT | 新配置待构建验证与首启 |
+| 系统 | Debian 13 Trixie 最小命令行；`Asia/Shanghai`、`zh_CN.UTF-8`；正常使用 APT | 云端构建/静态审计通过；实机待首启 |
 | 内核 | 固定 Linux 6.18.51，14 个 E87N 移植补丁 | 待首启 |
 | 小屏 | 预装独立、版本化 `e87n-display` Debian 包；NV3007、428×142 RGB565、四页状态界面 | 待验证颜色、方向及显示 |
 | 背光 | 0–100% 亮度、开关、持久化；默认 20% | 待验证实际亮度和关闭 |
@@ -104,7 +104,7 @@ tests/                         代码夹具和模拟回归测试
 docs/                          构建、使用、验收及历史记录
 ```
 
-`output/`、`source/`、镜像、内核包、构建日志、设备参考件和本地凭证不进入 Git。保留的 `edgepi-e87n-6.12/` 仅用于历史对照，不是当前默认配置。[GitHub Actions 构建入口](docs/GITHUB-ACTIONS.md)的存在不代表已有成功运行；应从成功 run 获取并校验 artifacts，不能将其当作已发布的 Release。本次文档更新没有可报告的新配置成功 run 或 Release 镜像。
+`output/`、`source/`、镜像、内核包、构建日志、设备参考件和本地凭证不进入 Git。保留的 `edgepi-e87n-6.12/` 仅用于历史对照，不是当前默认配置。从[已成功的最小配置 run](https://github.com/baozaodetudou/EDGEPI-E87N/actions/runs/34737922588) 获取并校验现有 artifacts，具体名称见[下载说明](docs/DOWNLOADS.md)。新工作流**仅手动触发**，成功后以 tag 发布实验性 GitHub Release；push/tag push 不触发。首次新发布流程仍待手动运行，不会将已有 artifacts 自动转换为 Release。
 
 ## 来源、许可与反馈
 

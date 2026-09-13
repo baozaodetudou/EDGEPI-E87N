@@ -27,13 +27,11 @@ class WorkflowPolicy(unittest.TestCase):
 
     def test_triggers_and_pins(self):
         events = self.workflow["on"]
-        self.assertEqual(set(events), {"workflow_dispatch", "push"})
-        self.assertEqual(events["push"]["branches"], ["main"])
-        paths = events["push"]["paths"]
-        for path in (".github/**", "scripts/**", "packaging/**", "board-support/**", "userpatches/**", "tests/**", "docs/**", "build-armbian.sh"):
-            self.assertIn(path, paths)
+        self.assertEqual(set(events), {"workflow_dispatch"})
         inputs = events["workflow_dispatch"]["inputs"]
-        self.assertEqual(set(inputs), {"kernel_version"})
+        self.assertEqual(set(inputs), {"kernel_version", "release_tag"})
+        self.assertEqual(inputs["release_tag"]["type"], "string")
+        self.assertEqual(inputs["release_tag"]["required"], "false")
         self.assertEqual(inputs["kernel_version"]["options"], ["6.18.51"])
         self.assertEqual(inputs["kernel_version"]["type"], "choice")
         self.assertEqual(inputs["kernel_version"]["default"], "6.18.51")
@@ -50,6 +48,9 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertEqual(jobs["image"]["runs-on"], "ubuntu-24.04-arm")
         self.assertEqual(jobs["image"]["needs"], "validate")
         self.assertEqual(jobs["display"]["needs"], "validate")
+        self.assertEqual(jobs["release"]["permissions"], {"contents": "write", "actions": "read"})
+        for name in ("validate", "image", "display"):
+            self.assertNotIn("permissions", jobs[name])
         reviewed = {
             "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
             "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
@@ -67,6 +68,37 @@ class WorkflowPolicy(unittest.TestCase):
         steps = jobs["image"]["steps"]
         build = next(step for step in steps if step.get("id") == "build")
         self.assertLess(int(build["timeout-minutes"]), int(jobs["image"]["timeout-minutes"]) - 45)
+
+    def test_release_is_manual_main_only_after_all_success(self):
+        job = self.workflow["jobs"]["release"]
+        self.assertEqual(job["needs"], ["validate", "display", "image"])
+        for condition in ("github.event_name == 'workflow_dispatch'", "github.ref == 'refs/heads/main'",
+                          "needs.validate.result == 'success'", "needs.display.result == 'success'",
+                          "needs.image.result == 'success'"):
+            self.assertIn(condition, job["if"])
+        self.assertNotIn("always()", job["if"])
+        preflight = next(s for s in self.workflow["jobs"]["validate"]["steps"]
+                         if s.get("id") == "release_tag")
+        self.assertIn('"$GITHUB_EVENT_NAME" == workflow_dispatch', preflight["run"])
+        self.assertIn('"$GITHUB_REF" == refs/heads/main', preflight["run"])
+        self.assertIn("ci-publish-release.py preflight", preflight["run"])
+        self.assertEqual(preflight["env"]["INPUT_RELEASE_TAG"], "${{ inputs.release_tag }}")
+
+    def test_release_uses_exact_current_attempt_and_verified_assets(self):
+        steps = self.workflow["jobs"]["release"]["steps"]
+        download = next(s for s in steps if 'gh run download' in s.get("run", ""))
+        self.assertEqual(download["run"].count('gh run download "$GITHUB_RUN_ID"'), 2)
+        for name in ("e87n-trixie-6.18.51-candidate", "e87n-display-candidate"):
+            self.assertIn(name + '-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}', download["run"])
+        self.assertNotIn("--pattern", download["run"])
+        prepare = next(s for s in steps if "ci-prepare-release.py" in s.get("run", ""))
+        publish = next(s for s in steps if "ci-publish-release.py publish" in s.get("run", ""))
+        self.assertLess(steps.index(prepare), steps.index(publish))
+        self.assertIn('--source-commit "$GITHUB_SHA"', prepare["run"])
+        self.assertIn('--run-attempt "$GITHUB_RUN_ATTEMPT"', prepare["run"])
+        self.assertIn('--source-commit "$GITHUB_SHA"', publish["run"])
+        self.assertNotIn("--clobber", publish["run"])
+        self.assertEqual(publish["env"]["RELEASE_TAG"], "${{ needs.validate.outputs.release_tag }}")
 
     def test_failure_uploads(self):
         for kind in ("image", "display"):

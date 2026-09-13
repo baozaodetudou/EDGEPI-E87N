@@ -2,7 +2,7 @@
 
 目标是 **Debian 13 Trixie / Linux 6.18.51 最小命令行系统**，包含正常 APT、有线 DHCP、SSH 和小屏。默认配置以 [DEFAULTS.md](DEFAULTS.md) 为准；这仍是实验性 E87N 移植，尚无 Debian 实机首启与硬件验收记录。
 
-当前源码需要新构建和对应验证；旧的[屏幕/风扇候选](candidate-display-fan-20260913.md)不会因修改仓库而自动更新。已有可丢弃 rootfs 副本的用户空间集成结果见本文末尾，其范围不包含新内核或新完整镜像。
+当前最小配置已在 [Actions 34737922588](https://github.com/baozaodetudou/EDGEPI-E87N/actions/runs/34737922588) 完成完整构建、实际镜像静态审计和上传，源码为 `2a60011`，详见[故障修复及本轮产物记录](ci-keygen-fix-20260913.md)。旧的[屏幕/风扇候选](candidate-display-fan-20260913.md)不会因修改仓库而自动更新。可丢弃 rootfs 副本的用户空间集成与云端镜像构建是两类独立证据，均不包含实体板卡启动。
 
 ## 默认软件范围
 
@@ -60,7 +60,7 @@ RAID/LVM 管理配置不属于默认最小系统；安装相关工具并选择�
 
 | 检查 | 已记录结果 |
 | --- | --- |
-| 系统验证器夹具 | 20 项 `test-verify-system.py` 和 5 项默认策略回归通过；包含 keygen mask、显示包版本、归属与 conffiles 检查 |
+| 系统验证器夹具 | 原 20 项，SSH keygen 修复后增至 27 项并全部通过；另有 5 项默认策略回归，包含 keygen mask、显示包版本、归属与 conffiles 检查 |
 | 真实 rootfs 副本集成 | 最新 hook 安装版本化 `e87n-display` 包并设置 root 密码 `doumao`；实际副本的 `verify-system.py` 静态检查通过 |
 | APT 与 locale | 签名源 `apt update`、安装并执行 `hello` 成功；`locale charmap` 为 `UTF-8` |
 | SSH/PAM | 独立网络 namespace 内通过 loopback 完成真实 root 密码认证；测试监听端口为 22222，系统默认端口仍为 22 |
@@ -71,4 +71,4 @@ RAID/LVM 管理配置不属于默认最小系统；安装相关工具并选择�
 
 已复跑 DNS 顺序修正后的集成：定制结束后保留构建期 DNS，APT 更新及安装完成后才模拟框架最终 resolved 链接。密码 SSH、UTF-8、身份生成及原镜像不变检查再次通过。显示包安装/升级/卸载/重装/purge 的 19 项测试通过。
 
-2026-09-13 11:10:49 CST 完成的 VM 镜像构建使用已被替代的旧配置，不交付为当前最小配置。新完整构建、产物校验、[GitHub Actions](GITHUB-ACTIONS.md) 成功 run/artifacts 与实机验收结果仍待记录；没有据此发布 Release。
+2026-09-13 11:10:49 CST 完成的 VM 镜像构建使用已被替代的旧配置，不交付为当前最小配置。随后首个最小配置云端镜像因 SSH keygen 检查器误报导致 job 失败；修复后，本轮 Actions 于 12:45:32 CST 完成，三个 job 均成功，完整镜像审计通过。失败产物的本地只读复验和可丢弃副本 SSH/APT 复测也通过，具体证据与边界见[本轮记录](ci-keygen-fix-20260913.md)。实机验收仍待进行，没有据此发布 Release。

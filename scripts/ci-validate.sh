@@ -10,3 +10,5 @@ actionlint .github/workflows/build-e87n.yml
 for script in scripts/ci-*.sh; do bash -n "$script"; done
 shellcheck scripts/ci-*.sh
 python3 tests/test-ci-workflow.py
+python3 tests/test-ci-prepare-release.py
+python3 tests/test-ci-publish-release.py

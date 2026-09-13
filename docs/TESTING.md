@@ -1,6 +1,6 @@
 # 测试与验证 E87N Armbian
 
-当前测试目标是 [DEFAULTS.md](DEFAULTS.md) 中的最小配置；已有可丢弃 rootfs 副本的用户空间集成结果，新内核和完整镜像仍需另行构建验证。诊断、网络与系统静态检查分别使用 `tests/test-doctor.py`、`tests/test-network-policy.py` 和 `tests/test-verify-system.py`；最后一项需要专用 Linux 构建环境的 root 身份来创建临时 root-owned 夹具，不挂载设备。网络测试要求 GNU patch，macOS 可用 `gpatch`，并会打印实际工具版本。
+当前测试目标是 [DEFAULTS.md](DEFAULTS.md) 中的最小配置；本轮云端完整构建和实际镜像静态审计已通过，另有可丢弃 rootfs 副本的用户空间集成结果，详见[本轮记录](ci-keygen-fix-20260913.md)。诊断、网络与系统静态检查分别使用 `tests/test-doctor.py`、`tests/test-network-policy.py` 和 `tests/test-verify-system.py`；最后一项需要专用 Linux 构建环境的 root 身份来创建临时 root-owned 夹具，不挂载设备。网络测试要求 GNU patch，macOS 可用 `gpatch`，并会打印实际工具版本。
 
 新镜像必须执行 `verify-image.sh --release trixie --require-usb-root --require-display-fan --require-system candidate.img`。`--require-system` 核对 `root` / `doumao` 密码登录配置、首次 SSH 前生成独立身份的服务依赖、无串口自动登录、无旧初始化服务、networkd/netplan DHCP、上海时区、中文 UTF-8、签名 APT 源、预装 `e87n-display` 包和真实 DTB 的 GMAC aliases。它不要求默认安装 RAID/LVM 管理套件，也不自动调用 `verify-lts-platform.sh --require-storage`。这些都是静态检查，不执行镜像程序，也不能证明 SSH 已能登录。
 
@@ -16,7 +16,7 @@
 | 框架加载 / 补丁发现与应用 | 固定框架、14 个补丁、指定 Linux 基线；可选实际 DTB 编译 | 完整内核已编译或设备可启动 |
 | 真实包 / 配置 / DTB 静态检查 | 本轮实际生成的文件 | rootfs、initramfs 或所有硬件正常 |
 | `verify-image.sh` | 完成的 raw 镜像、真实只读 loop/GPT/ext4/UUID/initramfs；显式启用 USB-root、显示/风扇与最小系统检查 | U-Boot 能加载、首启成功或 eMMC 写入安全 |
-| `smoke-minimal-userspace.sh` | 旧候选的可丢弃 rootfs 副本执行最新 customize、APT、locale 与隔离 loopback SSH/PAM | 新内核/镜像构建、完整 PID 1 启动、实体网口或板卡通过 |
+| `smoke-minimal-userspace.sh` | 可信候选的可丢弃 rootfs 副本执行最新 customize、APT、locale 与隔离 loopback SSH/PAM | 新内核/镜像构建、完整 PID 1 启动、实体网口或板卡通过 |
 | 上板证据采集 | 已经启动的 Linux 板卡日志和只读状态 | 屏幕效果、风扇起转、负载稳定性或完整硬件验收 |
 
 ## 不需要构建源码或设备的 fixture 测试
@@ -105,6 +105,8 @@ sudo python3 -B tests/test-verify-system.py
 
 2026-09-13 已在原生 ARM64 Debian 13 VM 完成：16 项 `test-verify-system.py` 夹具通过；最新 customize hook 在旧候选的可丢弃 rootfs 副本中安装版本化 `e87n-display` 包、设置 root 密码 `doumao`，实际副本的 `verify-system.py` 静态检查通过。签名 APT 源更新、安装并执行 `hello` 成功，`locale charmap` 返回 `UTF-8`。独立网络 namespace 的 loopback SSH/PAM 真实 root 密码登录成功；新生成密钥彼此唯一，重复生成保持已有密钥。原始输入镜像测试前后内容未变。
 
+上述为早期记录。本轮修复后，系统夹具已扩至 27 项，Linux 完整回归及云端 `validate` 均通过；以首轮云端最小镜像为输入的可丢弃副本也重新完成同一 SSH/APT/locale/身份集成检查，退出 0。真实 Debian SSH keygen 单元及负例现已纳入回归，见[修复记录](ci-keygen-fix-20260913.md)。
+
 重复此集成检查需要可丢弃的原生 ARM64 Linux 构建 VM、root、loop/mount、mount/PID/network namespace、chroot、SSH 客户端及静态验证器所需工具，并需要访问签名 Debian 软件源和足够空间复制 rootfs。从仓库根目录运行，输入为可信、构建已结束且不再变化的普通 raw 镜像文件：
 
 ```sh
@@ -113,7 +115,7 @@ sudo bash tests/smoke-minimal-userspace.sh /absolute/path/to/existing-candidate.
 
 脚本只读挂载输入后复制 bootfs/rootfs；所有 customize、软件安装和密钥生成写入专用副本，使用 `policy-rc.d` 抑制安装过程启动服务。SSH 单独在新网络 namespace 的 `127.0.0.1:22222` 测试，镜像默认 SSH 端口仍为 22。脚本比较输入镜像测试前后的哈希，结束时释放自身挂载并保留打印出的副本目录供检查；它不是纯静态验证器。
 
-这不是完整系统启动：测试使用 VM 内核，副本保留旧候选的内核与布局，也可能保留旧软件包。通过结果不证明新内核裁剪、最终最小包集合、新镜像构建、PID 1 服务启动顺序、真实 DHCP/DNS/NTP、显示或风扇。没有新的镜像 SHA-256 或物理启动结果；不要把该副本当作可交付新镜像。相关状态同时记录于 [SYSTEM-READINESS.md](SYSTEM-READINESS.md)。
+这不是完整系统启动：测试使用 VM 内核，副本保留输入候选的内核与布局，也可能保留旧软件包。通过结果不证明新内核裁剪、最终最小包集合、新镜像构建、PID 1 服务启动顺序、真实 DHCP/DNS/NTP、显示或风扇。此测试不产生可交付镜像或物理启动结果；云端原始镜像有其独立校验值，不要把该测试副本当作交付物。相关状态同时记录于 [SYSTEM-READINESS.md](SYSTEM-READINESS.md)。
 
 ## 需要已准备框架或 Linux 基线的检查
 
