@@ -117,13 +117,15 @@ class PublisherTests(unittest.TestCase):
         self.root = Path(temp.name).resolve()
         self.assets = self.root / "assets"
         self.assets.mkdir()
-        for name in ("e87n-trixie.img.xz", "e87n-display_1.2.3_all.deb", "kernel-packages.tar.xz",
+        for name in ("e87n-trixie-uboot-firmware.tar", "e87n-display_1.2.3_all.deb", "kernel-packages.tar.xz",
                      "build-evidence.tar.xz", "RELEASE-NOTES.md"):
             (self.assets / name).write_bytes(("fixture " + name).encode())
         for kind in ("image", "display"):
             metadata = {"kind": kind, "build_step_outcome": "success", "source_commit": SOURCE,
                         "target": dict(publisher.TARGET), "collection_errors": [],
                         "image_static_audit": "passed" if kind == "image" else "not applicable"}
+            if kind == "image":
+                metadata.update(factory_format="e87n-uboot-firmware-tar-v1", factory_static_audit="passed")
             (self.assets / f"{kind}-build-metadata.json").write_text(json.dumps(metadata))
         self.manifest()
         self.fake = FakeGh(self)
@@ -271,9 +273,9 @@ class PublisherTests(unittest.TestCase):
         self.assertTrue(any(c[-1].endswith("releases/42/assets?per_page=100") for c in calls[upload_index + 1:edit_index]))
         upload = calls[upload_index]
         self.assertEqual(set(upload[upload.index("--") + 1:]),
-                         {str(self.assets / "e87n-trixie.img.xz"), str(self.assets / "e87n-display_1.2.3_all.deb")})
+                         {str(self.assets / "e87n-trixie-uboot-firmware.tar"), str(self.assets / "e87n-display_1.2.3_all.deb")})
         self.assertEqual({a["name"] for a in self.fake.assets},
-                         {"e87n-trixie.img.xz", "e87n-display_1.2.3_all.deb"})
+                         {"e87n-trixie-uboot-firmware.tar", "e87n-display_1.2.3_all.deb"})
         self.assertTrue(self.fake.published and self.fake.tag_exists)
         self.assertTrue(calls[-1][-1].endswith(f"git/ref/tags/{TAG}"))
 
@@ -296,7 +298,7 @@ class PublisherTests(unittest.TestCase):
                 self.assertIn("retained without cleanup", self.errors.getvalue())
 
     def test_existing_draft_assets_are_preserved_without_upload_or_clobber(self):
-        self.fake.assets = [{"name": "old.img.xz", "size": 3, "state": "uploaded"}]
+        self.fake.assets = [{"name": "old-uboot-firmware.tar", "size": 3, "state": "uploaded"}]
         before = copy.deepcopy(self.fake.assets)
         self.assertNotEqual(self.run_cli(), 0)
         self.assertEqual(self.actions(), ["create"])
@@ -371,6 +373,11 @@ class PublisherTests(unittest.TestCase):
                       {**publisher.TARGET, "kernel": "6.18.50"}, {**publisher.TARGET, "extra_storage": "yes"})]
             if kind == "image":
                 cases.append({**original, "image_static_audit": "not proven"})
+                for key, invalid in (
+                        ("factory_format", (None, "", "raw-gpt", "e87n-uboot-firmware-tar-v2")),
+                        ("factory_static_audit", (None, "", "failed", "not proven", "not applicable", True))):
+                    cases.append({k: v for k, v in original.items() if k != key})
+                    cases.extend({**original, key: value} for value in invalid)
             for metadata in cases:
                 with self.subTest(kind=kind, metadata=metadata):
                     path.write_text(json.dumps(metadata))
@@ -399,7 +406,7 @@ class PublisherTests(unittest.TestCase):
         self.assertEqual(self.run_cli(), 0)
 
     def test_unexpected_missing_and_duplicate_required_files_rejected_locally(self):
-        for name in ("another.img.xz", "e87n-display_2_all.deb", "extra.txt", "evil;id.img.xz", "image#label.img.xz"):
+        for name in ("another-uboot-firmware.tar", "another.img.xz", "e87n-display_2_all.deb", "extra.txt", "evil;id-uboot-firmware.tar", "image#label-uboot-firmware.tar"):
             path = self.assets / name
             path.write_text("fixture")
             self.manifest()
@@ -414,6 +421,30 @@ class PublisherTests(unittest.TestCase):
             self.assertEqual(self.fake.calls, [])
             path.write_bytes(saved)
 
+    def test_legacy_and_compressed_system_payloads_rejected_before_auth(self):
+        path = self.assets / "e87n-trixie-uboot-firmware.tar"
+        for name in ("e87n-trixie.img.xz", "e87n-trixie.img", "e87n-trixie-uboot-firmware.tar.xz"):
+            with self.subTest(name=name):
+                wrong = path.with_name(name)
+                path.rename(wrong)
+                self.manifest()
+                self.assertNotEqual(self.run_cli(), 0)
+                self.assertEqual(self.fake.calls, [])
+                wrong.rename(path)
+        self.manifest()
+
+    def test_empty_public_payloads_rejected_before_auth(self):
+        for name in ("e87n-trixie-uboot-firmware.tar", "e87n-display_1.2.3_all.deb"):
+            with self.subTest(name=name):
+                path = self.assets / name
+                saved = path.read_bytes()
+                path.write_bytes(b"")
+                self.manifest()
+                self.assertNotEqual(self.run_cli(), 0)
+                self.assertEqual(self.fake.calls, [])
+                path.write_bytes(saved)
+        self.manifest()
+
     def test_symlink_directories_files_and_nonregular_files_rejected_locally(self):
         link = self.root / "alias"
         link.symlink_to(self.assets, target_is_directory=True)
@@ -421,8 +452,8 @@ class PublisherTests(unittest.TestCase):
         parent = self.root / "parent"
         parent.symlink_to(self.root, target_is_directory=True)
         self.assertNotEqual(self.run_cli(assets=str(parent / "assets")), 0)
-        path = self.assets / "linked.img.xz"
-        path.symlink_to(self.assets / "e87n-trixie.img.xz")
+        path = self.assets / "linked-uboot-firmware.tar"
+        path.symlink_to(self.assets / "e87n-trixie-uboot-firmware.tar")
         self.assertNotEqual(self.run_cli(), 0)
         path.unlink()
         path.mkdir()
@@ -431,12 +462,12 @@ class PublisherTests(unittest.TestCase):
         os.mkfifo(path)
         self.assertNotEqual(self.run_cli(), 0)
         path.unlink()
-        os.link(self.assets / "e87n-trixie.img.xz", path)
+        os.link(self.assets / "e87n-trixie-uboot-firmware.tar", path)
         self.assertNotEqual(self.run_cli(), 0)
         self.assertEqual(self.fake.calls, [])
 
     def test_corrupt_payload_is_rejected_before_auth_and_hashes_are_streamed(self):
-        (self.assets / "e87n-trixie.img.xz").write_bytes(b"changed payload")
+        (self.assets / "e87n-trixie-uboot-firmware.tar").write_bytes(b"changed payload")
         self.assertNotEqual(self.run_cli(), 0)
         self.assertEqual(self.fake.calls, [])
         self.manifest()

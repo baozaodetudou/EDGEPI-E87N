@@ -44,8 +44,8 @@ fi
 # Armbian's patching.py uses USERPATCHES_PATH/kernel, not userpatches/patch/kernel.
 # Check the inventory even in native hook-only mode.
 patch_files=("$USERPATCHES_PATH/kernel/edgepi-e87n-6.18/"*.patch)
-expected_prefixes=(0000 360 361 740 750 752 790 791 792 821 830 843 900 901)
-[[ ${#patch_files[@]} == "${#expected_prefixes[@]}" ]] || exit_with_error 'Expected exactly 14 Linux 6.18 patches'
+expected_prefixes=(0000 360 361 740 750 752 790 791 792 821 830 843 900 901 902)
+[[ ${#patch_files[@]} == "${#expected_prefixes[@]}" ]] || exit_with_error 'Expected exactly 15 Linux 6.18 patches'
 for index in "${!expected_prefixes[@]}"; do
 	patch_name=${patch_files[$index]##*/}
 	[[ -f "${patch_files[$index]}" && "${patch_name%%-*}" == "${expected_prefixes[$index]}" ]] ||
@@ -325,5 +325,5 @@ if [[ "$hook_only" == no ]]; then
 else
 	printf 'SCOPE: hook-only; Bash 5 Armbian family loader NOT tested\n'
 fi
-printf 'PASS: 14 patch prefixes including 901; thermal/fan/display and base networking/storage preserved; DM/RAID/XFRM interface opt-in; no early assembly or rootfs change\n'
+printf 'PASS: 15 patch prefixes including 902; thermal/fan/display and base networking/storage preserved; DM/RAID/XFRM interface opt-in; no early assembly or rootfs change\n'
 printf 'SCOPE: request arrays and seed overlay tested; Kconfig resolution, kernel/image build and hardware NOT tested\n'

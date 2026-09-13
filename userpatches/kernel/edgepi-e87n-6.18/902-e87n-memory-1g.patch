@@ -1,0 +1,45 @@
+From: E87N Armbian port <local>
+Subject: [PATCH] arm64: dts: mediatek: describe E87N RAM and firmware reservations
+
+The read-only live E87N DT confirms 1 GiB at 0x40000000, a 64 KiB
+ramoops area at 0x7ff70000 and a 512 KiB secure monitor at 0x7ff80000.
+Keep the shared wmcpu reservation at 0x50000000 intact. These overrides
+apply to E87N only, after 901; other MT7987 boards are unchanged.
+
+Use one 64 KiB ramoops record within the observed region. This record
+policy is explicit port configuration, not a claim about vendor sizes.
+The secure monitor must never be mapped into normal Linux memory.
+
+---
+diff --git a/arch/arm64/boot/dts/mediatek/mt7987a-edgepi-e87n.dts b/arch/arm64/boot/dts/mediatek/mt7987a-edgepi-e87n.dts
+--- a/arch/arm64/boot/dts/mediatek/mt7987a-edgepi-e87n.dts
++++ b/arch/arm64/boot/dts/mediatek/mt7987a-edgepi-e87n.dts
+@@ -12,6 +12,28 @@
+ 	model = "EdgePi E87N";
+ 	compatible = "edgepi,e87n", "mediatek,mt7987a", "mediatek,mt7987";
+ 
++	memory {
++		device_type = "memory";
++		reg = <0 0x40000000 0 0x40000000>;
++	};
++
++	reserved-memory {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++
++		ramoops@7ff70000 {
++			compatible = "ramoops";
++			reg = <0 0x7ff70000 0 0x10000>;
++			record-size = <0x10000>;
++		};
++
++		secmon@7ff80000 {
++			reg = <0 0x7ff80000 0 0x80000>;
++			no-map;
++		};
++	};
++
+ 	aliases {
+ 		serial0 = &uart0;
+ 		ethernet0 = &gmac0;

@@ -172,7 +172,14 @@ allocated=$(losetup --find --show --read-only --partscan "$image_fd")
 loopdev=$allocated
 printf 'Owned read-only loop: %s\n' "$loopdev"
 for device in "$loopdev" "${loopdev}p1" "${loopdev}p2"; do
-	[[ $(blockdev --getro "$device") == 1 ]] || fail "device is not read-only: $device"
+	# Kernel partition registration can precede udev's device nodes (observed
+	# on the ARM64 VM). Retry only lookup errors; never accept a writable loop.
+	readonly_state=''
+	for ((attempt = 0; attempt < 30; attempt++)); do
+		if readonly_state=$(blockdev --getro "$device" 2>/dev/null); then break; fi
+		sleep 0.1
+	done
+	[[ $readonly_state == 1 ]] || fail "device is not read-only: $device"
 done
 for device in "${loopdev}p1" "${loopdev}p2"; do
 	[[ $(blkid -p -s TYPE -o value "$device") == ext4 ]] || fail "partition is not ext4: $device"

@@ -1,0 +1,17 @@
+[Unit]
+Description=Read E87N factory MACs before DHCP
+After=local-fs.target systemd-udev-trigger.service systemd-udev-settle.service
+Before=systemd-networkd.service
+
+[Service]
+Type=oneshot
+ExecStartPre=-/usr/bin/udevadm settle --timeout=5
+ExecStart=/usr/bin/python3 -I /usr/lib/e87n/factory-boot.py mac
+RemainAfterExit=yes
+TimeoutStartSec=15
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/run/systemd/network
+PrivateTmp=yes
+UMask=0022

@@ -82,17 +82,29 @@ def main():
     counts = {}
     if args.kind == "image":
         output = REPO / "source/armbian-build/output"
-        counts["images"] = collect_tree(output / "images", "images", (".img", ".img.xz", ".img.gz", ".img.zst"), errors)
+        counts["images"] = collect_tree(REPO / "output/ci/firmware", "images", (".tar",), errors)
         counts["packages"] = collect_tree(output / "debs", "packages/armbian", (".deb",), errors)
         counts["framework_logs"] = collect_tree(output / "logs", "logs/armbian", (".log", ".txt", ".html", ".json", ".gz", ".xz", ".zst"), errors)
     else:
         counts["packages"] = collect_tree(REPO / "output/ci/display-debs", "packages/display", (".deb",), errors)
     counts["ci_logs"] = collect_tree(REPO / "output/ci/logs", "logs/ci", (".log", ".exit-code", ".txt"), errors)
 
+    factory_audit_passed = False
     if args.status == "success":
         for required in (("images", "packages") if args.kind == "image" else ("packages",)):
             if not counts[required]:
                 errors.append("successful build is missing " + required)
+        if args.kind == "image":
+            if counts["images"] != 1:
+                errors.append("successful build requires exactly one factory firmware .tar")
+            try:
+                with contained_path(DEST / "logs/ci/factory-firmware-audit-1.log").open("rb") as audit:
+                    factory_audit_passed = any(line.strip() == b"PASS" or
+                        line.startswith((b"PASS:", b"PASS ")) for line in audit)
+                if not factory_audit_passed:
+                    errors.append("factory firmware audit log is missing PASS")
+            except (OSError, ValueError) as error:
+                errors.append("required factory firmware audit log: " + str(error))
     metadata = {
         "kind": args.kind,
         "build_step_outcome": args.status or "not-started",
@@ -103,6 +115,8 @@ def main():
         "armbian_commit": "7c1bb29eb0e7bd75b0703d86fe654b2680e646da",
         "kernel_commit": "f6388029ea9e2c9e807d73827658738ea131faee",
         "image_static_audit": ("passed" if args.status == "success" else "not proven") if args.kind == "image" else "not applicable",
+        "factory_format": "e87n-uboot-firmware-tar-v1" if args.kind == "image" else "not applicable",
+        "factory_static_audit": ("passed" if factory_audit_passed else "not proven") if args.kind == "image" else "not applicable",
         "board_validation": "pending; a successful build or checksum is not hardware acceptance",
         "failure_artifacts": "may be incomplete; consult build_step_outcome and logs before use",
         "files_collected": counts,

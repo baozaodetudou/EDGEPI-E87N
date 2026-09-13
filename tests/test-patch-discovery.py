@@ -29,7 +29,7 @@ patch_dir = PatchDir(
     str(source),
 )
 files = patch_dir.find_files_patch_files()
-expected_prefixes = ["0000", "360", "361", "740", "750", "752", "790", "791", "792", "821", "830", "843", "900", "901"]
+expected_prefixes = ["0000", "360", "361", "740", "750", "752", "790", "791", "792", "821", "830", "843", "900", "901", "902"]
 files = sorted(files, key=lambda item: item.file_name)
 if len(files) != len(expected_prefixes):
     raise SystemExit(f"FAIL: Armbian discovered {len(files)} patches, expected {len(expected_prefixes)}")

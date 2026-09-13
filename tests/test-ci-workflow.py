@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -146,6 +147,35 @@ export -f python3
             self.assertEqual(collect["if"], "${{ always() }}")
             self.assertIn("steps.build.outcome", collect["env"]["BUILD_OUTCOME"])
 
+    def test_factory_firmware_dependencies(self):
+        install = next(s["run"] for s in self.workflow["jobs"]["validate"]["steps"]
+                       if s.get("name") == "Install validation tools")
+        runner = (REPO / "scripts/ci-prepare-runner.sh").read_text()
+        for package in ("u-boot-tools", "e2fsprogs", "util-linux", "device-tree-compiler", "python3",
+                        "initramfs-tools-core", "fdisk", "libcrypt1"):
+            with self.subTest(package=package):
+                self.assertIn(package, install.split())
+                self.assertIn(package, runner.split())
+        regressions = (REPO / "scripts/ci-regressions.sh").read_text()
+        for tool in ("resize2fs", "fdtput", "mkimage", "lsinitramfs"):
+            self.assertIn(tool, regressions.replace(";", " ").split())
+
+    def test_factory_compile_checks_and_regression_suites_are_mandatory(self):
+        validate = (REPO / "scripts/ci-validate.sh").read_text()
+        regressions = (REPO / "scripts/ci-regressions.sh").read_text()
+        for name in ("scripts/build-factory-firmware.py", "scripts/verify-factory-firmware.py",
+                     "scripts/prepare-factory-rootfs.py", "board-support/factory-boot/factory_boot.py",
+                     "scripts/factory_firmware.py", "tests/test-factory-firmware.py", "tests/test-factory-rootfs.py"):
+            self.assertIn(name, validate)
+        for suite in ("factory-firmware", "factory-rootfs"):
+            self.assertIn(f'run_fixture {suite} sudo -n python3 -B tests/test-{suite}.py', regressions)
+
+    def test_firmware_candidate_upload_does_not_compress_again(self):
+        upload = next(s for s in self.workflow["jobs"]["image"]["steps"]
+                      if s.get("uses", "").startswith("actions/upload-artifact@")
+                      and s["with"]["path"] == "output/ci/artifacts/")
+        self.assertEqual(upload["with"]["compression-level"], "0")
+
 
 class Fixtures(unittest.TestCase):
     def setUp(self):
@@ -153,12 +183,13 @@ class Fixtures(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         (self.root / "scripts").mkdir()
-        for name in ("ci-build.sh", "ci-collect-artifacts.py", "ci-prepare-runner.sh"):
+        for name in ("ci-build.sh", "ci-collect-artifacts.py", "ci-prepare-runner.sh", "ci-validate.sh"):
             shutil.copyfile(REPO / "scripts" / name, self.root / "scripts" / name)
         self.env = {**os.environ, "GITHUB_SHA": "fixture-commit", "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "2"}
         self.env["RUNNER_TEMP"] = str(self.root)
-        for key in ("BASH_ENV", "E87N_KERNEL_VERSION", "GITHUB_ACTIONS", "E87N_RUNNER_ENVIRONMENT"):
-            self.env.pop(key, None)
+        for key in list(self.env):
+            if key.startswith("E87N_MOCK_") or key in ("BASH_ENV", "E87N_KERNEL_VERSION", "GITHUB_ACTIONS", "E87N_RUNNER_ENVIRONMENT"):
+                self.env.pop(key, None)
 
     def put(self, name, contents="fixture\n"):
         path = self.root / name
@@ -170,8 +201,41 @@ class Fixtures(unittest.TestCase):
         return subprocess.run(["bash", str(self.root / "scripts" / script), *args], cwd=self.root, env=self.env, text=True, capture_output=True)
 
     def collect(self, kind, status):
-        import sys
         return subprocess.run([sys.executable, str(self.root / "scripts/ci-collect-artifacts.py"), "--kind", kind, "--status", status], cwd=self.root, env=self.env, text=True, capture_output=True)
+
+    def test_factory_compile_checks_fail_on_missing_or_invalid_python(self):
+        # Real Python compiler, isolated inputs; factory suites must not execute
+        # during static validation (their Linux execution belongs to regressions).
+        names = ("scripts/build-factory-firmware.py", "scripts/verify-factory-firmware.py",
+                 "scripts/prepare-factory-rootfs.py", "board-support/factory-boot/factory_boot.py",
+                 "scripts/factory_firmware.py", "tests/test-factory-firmware.py", "tests/test-factory-rootfs.py")
+        source = 'raise AssertionError("factory code must only be compiled here")\n'
+        for name in names:
+            self.put(name, source)
+        for name in ("test-ci-workflow.py", "test-ci-prepare-release.py", "test-ci-publish-release.py"):
+            self.put("tests/" + name, "pass\n")
+        mocks = self.put("validation-mocks.sh", '''actionlint() { return 0; }
+shellcheck() { return 0; }
+python3() { command "$E87N_TEST_PYTHON" "$@"; }
+export -f actionlint shellcheck python3
+''')
+        self.env.update(BASH_ENV=str(mocks), E87N_TEST_PYTHON=sys.executable)
+        result = self.run_script("ci-validate.sh")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("PASS: CI and factory firmware Python compilation", result.stdout)
+        self.assertFalse(list(self.root.rglob("__pycache__")))
+        for name in names:
+            with self.subTest(name=name):
+                path = self.root / name
+                path.unlink()
+                result = self.run_script("ci-validate.sh")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("FileNotFoundError", result.stderr)
+                path.write_text("def broken(:\n")
+                result = self.run_script("ci-validate.sh")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("SyntaxError", result.stderr)
+                path.write_text(source)
 
     def prepare_mocks(self, result=0, image=True):
         self.put("packaging/e87n-display/VERSION", "1.2.3\n")
@@ -182,10 +246,30 @@ class Fixtures(unittest.TestCase):
         mocks = self.put("mocks.sh", """uname() { if [[ $1 == -s ]]; then echo Linux; else echo aarch64; fi; }
 sudo() {
     if [[ $* == '-n true' ]]; then return 0; fi
-    [[ $1 == -n && $2 == bash && $3 == scripts/verify-image.sh ]] || return 99
-    printf '%s\\n' "$@" > audit-args
-    printf 'fixture audit result\\n'
-    return "${E87N_MOCK_AUDIT_EXIT:-0}"
+    if [[ $1 == -n && $2 == bash && $3 == scripts/verify-image.sh ]]; then
+        printf 'image-audit\\n' >> build-events
+        printf '%s\\n' "$@" > audit-args
+        printf 'fixture audit result\\n'
+        return "${E87N_MOCK_AUDIT_EXIT:-0}"
+    fi
+    [[ $1 == -n && $2 == python3 ]] || return 99
+    case $3 in
+        scripts/build-factory-firmware.py)
+            [[ $# == 7 && $4 == --image && $6 == --output ]] || return 99
+            printf 'firmware-build\\n' >> build-events
+            printf '%s\\n' "$@" > factory-build-args
+            printf 'fixture firmware' > "$7"
+            return "${E87N_MOCK_FACTORY_BUILD_EXIT:-0}"
+            ;;
+        scripts/verify-factory-firmware.py)
+            [[ $# == 4 && -s $4 ]] || return 99
+            printf 'firmware-audit\\n' >> build-events
+            printf '%s\\n' "$@" > factory-audit-args
+            printf '%s\\n' "${E87N_MOCK_FACTORY_AUDIT_OUTPUT:-PASS: fixture factory firmware audit}"
+            return "${E87N_MOCK_FACTORY_AUDIT_EXIT:-0}"
+            ;;
+        *) return 99 ;;
+    esac
 }
 xz() {
     [[ $1 == -dc && $2 == -- ]] || return 99
@@ -211,6 +295,24 @@ export -f uname sudo xz dpkg-deb
         self.assertEqual(raw.read_text(), "fixture raw image")
         self.assertTrue(raw.parent.name.startswith("e87n-ci-audit."))
         self.assertNotIn("output", raw.parts)
+        firmware = self.root / "output/ci/firmware/test-uboot-firmware.tar"
+        self.assertEqual((self.root / "factory-build-args").read_text().splitlines(),
+                         ["-n", "python3", "scripts/build-factory-firmware.py", "--image", str(raw), "--output", str(firmware)])
+        self.assertEqual((self.root / "factory-audit-args").read_text().splitlines(),
+                         ["-n", "python3", "scripts/verify-factory-firmware.py", str(firmware)])
+        self.assertEqual(firmware.read_text(), "fixture firmware")
+        self.assertEqual((self.root / "source/armbian-build/output/images/test.img.xz").read_text(), "fixture image")
+        self.assertEqual((self.root / "build-events").read_text().splitlines(),
+                         ["image-audit", "firmware-build", "firmware-audit"])
+        self.assertIn("PASS", (self.root / "output/ci/logs/factory-firmware-audit-1.log").read_text())
+        self.put("source/armbian-build/output/debs/kernel.deb")
+        result = self.collect("image", "success")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        metadata = json.loads((self.root / "output/ci/artifacts/build-metadata.json").read_text())
+        self.assertEqual(metadata["factory_format"], "e87n-uboot-firmware-tar-v1")
+        self.assertEqual(metadata["factory_static_audit"], "passed")
+        self.assertEqual(metadata["files_collected"]["images"], 1)
+        self.assertEqual([p.name for p in (self.root / "output/ci/artifacts/images").iterdir()], [firmware.name])
 
     def test_audit_failure_marks_build_and_collection_failed(self):
         self.prepare_mocks()
@@ -224,7 +326,34 @@ export -f uname sudo xz dpkg-deb
         metadata = json.loads((dest / "build-metadata.json").read_text())
         self.assertEqual(metadata["build_step_outcome"], "failure")
         self.assertEqual(metadata["image_static_audit"], "not proven")
+        self.assertEqual(metadata["factory_static_audit"], "not proven")
+        self.assertFalse((self.root / "factory-build-args").exists())
         self.assertFalse(list(dest.rglob("candidate.img")))
+
+    def test_factory_packager_failure_stops_verification_and_preserves_evidence(self):
+        self.prepare_mocks()
+        self.env["E87N_MOCK_FACTORY_BUILD_EXIT"] = "43"
+        result = self.run_script("ci-build.sh", "image")
+        self.assertEqual(result.returncode, 43, result.stdout + result.stderr)
+        self.assertEqual((self.root / "output/ci/logs/image.exit-code").read_text(), "43\n")
+        self.assertFalse((self.root / "factory-audit-args").exists())
+        self.assertEqual(self.collect("image", "failure").returncode, 0)
+        dest = self.root / "output/ci/artifacts"
+        metadata = json.loads((dest / "build-metadata.json").read_text())
+        self.assertEqual(metadata["factory_static_audit"], "not proven")
+        self.assertTrue((dest / "logs/ci/image-audit-1.log").is_file())
+
+    def test_factory_verifier_failure_marks_build_failed_even_with_pass_output(self):
+        self.prepare_mocks()
+        self.env["E87N_MOCK_FACTORY_AUDIT_EXIT"] = "44"
+        result = self.run_script("ci-build.sh", "image")
+        self.assertEqual(result.returncode, 44, result.stdout + result.stderr)
+        self.assertEqual((self.root / "output/ci/logs/image.exit-code").read_text(), "44\n")
+        self.assertEqual(self.collect("image", "failure").returncode, 0)
+        dest = self.root / "output/ci/artifacts"
+        metadata = json.loads((dest / "build-metadata.json").read_text())
+        self.assertEqual(metadata["factory_static_audit"], "not proven")
+        self.assertIn("PASS", (dest / "logs/ci/factory-firmware-audit-1.log").read_text())
 
     def test_decompression_failure_prevents_audit(self):
         self.prepare_mocks()
@@ -251,6 +380,17 @@ export -f uname sudo xz dpkg-deb
         self.prepare_mocks(image=False)
         self.assertNotEqual(self.run_script("ci-build.sh", "image").returncode, 0)
 
+    def test_multiple_images_stop_before_audit_and_packaging(self):
+        self.prepare_mocks()
+        builder = self.root / "build-armbian.sh"
+        builder.write_text(builder.read_text().replace("exit 0\n",
+            "cp source/armbian-build/output/images/test.img.xz source/armbian-build/output/images/second.img.xz\nexit 0\n"))
+        result = self.run_script("ci-build.sh", "image")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("exactly one", result.stdout + result.stderr)
+        self.assertFalse((self.root / "audit-args").exists())
+        self.assertFalse((self.root / "factory-build-args").exists())
+
     def test_arbitrary_kernel_is_rejected_before_build(self):
         self.prepare_mocks()
         self.env["E87N_KERNEL_VERSION"] = "6.19; touch should-not-exist"
@@ -271,8 +411,19 @@ export -f uname sudo xz dpkg-deb
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("restricted to GitHub-hosted", result.stderr)
 
+    def test_stale_factory_output_is_preserved_and_rejected(self):
+        self.prepare_mocks()
+        sentinel = self.put("output/ci/firmware/old-uboot-firmware.tar", "keep me")
+        self.assertNotEqual(self.run_script("ci-build.sh", "image").returncode, 0)
+        self.assertEqual(sentinel.read_text(), "keep me")
+        self.assertFalse((self.root / "image-args").exists())
+
     def test_failed_image_collection_and_checksums(self):
-        image = self.put("source/armbian-build/output/images/candidate.img.xz", "partial image")
+        image = self.put("output/ci/firmware/candidate-uboot-firmware.tar", "partial firmware")
+        for name in ("candidate.img", "candidate.img.xz", "candidate.img.gz", "candidate.img.zst", "wrong.tar"):
+            self.put("source/armbian-build/output/images/" + name, "never upload")
+        for name in ("candidate.img", "candidate.img.xz", "candidate.tar.xz"):
+            self.put("output/ci/firmware/" + name, "never upload")
         self.put("source/armbian-build/output/debs/kernel/fixture.deb")
         self.put("source/armbian-build/output/logs/build.log")
         self.put("output/ci/logs/image.exit-code", "23\n")
@@ -284,7 +435,9 @@ export -f uname sudo xz dpkg-deb
         metadata = json.loads((dest / "build-metadata.json").read_text())
         self.assertEqual(metadata["build_step_outcome"], "failure")
         self.assertEqual(metadata["source_commit"], "fixture-commit")
-        self.assertEqual(image.stat().st_ino, (dest / "images/candidate.img.xz").stat().st_ino)
+        self.assertEqual(metadata["factory_format"], "e87n-uboot-firmware-tar-v1")
+        self.assertEqual(metadata["factory_static_audit"], "not proven")
+        self.assertEqual(image.stat().st_ino, (dest / "images/candidate-uboot-firmware.tar").stat().st_ino)
         for line in (dest / "SHA256SUMS").read_text().splitlines():
             digest, relative = line.split("  ", 1)
             self.assertEqual(digest, hashlib.sha256((dest / relative).read_bytes()).hexdigest())
@@ -294,6 +447,41 @@ export -f uname sudo xz dpkg-deb
         result = self.collect("image", "success")
         self.assertEqual(result.returncode, 1)
         self.assertTrue((self.root / "output/ci/artifacts/build-metadata.json").is_file())
+
+    def test_multiple_factory_tars_fail_successful_collection(self):
+        self.put("output/ci/firmware/first-uboot-firmware.tar")
+        self.put("output/ci/firmware/nested/second-uboot-firmware.tar")
+        self.put("source/armbian-build/output/debs/kernel.deb")
+        self.put("output/ci/logs/factory-firmware-audit-1.log", "PASS\n")
+        result = self.collect("image", "success")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("exactly one", result.stdout)
+
+    def test_missing_factory_audit_log_fails_successful_collection(self):
+        self.put("output/ci/firmware/candidate-uboot-firmware.tar")
+        self.put("source/armbian-build/output/debs/kernel.deb")
+        result = self.collect("image", "success")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("required factory firmware audit log", result.stdout)
+        metadata = json.loads((self.root / "output/ci/artifacts/build-metadata.json").read_text())
+        self.assertEqual(metadata["factory_static_audit"], "not proven")
+
+    def test_factory_audit_without_pass_fails_successful_collection(self):
+        self.put("output/ci/firmware/candidate-uboot-firmware.tar")
+        self.put("source/armbian-build/output/debs/kernel.deb")
+        self.put("output/ci/logs/factory-firmware-audit-1.log", "FAIL: malformed firmware\n")
+        result = self.collect("image", "success")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("missing PASS", result.stdout)
+
+    def test_legacy_image_alone_cannot_satisfy_successful_collection(self):
+        self.put("source/armbian-build/output/images/candidate.img.xz")
+        self.put("source/armbian-build/output/debs/kernel.deb")
+        self.put("output/ci/logs/factory-firmware-audit-1.log", "PASS\n")
+        result = self.collect("image", "success")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("exactly one", result.stdout)
+        self.assertFalse((self.root / "output/ci/artifacts/images").exists())
 
     def test_early_failure_still_has_metadata_and_checksums(self):
         result = self.collect("display", "skipped")

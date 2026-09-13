@@ -2,9 +2,11 @@
 
 当前配方采用 [DEFAULTS.md](DEFAULTS.md) 定义的最小系统：`root` / `doumao`、SSH 22 密码登录、networkd/netplan DHCP、`Asia/Shanghai`、`zh_CN.UTF-8`、正常 APT 和预装版本化 `e87n-display` 包。没有首次创建用户向导或强制公钥门槛，额外存储模块默认 `E87N_EXTRA_STORAGE=no`。范围与待测项见 [SYSTEM-READINESS.md](SYSTEM-READINESS.md)。
 
-新配置的完整构建、镜像检查与最终哈希尚待记录，尚未在 E87N 上启动或测试。[2026-09-13 屏幕/风扇候选记录](candidate-display-fan-20260913.md)仅证明旧配置当次的构建、静态检查与导出结果。2026-09-13 11:10:49 CST 完成的另一轮 VM 构建也使用已被替代的旧配置，不能交付为新最小配置镜像。构建后的检查见 [TESTING.md](TESTING.md)。
+当前交付为[原厂 U-Boot 未压缩 USTAR 固件](UBOOT-FIRMWARE.md)，Armbian `.img` / `.img.xz` 只作中间产物或历史证据，不可刷写。R4 本地已生成并独立审计 EXIT 0；R4 重新打包历史 Actions 34737922588 的原始 RAW，修正 DTB 的 1 GiB/保留区及 bootargs（含 902 等效修正），没有完整重编 Armbian 或内核。V3 因内核地址修正已废弃，主机导出及 SHA-256 比对已完成。没有 E87N 重启、刷写、完整恢复备份、已实测控制通道或板上 RAM 测试记录。
 
-下列命令均从仓库根目录执行。产物路径属于本地构建目录；[GitHub Actions](GITHUB-ACTIONS.md) 只有成功运行并上传后才有对应 artifacts，本文不宣称已有成功 run 或 Release 附件。
+[Actions 34737922588](ci-keygen-fix-20260913.md) 与[2026-09-13 屏幕/风扇候选](candidate-display-fan-20260913.md)仅证明各自旧 GPT 配置的构建和审计结果。2026-09-13 11:10:49 CST 的旧配置 VM 构建同样不能作为新固件完成证据。既有历史哈希不变；新格式检查见 [UBOOT-FIRMWARE.md](UBOOT-FIRMWARE.md)。
+
+下列命令均从构建主机的仓库根目录执行。产物路径属于本地构建目录；新 [GitHub Actions](GITHUB-ACTIONS.md) 流程只有成功运行并上传后才有对应 TAR artifacts，远端 Release 发布未确认。
 
 ## 固定输入与可复现范围
 
@@ -17,7 +19,8 @@
 | 板卡 / 分支 | `BOARD=edgepi-e87n` / `BRANCH=current`；family 拒绝其他分支 |
 | 目标发行版 | `RELEASE=trixie`；历史屏幕/风扇候选实际为 Debian 13.6，新构建以实际包版本为准 |
 | 内核配置 | `userpatches/config/kernel/linux-edgepi-e87n-lts.config`，另有板卡 hook 调整最终配置 |
-| 当前补丁目录 | `userpatches/kernel/edgepi-e87n-6.18/`，共 14 个补丁，包括 NV3007 驱动和 `901-e87n-ethernet-aliases.patch` |
+| 当前补丁目录 | `userpatches/kernel/edgepi-e87n-6.18/`，共 15 个补丁，包括 NV3007、901 GMAC aliases 和 `902-e87n-memory-1g.patch` 的 1 GiB/固件保留区修正 |
+| 固件转换 | `scripts/build-factory-firmware.py`、`scripts/prepare-factory-rootfs.py`、`board-support/factory-boot/`；最终为 FIT kernel + 含 `/boot` 的 ext4 root + CONTROL 的未压缩 USTAR |
 | 用户空间与固件 | `board-support/`、`packaging/e87n-display/`、`scripts/build-display-deb.sh`、`userpatches/customize-image.sh`、`firmware/`；PHY 固件安装前检查 SHA-256 与大小 |
 | 额外存储模块 | `E87N_EXTRA_STORAGE=no`；只有显式设为 `yes` 才请求额外 DM/RAID 等模块 |
 
@@ -60,7 +63,7 @@ KERNEL_BTF=no KERNEL_CONFIGURE=no SHOW_LOG=yes USE_TMPFS=no
 KERNEL_GIT=shallow EXTRAWIFI=no CPUTHREADS=4
 ```
 
-额外参数按原样追加给 Armbian，例如 `./build.sh CPUTHREADS=2`。更改参数后的产物需要重新验证。`BSPFREEZE=yes` 请求冻结 Armbian 内核、DTB、板级包及重打包的 base-files，防止后续官方同名 Filogic 包替换这套 E87N 移植；这不锁定全部 Debian 包。
+额外参数按原样追加给 Armbian，例如 `./build.sh CPUTHREADS=2`。更改参数后的产物需要重新验证。`BSPFREEZE=yes` 请求冻结 Armbian 内核、DTB、板级包及重打包的 base-files，防止官方同名 Filogic 包替换板级移植，也防止 `/boot`/模块变化而 p4 FIT 未同步。允许 `apt update` / 安装用户空间软件，不要解除内核 hold；没有自动 FIT 更新器，后续内核、DTB、initrd、模块和 FIT/root 必须成套重建审计。
 
 板卡 hook 默认使用 `E87N_EXTRA_STORAGE=no`；需要额外存储模块时可显式运行 `./build.sh E87N_EXTRA_STORAGE=yes`。该选项不预装 RAID/LVM 管理套件，也不改变 ext4 根分区或部署数据盘。默认最小系统仍保留常规 Linux 与板级驱动，详细配置和验收范围见 [OPTIONAL-STORAGE.md](OPTIONAL-STORAGE.md)。
 
@@ -126,7 +129,7 @@ helper 的默认配置为 `E87N_LIMA_VM=e87n-armbian`、`E87N_LIMA_DIR=/srv/e87n
 | 4 | 进程成功，但没有符合条件的新非空镜像 |
 | 构建的非零退出码 | 可确认的正常进程失败会原样传回；需结合日志区分同值状态码 |
 
-`Result=success` 与 `active/running` 同时出现不代表完成。即使 `status` 返回 0，也只证明进程结果和文件存在性，不证明镜像内容正确。
+`Result=success` 与 `active/running` 同时出现不代表完成。即使 `status` 返回 0，也只证明进程结果和中间镜像文件存在性，不证明最终 TAR 转换、厂商解析器或固件审计通过。
 
 传统单元确认完成后，可导出输出快照：
 
@@ -165,11 +168,39 @@ bash scripts/seed-kernel-cache.sh current
 完整构建的原始输出相对于仓库根目录为：
 
 ```text
-source/armbian-build/output/images/   磁盘镜像
+source/armbian-build/output/images/   GPT 中间镜像（不可刷写）
 source/armbian-build/output/debs/     内核、DTB 等 Debian 包
 source/armbian-build/output/logs/     构建日志
+output/ci/firmware/                  CI 最终 -uboot-firmware.tar
 ```
 
 镜像与压缩副本可能沿用相同文件名。记录本轮输入、时间和校验值，按同一次构建选择内核/DTB 包；不要仅凭旧文件仍存在判定成功。构建结束后按 [TESTING.md](TESTING.md) 检查实际产物。
 
-`BOOTCONFIG=none` 仅跳过启动链构建/注入。完整镜像仍包含新 GPT，不是保留原厂启动链的 eMMC 安装器。任何首启安排都应先阅读[首启与写入边界](first-boot.md)；本文不提供 eMMC 写入步骤。
+`BOOTCONFIG=none` 仅跳过启动链构建/注入。完整镜像仍包含新 GPT，不能刷写；历史 extlinux/独立 bootfs 路径仅适用于中间或旧产物，新 TAR 从原 p4 的 FIT 启动。
+
+## 从 GPT 中间镜像生成 U-Boot TAR
+
+在专用 Linux 构建主机完成实际 raw 镜像审计后，使用普通 `.img` 文件作为输入：
+
+```sh
+sudo -n python3 scripts/build-factory-firmware.py \
+  --image /path/to/Armbian-candidate.img \
+  --output /path/to/candidate-uboot-firmware.tar
+sudo -n python3 scripts/verify-factory-firmware.py /path/to/candidate-uboot-firmware.tar
+```
+
+转换器处理主机私有文件副本，不连接板卡或修改输入镜像。需要 Linux root、loop/只读挂载工具、Python 3、e2fsprogs、device-tree-compiler、u-boot-tools、initramfs-tools-core 及主机 C 编译器等；完整依赖以脚本和 CI 准备步骤为准。`./build.sh` 生成中间镜像不等于已完成这两步。
+
+新实现把原 bootfs 复制到 root 内 `/boot`，移除旧独立 `/boot` 挂载，禁用通用 Armbian resize 并安装严格验证布局的 p5 专用 resize2fs 服务；factory MAC helper 在 DHCP 前只读 p2 的 `0x24`/`0x2a`。内核/DTB hold 必须保留。
+
+本轮转换改为**重新整理 ext4**：创建相同 UUID 的全新 **735 MiB ext4**，用 `cp -a --preserve=all` 复制完整目录树，不裁剪必要组件；文件 SHA、属主、模式、硬链接及 xattrs 比较已通过。首次最小化旧文件系统仍约 820 MB，不适合上传上限。R4 已完成独立最终审计，首次 ENOSPC 与磁盘临时目录复验过程见[固件记录](UBOOT-FIRMWARE.md)。
+
+外层为未压缩 USTAR，仅有 `sysupgrade-edgepi-e87n/{kernel,root,CONTROL}`。FIT 使用 LZMA 内核、原始 initrd 和 DTB；root 为原始 ext4。最终完整 TAR 必须 `<=768 MiB`，FIT 必须容纳于 32 MiB p4，root 及厂商尾部 512 KiB 擦除须在 p5 内。此大小限制不是 Web 空闲 RAM 实测结果。
+
+本轮原生 VM 已报告：902 `--dry-run --fuzz=0`、加强后的 factory 24 项、root adapter 24 项、完整 Linux `ci-regressions.sh` 全套及静态 CI 85 项通过；新增 runtime/root preparer 两个编译检查目标也已复验通过。首次转换的 LZMA kernel 5993493 字节、原始 initrd 16328217 字节、DTB 21479 字节，FIT 可容纳于 32 MiB p4。V3 已废弃；R4 TAR 793057280 字节、root 770703360 字节，独立最终审计 EXIT 0，准确文件名和 SHA-256 见[下载说明](DOWNLOADS.md)。
+
+实际 ARM64 Image 头的 `text_offset=0`、有效 `image_size=0x1690000`（23658496 字节）、`flags=0xa` 决定 R4 FIT 的 kernel load/entry 改为 **`0x40000000`**（2 MiB 对齐 RAM 基址），配合 1 GiB DTB。新审计显式核对对齐与 image_size 范围，拒绝非法 Image 头、FIT loadables、非空 FIT reservation map 和额外 init 参数，要求 root 使用 4 KiB ext4 块；不能沿用 V3 审计结论。依据见 [Linux ARM64 booting](https://docs.kernel.org/arch/arm64/booting.html)，旧地址/重定位差异见[固件契约](UBOOT-FIRMWARE.md)。
+
+本次 R4 最终验证已对同一 TAR 独立重跑全部检查并 EXIT 0，随后以不覆盖已有文件的方式暴露产物；主机导出及 SHA-256 比对已完成。源 RAW SHA-256 为 `289f766db8e0a74993e36a4a776abf39a1b380d56333b8875e1586864b05f5c9`，不是本轮完整新内核编译。完整 Linux regressions 的 `regressions-disk.log` EXIT 0，此前缺 docs/AppleDouble 与 tmpfs 满失败均已解决并保留日志；新增两个编译检查目标也已复验通过。未来新源码工作流未 dispatch，远端发布未确认。刷写前仍需完成板上 RAM 测试、独立备份，并确认串口或已经实测可恢复的 U-Boot Web/网络控制通道及物理恢复路径，当前均未实测。
+
+正常 TAR/FIT 的 initrd 会按原 `.img` root UUID 挂载磁盘根文件系统，不是独立 RAM 诊断系统。刷写前诊断需另备仅驻留 RAM 或隔离的测试 rootfs，并确认不会挂载/扩容原 eMMC，详见[首启准备](first-boot.md)。满足用户“完全准备好再刷”的条件前不刷写，本文不提供设备写入步骤。

@@ -1,17 +1,27 @@
-# E87N 默认 DHCP 与网口身份
+# E87N 默认 DHCP 与 factory 网口身份
 
-默认网络以 [DEFAULTS.md](DEFAULTS.md) 为准：两个有线网口通过 networkd/netplan
-请求 DHCP，没有固定管理 IP、DHCP 服务器、LAN/WAN 分工、网桥或 NAT 预设。
-当前 `/etc/netplan/10-e87n-dhcp.yaml` 匹配 `e*` 接口，启用 IPv4/IPv6 DHCP 与
-IPv6 RA；DNS 使用 systemd-resolved，时间同步使用 systemd-timesyncd。
+默认网络以 [DEFAULTS.md](DEFAULTS.md) 为准：两个有线网口通过 networkd/netplan 请求 DHCP，没有固定管理 IP、DHCP 服务器、LAN/WAN 分工、网桥或 NAT 预设。`/etc/netplan/10-e87n-dhcp.yaml` 匹配 `e*` 接口，启用 IPv4/IPv6 DHCP 与 IPv6 RA；DNS 使用 systemd-resolved，时间同步使用 systemd-timesyncd。
 
-首次只连接一个网口到可信内网 DHCP 路由器，从租约、小屏或串口读取实际 IP，
-然后用 `ssh root@<设备IP>` 连接默认 22 端口，密码 `doumao`，登录后执行 `passwd`。
-没有首次创建用户向导或强制公钥门槛；串口需要正常认证。第二个物理网口需单独验收。
+新 [U-Boot TAR 固件](UBOOT-FIRMWARE.md)保留原 eMMC p2 factory，由首启 helper 在 DHCP 前恢复 MAC。root adapter 24 项、加强后 factory 24 项与完整 Linux regressions 已通过，R4 本地打包/独立静态审计 EXIT 0；它重新打包历史 RAW，没有完整重编内核。**实际首启时序、两个物理端口与跨重启稳定性仍待验收**。V3 已废弃，新增两个编译检查目标的再验证及主机导出复制仍待结果，未来新源码工作流未 dispatch。
 
-## 网口稳定身份：源码补强，实机待测
+原 OpenWrt 已只读确认 eth0/of_node 为 mac0、eth1/of_node 为 mac1。这为当前原系统的端口映射提供证据，不证明新内核枚举、alias 命名或 helper 恢复 MAC 已实测。
 
-新增独立补丁 `userpatches/kernel/edgepi-e87n-6.18/901-e87n-ethernet-aliases.patch`，在原 `0000` 创建的板级 DTS 中追加：
+仅在[刷写前准备](first-boot.md)全部完成且新系统成功启动后，首次只连接一个网口到可信内网 DHCP 路由器，从租约、小屏或串口读取实际 IP，再用 `ssh root@<设备IP>` 连接默认 22 端口，密码 `doumao`，登录后执行 `passwd`。保存环境中的 `ipaddr=192.168.1.1` 和 `serverip=192.168.1.2` 属于 U-Boot，不是 Debian 固定管理地址。
+
+## DHCP 前的 factory MAC 适配
+
+新 rootfs 适配安装 `/usr/lib/e87n/factory-boot.py`、`e87n-factory-mac.service` 与 networkd 顺序配置。helper 按以下约束工作：
+
+1. 核对原生 aarch64、E87N model/compatible、不可移除 eMMC、p1–p5 的标签/边界以及当前可写 ext4 根设备为 p5。布局来自[只读记录](boot-layout-readonly-20260913.md)，不是对任意分区的通用扫描。
+2. 等待 udev，核对 eth0/eth1 的 `of_node` 与 GMAC0/1 aliases，对应关系不能仅凭枚举顺序猜测。已 administratively up 的接口会被拒绝，不能在已运行网络上手动重放该过程。
+3. **只读 p2 factory 的 `0x24`、`0x2a` 偏移，各 6 字节**，对应 GMAC0、GMAC1。两个地址必须不同、非零、有效单播；不写 p2，不从 U-Boot 环境读取或保存 MAC。
+4. 在 networkd/DHCP 前应用地址，并从 netplan 已生成的 DHCP 配置派生按 alias 匹配的临时 networkd 策略。保留源 YAML 的 `Name=e*` 与 DHCP 设置，增加 `ID_NET_NAME_ONBOARD=end0/end1` 匹配，使 networkd 使用对应 factory 地址。
+
+此实现依赖 `net.ifnames=0`、可用的 GMAC aliases 以及 systemd v257 的设备树端口身份语义；新 FIT bootargs 保留该参数。源码及服务见 [factory-boot](../board-support/factory-boot/README.md)。缺设备、布局不符、无效 MAC 或策略冲突会导致服务明确失败并留下 journal 错误。networkd 使用 `Wants/After`，不是 `Requires`，因此原 DHCP/MAC 回退仍可能启动：**取得 DHCP 租约不证明已采用 factory MAC**。
+
+## GMAC aliases 与历史 persistent 回退
+
+独立补丁 `901-e87n-ethernet-aliases.patch` 为两个 GMAC 提供板级身份：
 
 ```dts
 aliases {
@@ -21,41 +31,24 @@ aliases {
 };
 ```
 
-`0000` 本身不修改。此改动为两个 GMAC 补充固定的板级身份，使支持该功能的 systemd 命名方案能够用端口索引生成持久 MAC，减少对 `ethN` 枚举顺序的依赖。**目前只完成源码和离线验证，尚未证明实机重启后的 MAC 稳定。**
+固定内核提交 `f6388029ea9e2c9e807d73827658738ea131faee` 的 MTK 驱动按 MAC 节点 `reg` 选择 netdev，并设置其 `dev.of_node`；E87N 中 `gmac0: mac@0`、`gmac1: mac@1` 的 reg 分别为 0、1。两个节点共享平台父设备，但其设备树身份不同。[固定内核源码](https://github.com/gregkh/linux/blob/f6388029ea9e2c9e807d73827658738ea131faee/drivers/net/ethernet/mediatek/mtk_eth_soc.c)
 
-当前配方清空 `/etc/machine-id`，沿用 systemd `99-default.link` 的 `MACAddressPolicy=persistent`。DT 别名提供额外身份输入；仓库保留的 `10-e87n-mtk-mac.link` 与默认策略等效，不作为镜像安装项，也没有额外的 MAC 写入程序。新镜像的实际文件与启动行为仍需逐项核对。
+systemd v257 启用 `NAMING_DEVICETREE_PORT_ALIASES` 时按 netdev 的 `of_node` 匹配 `ethernetN`，预期形成 `ID_NET_NAME_ONBOARD=end0/end1`。仅安装版本 257 不排除 `net.naming_scheme` 或 `NET_NAMING_SCHEME` 指定旧方案；运行时仍须核对。[net_id](https://github.com/systemd/systemd/blob/v257/src/udev/udev-builtin-net_id.c)、[命名方案标志](https://github.com/systemd/systemd/blob/v257/src/shared/netif-naming-scheme.h)
 
-## 源码依据与预期效果
+历史两分区 GPT 镜像没有 factory 分区，DTS 已移除两个 GMAC 对不存在 provider 的 nvmem 引用，驱动可能使用临时随机 MAC；旧配方依赖 systemd `99-default.link` 的 `MACAddressPolicy=persistent`，结合 alias 与 machine-id 生成本地管理单播地址。那条回退不恢复 factory MAC，不能据此保留“当前没有 MAC helper”的结论。仓库中的 `10-e87n-mtk-mac.link` 是历史配置，不是新 factory 服务。[身份选择与哈希](https://github.com/systemd/systemd/blob/v257/src/shared/netif-util.c)、[MAC 策略](https://github.com/systemd/systemd/blob/v257/src/udev/net/link-config.c)
 
-1. 固定内核提交 `f6388029ea9e2c9e807d73827658738ea131faee` 的 MTK 驱动按 MAC 节点的 `reg` 选择 netdev，并设置 `eth->netdev[id]->dev.of_node = np`。现有 DTS 的真实标签为 `gmac0: mac@0`、`gmac1: mac@1`，`reg` 分别为 0、1，板级均启用。因此别名指向的是两个不同 MAC 节点，尽管它们共用 `ethernet@15100000` 平台父设备。[固定内核源码](https://github.com/gregkh/linux/blob/f6388029ea9e2c9e807d73827658738ea131faee/drivers/net/ethernet/mediatek/mtk_eth_soc.c)
+历史 extlinux 中的 `net.ifnames=0` 只属于中间/旧镜像启动路径；新交付从 FIT 启动。`net.ifnames=0` 关闭 NamePolicy 改名，不保证两个物理端口永远按固定 ethN 编号出现。alias 服务必须验证映射，不能依赖原 `armbianEnv.txt` 中 ethaddr/eth1addr 的替换来完成地址恢复。
 
-2. systemd v257 的 `names_devicetree()` 在启用 `NAMING_DEVICETREE_PORT_ALIASES` 时，优先读取 netdev 自己的 `of_node`，再匹配 `/aliases/ethernetN`。上述别名预期得到 `ID_NET_NAME_ONBOARD=end0`、`end1`。这条路径不需要 `ID_NET_NAME_PATH`，也不依赖两个网口可能相同的普通 `ID_PATH`。[net_id 源码](https://github.com/systemd/systemd/blob/v257/src/udev/udev-builtin-net_id.c)
+machine-id 与 SSH host keys 仍应每台独立生成。DHCP 绑定应核对实际 factory 地址；从旧生成地址迁移后租约可能变化。复制已启动 rootfs 的身份不能作为独立设备配置。
 
-   **需要运行时使用 v257 或包含同一功能标志的命名方案。** 仅安装 systemd 257 并不能排除发行版默认值、`net.naming_scheme` 或 `NET_NAMING_SCHEME` 覆盖成旧方案；旧方案可能只检查共用的父节点，无法利用本补丁。[命名方案标志](https://github.com/systemd/systemd/blob/v257/src/shared/netif-naming-scheme.h)
+## 验证边界
 
-3. systemd 的持久地址生成优先采用 `ID_NET_NAME_ONBOARD`，与 machine-id 一起哈希。别名生效后，地址身份输入改为 `end0`/`end1`，不再因另一个网卡先注册、导致本口从 `eth0` 变成 `eth2` 而改变。导出的 extlinux 已含 `net.ifnames=0`；该参数只关闭 NamePolicy 改名，仍允许生成身份属性和执行 MAC 策略，主接口名继续沿用内核枚举名，现有 `e*` DHCP 匹配仍适用。别名不会保证物理端口永远叫 `eth0` 或 `eth1`。[身份选择与哈希](https://github.com/systemd/systemd/blob/v257/src/shared/netif-util.c)、[MAC 策略与 net.ifnames](https://github.com/systemd/systemd/blob/v257/src/udev/net/link-config.c)
+历史 `tests/test-network-policy.py` 使用 GNU patch 以 `--fuzz=0` 应用 901，检查两条 alias 指向不同的启用 GMAC 节点；有 dtc 时编译精简夹具。这些是 alias 源码验证，既不是完整新 DTB 构建，也不验证新 helper 在真实网络启动时恢复 MAC。
 
-内核已使用的永久 MAC 仍由默认 persistent 策略保留。生成的地址是本地管理单播地址，**不恢复 factory MAC**。从旧的接口名回退切换为别名身份时，原有回退 MAC 可能改变一次，旧 DHCP 绑定需重新核验。克隆已启动 rootfs 会复制 machine-id；唯一性仍依赖每次安装独立生成并持久化身份。首次 udev 配置网口前必须已有正确身份，initramfs 与 rootfs 的身份/策略时序仍需通过实际启动核对。
+当前补丁集包含新增的 902 内存/保留区修正，共 15 个补丁；原生内核树 902 的 `--dry-run --fuzz=0` 已通过，实际构建仍需审计 FIT 内 DTB 和 root 内 `/boot`。root adapter 24 项离线测试已有通过结果，完整启动和上板验收仍待记录，至少需要核对：
 
-`armbian-firstrun` 会替换 `/boot/armbianEnv.txt` 中已有的 `ethaddr`/`eth1addr`，但当前 extlinux/U-Boot 流程没有消费这些值的证据，本方案不依赖该行为。SSH host keys 在首次 SSH 前独立生成，账号默认值和首启边界见 [first-boot.md](first-boot.md)。
+- 合法与无效 p2 数据、错误布局、缺 alias/命名属性、已启用接口等情形的明确结果，确保 factory 和环境只读。
+- 完整 systemd 启动顺序中 helper 先于 DHCP，最终 MAC 与 p2 两个地址对应，无后续策略覆盖。
+- 两个物理端口的链路、PHY 固件、DHCP/DNS/NTP、吞吐及跨重启 MAC；失败回退不能误标为恢复成功。
 
-## 离线验证与后续实机核对
-
-```sh
-python3 -B tests/test-network-policy.py
-```
-
-测试从原 `0000` 重建临时 DTS，确认并使用 **GNU patch**（macOS 优先 `gpatch`，Linux 使用 GNU `patch`），以 `--fuzz=0` 应用 `901`，要求无 offset/fuzz；缺少 GNU 实现时直接失败，不使用 Apple patch 替代。验证内容：
-
-- 补丁只增加两条别名，串口别名及其余板级内容不变；
-- 文件中部的插入使用标准 3/3 对称上下文，避免 GNU patch 将前置多于后置的 hunk 限制为文件末尾匹配；
-- `ethernet0` 精确指向启用的 `gmac0/mac@0/reg=0`，`ethernet1` 指向启用的 `gmac1/mac@1/reg=1`；
-- 不存在裸 `ethernet` 与 `ethernet0` 冲突，不添加固定地址；
-- 若本机有 `dtc`，用实际别名和 GMAC 声明组成精简 fixture，编译/反编译核对两条别名解析到不同节点；这不是完整 E87N DTB 构建；
-- 旧 `10.link` 的配置仍与镜像默认值等效，不把静态测试当作实机 MAC 验证。
-
-当前完整补丁集为 **14** 个。必须使用冻结输入重编真实 DTB/镜像，并对实际 DTB 验证 GMAC aliases；夹具或旧镜像不能作为新构建完成证据。
-
-之后应从真实 DTB 和上板 sysfs/udev 核对两条 alias、netdev 各自的 `of_node`、实际命名方案、`ID_NET_NAME_ONBOARD=end0/end1`、默认 `ID_NET_LINK_FILE` 和 MAC。跨重启及独立初始化的两份系统验证通过前，保留“实机待测”状态。
-
-VM 可丢弃副本的隔离 loopback SSH/PAM 登录已通过，见 [TESTING.md](TESTING.md)；它没有使用 E87N 的物理网口，也不验证 DHCP/DNS、链路吞吐或跨重启 MAC。最小配置保留常规 Linux 网络基础，额外存储开关与管理工具范围见 [OPTIONAL-STORAGE.md](OPTIONAL-STORAGE.md)。
+VM 可丢弃副本的隔离 loopback SSH/PAM 登录已有历史通过记录，见 [TESTING.md](TESTING.md)；它没有使用 E87N 物理网口，不验证 DHCP、factory MAC 或跨重启行为。没有板卡重启、刷写或串口连接记录；必须先完成板上 RAM 测试、恢复备份及其余准备条件。

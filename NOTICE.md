@@ -12,6 +12,18 @@
 | [ZJJCKA/EDGEPI-E87N](https://github.com/ZJJCKA/EDGEPI-E87N/tree/c51dcd733aeda3c24c730ddaff2c54440a72ca6d) | 本地参考树版本：MT7987 硬件、DTS、驱动补丁 | 保留补丁内署名、SPDX 和作者信息；没有导入其 OpenWrt rootfs 或原显示 ELF |
 | StarField Xu / NV3007 驱动 | 上述 E87N 源树的 `999990-add-nv3007-fbtft.patch`，适配为当前 `900-fb-nv3007-e87n.patch` | 保留驱动作者、GPL 声明及初始化序列；适配 Linux 6.18 Kconfig/Makefile |
 | [linux-firmware](https://gitlab.com/kernel-firmware/linux-firmware/-/commit/c0af6c70df291701fdecf6402e47dd4564e6b718) | 两份 MT7987 PHY 微码，版本 7.1 | 使用 [MediaTek 独立许可](firmware/LICENCE.mediatek)，不把微码改为 GPL；哈希和大小见 [firmware/README](firmware/README.md) |
+| [Yuzhii0718/bl-mt798x-dhcpd](https://github.com/Yuzhii0718/bl-mt798x-dhcpd/tree/4d5f0ffe02c5410c545bfb3f4112346877c75a72) | 本地参考提交 `4d5f0ffe02c5410c545bfb3f4112346877c75a72`，E87N defconfig、eMMC 布局、plain firmware TAR/FIT 接口；`tests/vendor-untar/` 导入未修改的 `untar.c` / `untar.h` | Copyright (C) 2021 MediaTek Inc.，作者 Weijie Gao，保留 GPL-2.0/SPDX 和原作者声明；主机兼容头与 harness 单独提供 |
+
+厂商解析器的固定源文件 SHA-256：
+
+- `untar.c`：`2a4e02c9ab41e4e8c5910aaed581765477563d627754eb8cdd1600af74467c97`
+- `untar.h`：`08783dc4981fd9eeb1fbd933828e5bfc7ca3ac303d74a9ba84fe18e3f7b656d9`
+
+完整来源与测试边界见 [vendor-untar 说明](tests/vendor-untar/README.md)。原 FIP 的版本字符串为
+`U-Boot 2025.07-Mediatek (May 01 2026 - 22:36:56 +0800)`，嵌入 Web URL 可识别上述源码家族；
+参考提交包含匹配的 E87N defconfig/布局，但实际二进制提交未知，不声明已复现原厂 U-Boot。
+新 [USTAR 固件](docs/UBOOT-FIRMWARE.md) 采用厂商解析器的目录约定，root payload 仍为 Debian ext4，
+没有导入 OpenWrt rootfs，也不分发或更新设备 FIP、factory 数据或 U-Boot 环境。
 
 参考树提交号用于追溯资料来源，不意味着所有旧补丁均未修改：6.18 系列包含本项目的 API 适配、
 PHY 错误处理、温控及禁用未经验证 DVFS 等修改。当前补丁以 `userpatches/kernel/edgepi-e87n-6.18/` 为准；

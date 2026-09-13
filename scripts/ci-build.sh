@@ -45,8 +45,9 @@ fi
 }
 # Reject stale products before invoking the existing launcher. Hosted jobs use
 # fresh checkouts; retaining these directories makes a failed manual retry clear.
-[[ ! -e source/armbian-build/output ]] || {
-	printf 'FAIL: existing Armbian output; use a fresh job, do not reuse candidates\n' >&2
+[[ ! -e source/armbian-build/output && ! -L source/armbian-build/output &&
+   ! -e output/ci/firmware && ! -L output/ci/firmware ]] || {
+	printf 'FAIL: existing Armbian or firmware output; use a fresh job, do not reuse candidates\n' >&2
 	exit 1
 }
 grep -Fq "commit:f6388029ea9e2c9e807d73827658738ea131faee" \
@@ -67,18 +68,25 @@ bash build-armbian.sh build \
 
 shopt -s nullglob
 images=(source/armbian-build/output/images/*.img.xz)
-[[ ${#images[@]} -gt 0 ]] || { printf 'FAIL: build produced no .img.xz\n' >&2; exit 1; }
-audit_number=0
-for candidate in "${images[@]}"; do
-	[[ -s $candidate && ! -L $candidate ]] || { printf 'FAIL: invalid image %s\n' "$candidate" >&2; exit 1; }
-	audit_number=$((audit_number + 1))
-	audit_dir=$(mktemp -d "${RUNNER_TEMP:?}/e87n-ci-audit.XXXXXXXX")
-	printf 'Read-only image audit: %s -> %s/candidate.img\n' "$candidate" "$audit_dir"
-	# Decompression verifies xz integrity; raw scratch never enters the artifact
-	# tree. Retain it for the remainder of this disposable job, even on failure.
-	xz -dc -- "$candidate" > "$audit_dir/candidate.img"
-	sudo -n bash scripts/verify-image.sh --release trixie --require-usb-root \
-		--require-display-fan --require-system "$audit_dir/candidate.img" \
-		2>&1 | tee "output/ci/logs/image-audit-$audit_number.log"
-done
-printf 'PASS: build and actual image read-only static audits passed; board validation is pending.\n'
+[[ ${#images[@]} == 1 ]] || { printf 'FAIL: expected exactly one .img.xz build image\n' >&2; exit 1; }
+candidate=${images[0]}
+[[ -f $candidate && -s $candidate && ! -L $candidate ]] || { printf 'FAIL: invalid image %s\n' "$candidate" >&2; exit 1; }
+audit_dir=$(mktemp -d "${RUNNER_TEMP:?}/e87n-ci-audit.XXXXXXXX")
+printf 'Read-only image audit: %s -> %s/candidate.img\n' "$candidate" "$audit_dir"
+# Decompression verifies xz integrity; raw scratch never enters the artifact
+# tree. Retain it for the remainder of this disposable job, even on failure.
+xz -dc -- "$candidate" > "$audit_dir/candidate.img"
+sudo -n bash scripts/verify-image.sh --release trixie --require-usb-root \
+	--require-display-fan --require-system "$audit_dir/candidate.img" \
+	2>&1 | tee output/ci/logs/image-audit-1.log
+
+image_basename=${candidate##*/}
+firmware_output="$repo_dir/output/ci/firmware/${image_basename%.img.xz}-uboot-firmware.tar"
+mkdir -p "$repo_dir/output/ci/firmware"
+sudo -n python3 scripts/build-factory-firmware.py \
+	--image "$audit_dir/candidate.img" --output "$firmware_output"
+# The runner owns this log directory; only the verifier needs root privileges.
+# shellcheck disable=SC2024
+sudo -n python3 scripts/verify-factory-firmware.py "$firmware_output" \
+	> output/ci/logs/factory-firmware-audit-1.log 2>&1
+printf 'PASS: image and factory firmware static audits passed; hardware validation is pending.\n'

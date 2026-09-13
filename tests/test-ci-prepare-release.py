@@ -34,11 +34,13 @@ class ReleasePreparation(unittest.TestCase):
             self.put(f"{kind}-job/output/ci/logs/{kind}.log", "fake build log\n")
             self.put(f"{kind}-job/output/ci/logs/{kind}.exit-code", "0\n")
             if kind == "image":
-                self.put("image-job/source/armbian-build/output/images/candidate.img.xz", b"fake image, not xz\x00")
+                self.put("image-job/output/ci/firmware/candidate-uboot-firmware.tar", b"fake firmware, not tar\x00")
                 self.put("image-job/source/armbian-build/output/debs/kernel.deb", b"fake kernel package")
                 self.put("image-job/source/armbian-build/output/debs/extra/trixie-utils/kernel.deb", b"different nested package")
                 self.put("image-job/source/armbian-build/output/logs/build.log.xz", b"fake compressed log")
                 self.put("image-job/output/ci/logs/image-audit-1.log", "fake static audit passed\n")
+                self.put("image-job/output/ci/logs/factory-firmware-audit-1.log", "PASS: static factory firmware audit\n")
+                self.put("image-job/source/armbian-build/output/images/candidate.img.xz", b"internal raw GPT build product")
             else:
                 self.put(f"display-job/output/ci/display-debs/{DEB}", b"fake independent package, not a deb")
             result = subprocess.run([sys.executable, str(job / "scripts/ci-collect-artifacts.py"),
@@ -90,20 +92,23 @@ class ReleasePreparation(unittest.TestCase):
 
     def test_valid_exact_assets_hashes_evidence_and_recursive_packages(self):
         # Cross multiple read chunks without allocating or unpacking a real image.
-        self.put("image/images/candidate.img.xz", b"fake\x00" * 450000)
+        self.put("image/images/candidate-uboot-firmware.tar", b"fake\x00" * 450000)
         self.manifest("image")
         result = self.run_cli()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual({p.name for p in self.output.iterdir()}, {
-            "candidate.img.xz", DEB, "image-build-metadata.json", "display-build-metadata.json",
+            "candidate-uboot-firmware.tar", DEB, "image-build-metadata.json", "display-build-metadata.json",
             "kernel-packages.tar.xz", "build-evidence.tar.xz", "SHA256SUMS", "RELEASE-NOTES.md"})
-        for kind, source, target in (("image", "images/candidate.img.xz", "candidate.img.xz"),
+        for kind, source, target in (("image", "images/candidate-uboot-firmware.tar", "candidate-uboot-firmware.tar"),
                                      ("display", "packages/display/" + DEB, DEB),
                                      ("image", "build-metadata.json", "image-build-metadata.json"),
                                      ("display", "build-metadata.json", "display-build-metadata.json")):
             self.assertEqual((self.root / kind / source).read_bytes(), (self.output / target).read_bytes())
         sums = (self.output / "SHA256SUMS").read_text().splitlines()
         self.assertEqual(len(sums), 7)
+        metadata = json.loads((self.output / "image-build-metadata.json").read_text())
+        self.assertEqual(metadata["factory_format"], "e87n-uboot-firmware-tar-v1")
+        self.assertEqual(metadata["factory_static_audit"], "passed")
         for line in sums:
             checksum, name = line.split("  ", 1)
             self.assertEqual(checksum, hashlib.sha256((self.output / name).read_bytes()).hexdigest())
@@ -122,15 +127,21 @@ class ReleasePreparation(unittest.TestCase):
                     self.assertEqual((member.uid, member.gid, member.mode), (0, 0, 0o644))
                     self.assertEqual(bundle.extractfile(member).read(), expected[member.name].read_bytes())
         notes = (self.output / "RELEASE-NOTES.md").read_text()
-        self.assertIn("/releases/download/e87n-test-6.18.51/candidate.img.xz", notes)
+        self.assertIn("/releases/download/e87n-test-6.18.51/candidate-uboot-firmware.tar", notes)
         self.assertIn("/releases/download/e87n-test-6.18.51/" + DEB, notes)
         self.assertIn("仅有以上两个二进制附件", notes)
-        self.assertIn(hashlib.sha256((self.output / "candidate.img.xz").read_bytes()).hexdigest(), notes)
+        self.assertIn(hashlib.sha256((self.output / "candidate-uboot-firmware.tar").read_bytes()).hexdigest(), notes)
         self.assertIn(hashlib.sha256((self.output / DEB).read_bytes()).hexdigest(), notes)
         self.assertNotIn("sha256sum -c SHA256SUMS", notes)
+        self.assertNotIn(".img.xz", notes)
         for required in ("experimental", "Debian 13", "trixie", "6.18.51", "extra_storage=no", "root / doumao",
                          "SSH port 22", "LAN", "passwd", "DHCP", "zh_CN.UTF-8", "Asia/Shanghai", "static checks only",
-                         "No board has been validated", "Do not flash", "eMMC", "/commit/" + COMMIT,
+                         "No board has been validated", "Do not flash", "eMMC", "NOT hardware validated",
+                         "software validated", "uncompressed USTAR", "e87n-uboot-firmware-tar-v1",
+                         "sysupgrade-edgepi-e87n/kernel", "(FIT)", "sysupgrade-edgepi-e87n/root", "(ext4)",
+                         "only in the original U-Boot recovery page's `firmware` field",
+                         "Never use the SIMG, GPT or FIP fields", "never use LuCI sysupgrade",
+                         "verified recovery backup", "successful hardware RAM test boot", "before any flash", "/commit/" + COMMIT,
                          "/actions/runs/34737922588", "/attempts/1"):
             self.assertIn(required, notes)
 
@@ -191,6 +202,38 @@ class ReleasePreparation(unittest.TestCase):
                 self.rejected("collection_errors")
             self.metadata(kind, "collection_errors", [])
 
+    def test_factory_format_and_static_audit_are_required(self):
+        for key, expected, invalid in (
+                ("factory_format", "e87n-uboot-firmware-tar-v1", ["raw-gpt", "e87n-uboot-firmware-tar-v2", "", None]),
+                ("factory_static_audit", "passed", ["not proven", "failed", "not applicable", True, None])):
+            for value in invalid:
+                with self.subTest(key=key, value=value):
+                    self.metadata("image", key, value, remove=value is None)
+                    self.rejected(key)
+            self.metadata("image", key, expected)
+
+    def test_factory_audit_requires_hashed_pass_log(self):
+        path = self.root / "image/logs/ci/factory-firmware-audit-1.log"
+        for content in ("", "FAIL: invalid FIT\n", "not PASS\n", "PASSING is not a verdict\n"):
+            with self.subTest(content=content):
+                path.write_text(content)
+                self.manifest("image")
+                self.rejected("factory firmware audit log")
+        path.unlink()
+        self.manifest("image")
+        self.rejected("required factory firmware audit log")
+
+    def test_legacy_system_image_is_rejected_even_when_only_payload_and_hashed(self):
+        path = self.root / "image/images/candidate-uboot-firmware.tar"
+        for name in ("candidate.img.xz", "candidate.img", "candidate-uboot-firmware.tar.xz"):
+            with self.subTest(name=name):
+                wrong = path.with_name(name)
+                path.rename(wrong)
+                self.manifest("image")
+                self.rejected("unexpected artifact file")
+                wrong.rename(path)
+        self.manifest("image")
+
     def test_nonzero_and_malformed_exit_codes(self):
         for kind in ("image", "display"):
             for value in ("23\n", "", "0\n1\n", "success\n"):
@@ -216,10 +259,10 @@ class ReleasePreparation(unittest.TestCase):
     def test_manifest_unsafe_paths_and_duplicates(self):
         path = self.root / "image/SHA256SUMS"
         original = path.read_text()
-        for name in ("../outside", "/absolute.log", "images/../escape.img.xz", "images//x.img.xz",
-                     "./build-metadata.json", "C:/absolute.log", "images\\x.img.xz", "logs/ci/a\t.log",
+        for name in ("../outside", "/absolute.log", "images/../escape-uboot-firmware.tar", "images//x-uboot-firmware.tar",
+                     "./build-metadata.json", "C:/absolute.log", "images\\x-uboot-firmware.tar", "logs/ci/a\t.log",
                      "logs/ci/a\r.log", "logs/ci/a\x00.log", "logs/ci/a\x7f.log", "logs/ci/a\u0085.log",
-                     "images/asset#label.img.xz", "images/asset with space.img.xz"):
+                     "images/asset#label-uboot-firmware.tar", "images/asset with space-uboot-firmware.tar"):
             with self.subTest(name=repr(name)):
                 path.write_text("0" * 64 + "  " + name + "\n" + original)
                 self.rejected("unsafe artifact filename")
@@ -237,7 +280,7 @@ class ReleasePreparation(unittest.TestCase):
             self.rejected("malformed SHA256SUMS")
 
     def test_symlinks_in_files_directories_root_and_parent(self):
-        for relative in ("image/images/candidate.img.xz", "display/build-metadata.json", "image/SHA256SUMS",
+        for relative in ("image/images/candidate-uboot-firmware.tar", "display/build-metadata.json", "image/SHA256SUMS",
                          "image/packages/armbian", "display"):
             with self.subTest(path=relative):
                 path = self.root / relative
@@ -259,7 +302,7 @@ class ReleasePreparation(unittest.TestCase):
         self.rejected("not a regular file")
 
     def test_image_collision_and_extra_display_package(self):
-        path = self.put("image/images/nested/candidate.img.xz", "another image")
+        path = self.put("image/images/nested/candidate-uboot-firmware.tar", "another image")
         self.manifest("image")
         self.rejected("exactly one")
         path.unlink()
@@ -287,8 +330,9 @@ class ReleasePreparation(unittest.TestCase):
         self.assertTrue(self.output.is_symlink())
 
     def test_missing_or_empty_payload_and_evidence(self):
-        for relative in ("image/images/candidate.img.xz", "display/packages/display/" + DEB,
+        for relative in ("image/images/candidate-uboot-firmware.tar", "display/packages/display/" + DEB,
                          "image/build-metadata.json", "display/SHA256SUMS", "image/logs/ci/image.exit-code",
+                         "image/logs/ci/factory-firmware-audit-1.log",
                          "display/logs/ci/display.log", "image/packages/armbian"):
             with self.subTest(path=relative):
                 path = self.root / relative
@@ -299,7 +343,7 @@ class ReleasePreparation(unittest.TestCase):
                 self.rejected()
                 saved.rename(path)
                 self.manifest(relative.split("/")[0])
-        self.put("image/images/candidate.img.xz", b"")
+        self.put("image/images/candidate-uboot-firmware.tar", b"")
         self.manifest("image")
         self.rejected("empty payload")
 
@@ -316,6 +360,7 @@ class ReleasePreparation(unittest.TestCase):
 
     def test_unexpected_extras_even_when_hashed(self):
         for relative in ("image/private.key", "image/logs/ci/secret.sh", "image/images/extra.img",
+                         "image/images/extra.img.xz", "image/images/extra-uboot-firmware.tar.xz",
                          "image/packages/armbian/private.pem", "image/packages/display/extra.deb",
                          "display/packages/armbian/extra.deb", "display/logs/armbian/build.log",
                          "image/logs/ci/.secret.log", "display/secrets/private.log"):

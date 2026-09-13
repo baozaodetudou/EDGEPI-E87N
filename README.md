@@ -4,20 +4,24 @@
 
 **这是 Debian 系统，不是 OpenWrt 固件，也不是官方 Armbian 支持板卡。** OpenWrt/E87N 源码仅作为板级驱动、设备树和硬件接口参考；目标用户空间不包含 LuCI、UCI、procd 或原厂 musl 显示程序。
 
-> 当前[最小系统默认配置](docs/DEFAULTS.md)已通过 [Actions 34737922588](https://github.com/baozaodetudou/EDGEPI-E87N/actions/runs/34737922588) 的完整构建、真实镜像静态审计和产物上传，另有 VM 用户空间副本的 SSH/APT 集成结果，见[本轮记录](docs/ci-keygen-fix-20260913.md)。**尚未在 E87N 上完成启动或硬件验收**。不要通过 LuCI 上传，不要直接整盘覆盖原 eMMC。跳过 U-Boot 构建不等于保留原盘启动数据。
+> 当前交付为原厂 U-Boot Web plain firmware（类型 `fw`）使用的[未压缩 USTAR 固件](docs/UBOOT-FIRMWARE.md)。**R4 已生成并独立审计 EXIT 0**，文件名、大小和 SHA-256 见[下载说明](docs/DOWNLOADS.md)。R4 重新打包历史 Actions 34737922588 的原始 RAW，修正 DTB 的 1 GiB/保留区及 bootargs（含 902 等效修正），没有完整重编 Armbian 或内核。新 735 MiB ext4 完整复制比较、factory 24 项、root adapter 24 项、完整 Linux regressions 和静态 CI 85 项通过；之后新增两个编译检查目标的再验证及主机导出复制仍待结果。**板卡尚未重启或刷写，RAM 测试、完整恢复备份、可恢复控制通道及硬件验收未完成，必须完全准备好再刷。**
 
-## 镜像与屏幕安装包下载
+## 固件与屏幕安装包下载
+
+本次本地文件、SHA-256、最终审计与未完成的实机条件，见 [R4 生成与静态验收记录](docs/candidate-factory-r4-20260913.md)。
 
 发布成功后，从 [Releases](https://github.com/baozaodetudou/EDGEPI-E87N/releases) 选择 tag，每个版本提供两个二进制附件：
 
-- `Armbian-…_trixie_current_6.18.51_minimal.img.xz`：系统镜像，已预装屏幕控制程序。
+- `<basename>-uboot-firmware.tar`：未压缩 USTAR，包含 `sysupgrade-edgepi-e87n/{kernel,root,CONTROL}`；kernel 为 LZMA 内核 + 原始 initrd + DTB 的 FIT，root 为含 `/boot` 的 Debian ext4，已预装屏幕控制程序。
 - `e87n-display_<版本>_all.deb`：独立屏幕控制安装包，用于安装/升级；不需要重新刷镜像。
 
-Release 正文直接列出下载链接和 SHA-256；GitHub 自动附带的 Source code zip/tar.gz **不是系统镜像**。
+Release 正文直接列出两个附件的下载链接和 SHA-256；GitHub 自动附带的 Source code zip/tar.gz **不是系统固件**。完整 `.img` / `.img.xz` 只作中间产物或历史证据，不能刷写。新 TAR 使用厂商解析器的目录约定，不是 OpenWrt rootfs，不能用 LuCI sysupgrade 安装。
+
+匹配的厂商参考 plain firmware 路径先写 p5 rootfs，再写 p4 FIT kernel，并在 root payload 后擦除 512 KiB；不写 SIMG/GPT/FIP/环境。`<=768 MiB` 整包上限只是静态打包政策，不能证明 Web 有足够空闲 RAM。完整契约与刷写前准备见 [UBOOT-FIRMWARE.md](docs/UBOOT-FIRMWARE.md)。
 
 **唯一发布入口，无需填写参数：** 打开 [E87N Debian 13 release](https://github.com/baozaodetudou/EDGEPI-E87N/actions/workflows/build-e87n.yml) → **Run workflow** → 保持默认分支 `main` → 点击 **Run workflow**。每次都会重新构建本次运行选定的 main 提交，固定 Debian 13 Trixie / Linux 6.18.51；验证成功后并行构建镜像与显示包，再由 release job 自动生成并发布 `e87n-trixie-6.18.51-<GITHUB_RUN_ID>`。没有 tag、run ID 或内核输入框，也没有第二个发布工作流；自动生成 tag 只发生在手动运行内部，push、tag push 和定时任务均不触发。
 
-**远端 Release 是否已成功发布尚未确认。** 已成功的 `34737922588` artifacts 仅保留为历史构建证据和备用下载，不会自动转为 Release。详细说明见[下载与校验](docs/DOWNLOADS.md)。
+**远端 Release 发布未确认，未来从新源码完整构建的手动工作流尚未 dispatch。** R4 是本地已生成并审计的 TAR，主机导出及 SHA-256 比对已完成。历史 `34737922588` artifacts 保留原始哈希和证据，不会自动转为 Release，详见[下载说明](docs/DOWNLOADS.md)。
 
 ## 从这里开始
 
@@ -29,19 +33,19 @@ Release 正文直接列出下载链接和 SHA-256；GitHub 自动附带的 Sourc
 - [测试与验收](docs/TESTING.md)：区分代码夹具、镜像静态检查和实机测试。
 - [屏幕与风扇使用](docs/display-fan.md)：亮度、页面、开关、配置及服务。
 - [小屏独立软件包](docs/DISPLAY-PACKAGE.md)、[云端构建](docs/GITHUB-ACTIONS.md)与[可选存储模块](docs/OPTIONAL-STORAGE.md)。
-- [首启与刷写边界](docs/first-boot.md)：U-Boot 能力、备份、测试介质、账户与 SSH 风险。
+- [U-Boot 固件契约](docs/UBOOT-FIRMWARE.md)、[原系统只读证据](docs/boot-layout-readonly-20260913.md)与[首启准备](docs/first-boot.md)：格式、独立 RAM 诊断、恢复备份、可恢复控制通道和验收条件。
 - [2026-09-13 历史屏幕/风扇候选记录](docs/candidate-display-fan-20260913.md)：仅对应当次旧配置的版本、SHA-256 与验证结果。
 
 ## 功能与边界
 
 | 功能 | 当前实现 | 实机状态 |
 | --- | --- | --- |
-| 系统 | Debian 13 Trixie 最小命令行；`Asia/Shanghai`、`zh_CN.UTF-8`；正常使用 APT | 云端构建/静态审计通过；实机待首启 |
-| 内核 | 固定 Linux 6.18.51，14 个 E87N 移植补丁 | 待首启 |
+| 系统 | Debian 13 Trixie 最小命令行；`Asia/Shanghai`、`zh_CN.UTF-8`；正常使用 APT | R4 本地打包/独立静态审计通过；硬件待首启 |
+| 内核 | 源码固定 Linux 6.18.51、15 个补丁；R4 使用历史内核与 902 等效 DTB 修正 | 未完整重编新内核；实机待验收 |
 | 小屏 | 预装独立、版本化 `e87n-display` Debian 包；NV3007、428×142 RGB565、四页状态界面 | 待验证颜色、方向及显示 |
 | 背光 | 0–100% 亮度、开关、持久化；默认 20% | 待验证实际亮度和关闭 |
 | 风扇 | 内核独占自动温控；温度、PWM 和冷却档位读取 | 待验证起转和散热 |
-| 有线网络与存储 | MT7987 PHY 固件；MMC、USB-root、PCIe 等移植 | 网口/eMMC/USB/NVMe 待测 |
+| 有线网络与存储 | MT7987 PHY 固件；DHCP 前只读 p2 factory MAC；严格布局校验后仅在 p5 内 resize2fs | root adapter 离线 24 项通过；完整首启及网口/eMMC/USB/NVMe 实机待测 |
 | 额外存储 | `E87N_EXTRA_STORAGE=no`；DM/LUKS/LVM/RAID 等额外模块按需构建，管理工具按需安装 | 不自动部署数据盘；使用前单独验收 |
 | 登录与诊断 | `root` / `doumao`，SSH 22 密码登录；首次 SSH 前生成独立 host keys；`e87nctl doctor` | 登录、密钥生成与完整启动待测 |
 
@@ -49,7 +53,7 @@ Release 正文直接列出下载链接和 SHA-256；GitHub 自动附带的 Sourc
 
 风扇使用四级 PWM `0/128/192/255`，50/65/75℃触发档位 1/2/3，迟滞 2℃。这些是软件策略，不是芯片额定温度或异常情况下的安全保证。显示服务不会写风扇节点，关屏不停止内核自动温控；当前不提供任意手动停扇或原 LuCI 网页。
 
-以下限制仍然存在：CPU DVFS/CPU cooling 禁用；MT7987 WED 不支持；factory MAC 未恢复；GMAC 别名供 systemd 持久地址策略使用，但跨重启仍待测。DTS 默认内存仍为 256 MiB，原 OpenWrt 记录的这台设备为 1 GiB；新系统的 RAM fixup、原 U-Boot 加载能力及断电重启未经上板确认。完整编译不能证明全部驱动正常。
+CPU DVFS/CPU cooling 继续禁用，MT7987 WED 不支持。新 rootfs helper 在 DHCP 前只读 p2 的 `0x24`/`0x2a` 恢复 factory MAC；通用 Armbian resize 已由适配禁用，改为严格布局校验后只扩 p5 内 ext4。root adapter 离线 24 项通过，完整首启顺序及跨重启行为仍待验收。902 已按原系统只读 DT 修正为 1 GiB，并保留 wmcpu、ramoops、secmon，原生内核 dry-run 通过；新内核的实际内存交接仍待测。p1 的 `0x80000` 字节单环境已离线通过 CRC32 校验，未修改环境，保存环境中没有 bootcmd，详见[只读记录](docs/boot-layout-readonly-20260913.md)。
 
 ## 快速构建
 
@@ -63,7 +67,7 @@ cd EDGEPI-E87N
 
 Linux 由 Armbian 执行构建；macOS 默认使用 Docker 的特权构建容器。需要网络、足够磁盘空间以及相应管理员/容器权限；详细前置条件和输出位置见 [构建指南](docs/BUILDING.md)。不要并发启动多个构建。
 
-主要输出位于 `source/armbian-build/output/images/` 和 `source/armbian-build/output/debs/`。重新构建后必须重新验收；旧的同名压缩包不能作为新构建的完成证据。
+Armbian 中间镜像和包位于 `source/armbian-build/output/images/`、`source/armbian-build/output/debs/`。原始 `.img` 审计后由 `scripts/build-factory-firmware.py --image RAW --output <basename>-uboot-firmware.tar` 转换；这里 RAW 是主机上的普通 `.img` 文件。CI 的 TAR 输出位于 `output/ci/firmware/`。转换和最终固件审计见[构建指南](docs/BUILDING.md)，不能仅以旧同名压缩包或中间镜像生成成功判定交付完成。
 
 | 构建输入 | 固定值 |
 | --- | --- |
@@ -73,7 +77,7 @@ Linux 由 Armbian 执行构建；macOS 默认使用 Docker 的特权构建容器
 | 板卡 / family | `edgepi-e87n` / `edgepi-e87n` |
 | 内核配置 / 补丁集 | `linux-edgepi-e87n-lts` / `edgepi-e87n-6.18` |
 
-Debian 包仍从签名软件源更新，容器工具链也不是完整快照，因此不承诺逐字节可重复构建。不会自动跟踪新内核；升级 LTS 需要重新移植和验收。7.2.5 不用于本镜像。为避免官方同名 Filogic 包覆盖板级移植，默认锁定内核、DTB、BSP 及重打包的 base-files，见 [构建指南](docs/BUILDING.md)。
+Debian 包仍从签名软件源更新，容器工具链也不是完整快照，因此不承诺逐字节可重复构建。不会自动跟踪新内核；升级 LTS 需要重新移植和验收。7.2.5 不用于本固件。默认锁定内核、DTB、BSP 及重打包的 base-files；不要解除内核 hold，避免 `/boot`/模块更新后 p4 FIT 未更新而失配。允许 `apt update` 和安装用户空间软件；内核升级必须成套重建 FIT/root，见 [构建指南](docs/BUILDING.md)。
 
 ## 登录新 Armbian 后
 
@@ -109,7 +113,7 @@ build-lima.sh                   已有 Lima VM 的受限状态/构建/导出工�
 board-support/                 Debian 小屏、诊断、镜像默认配置与 systemd 服务
 packaging/e87n-display/         独立版本化显示包与维护脚本
 userpatches/config/            板卡、family 和内核配置
-userpatches/kernel/edgepi-e87n-6.18/  当前 14 个内核补丁
+userpatches/kernel/edgepi-e87n-6.18/  当前 15 个内核补丁（含 902 内存修正）
 patches/armbian-build/          固定框架的主机兼容修补
 firmware/                      有独立许可的 MT7987 PHY 微码
 scripts/                       补丁、内核包、镜像和实机证据检查工具
@@ -117,7 +121,7 @@ tests/                         代码夹具和模拟回归测试
 docs/                          构建、使用、验收及历史记录
 ```
 
-`output/`、`source/`、镜像、内核包、构建日志、设备参考件和本地凭证不进入 Git。保留的 `edgepi-e87n-6.12/` 仅用于历史对照，不是当前默认配置。镜像与独立显示包通过 tag Release 分发，原始内核包和日志仍可从对应构建的 Actions artifacts 获取，具体名称见[下载说明](docs/DOWNLOADS.md)。唯一工作流**仅手动触发**，每次重新构建并自动生成 tag 发布。
+`output/`、`source/`、镜像、固件 TAR、内核包、构建日志、设备参考件和本地凭证不进入 Git。保留的 `edgepi-e87n-6.12/` 仅用于历史对照，不是当前默认配置。固件 TAR 与独立显示包通过 tag Release 分发，原始内核包和日志保留在对应构建的 Actions artifacts，具体名称见[下载说明](docs/DOWNLOADS.md)。唯一工作流**仅手动触发、无 inputs**，每次重新构建并自动生成 tag 发布。
 
 ## 来源、许可与反馈
 
@@ -125,4 +129,4 @@ docs/                          构建、使用、验收及历史记录
 
 本项目新增代码按 [GPL-2.0](LICENSE) 发布；第三方文件遵循各自已有声明，`firmware/` 内 MediaTek 微码**不属于 GPL 内核代码**，按其独立许可证分发。镜像内 Debian 软件包各自的许可证不由本仓库统一替换。
 
-报告问题请提供本仓库提交号、镜像 SHA-256、串口启动日志和相关驱动错误，并先删除密码、密钥、内网 IP/MAC 及其他私人信息。不要把 `output/runtime/`、完整设备备份或私有日志直接提交到公开仓库。
+报告问题请提供本仓库提交号、固件 SHA-256、可获得的启动日志和相关驱动错误，并先删除密码、密钥、内网 IP/MAC 及其他私人信息。恢复通道可采用串口或已经实测可恢复的 U-Boot Web/网络控制通道，同时须确认物理恢复路径；当前均未实测。不要把 `output/runtime/`、完整设备备份或私有日志直接提交到公开仓库。

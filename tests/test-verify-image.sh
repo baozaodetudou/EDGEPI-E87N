@@ -89,6 +89,10 @@ losetup() {
 blockdev() {
 	mock_record blockdev "$@"
 	[[ $# == 2 && "$1" == --getro && "$2" =~ ^/dev/loop770077(p[12])?$ ]] || mock_error blockdev "$@" || return
+	if [[ "$mode" == delayed_partition && "$2" == /dev/loop770077p1 && ! -f "$mock_dir/node-ready" ]]; then
+		printf 'ready\n' > "$mock_dir/node-ready"
+		return 1
+	fi
 	if [[ "$mode" == writable_loop ]]; then printf '0\n'; else printf '1\n'; fi
 }
 blkid() {
@@ -254,6 +258,7 @@ done
 run_case gpt_command_fail 70 "$image"
 run_case loop_fail 66 "$image"
 run_case writable_loop 1 "$image"
+run_case delayed_partition 0 "$image"
 run_case not_ext4 1 "$image"
 run_case fsck_fail 4 "$image"
 run_case bad_uuid 1 "$image"

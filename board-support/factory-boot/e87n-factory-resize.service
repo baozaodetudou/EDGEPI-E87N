@@ -1,0 +1,14 @@
+[Unit]
+Description=Grow ext4 within the verified E87N factory rootfs partition
+After=local-fs.target
+Before=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I /usr/lib/e87n/factory-boot.py resize
+TimeoutStartSec=100
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

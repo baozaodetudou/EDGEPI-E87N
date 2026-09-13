@@ -103,10 +103,11 @@ def validate_assets(directory, source_commit):
         require((info.st_dev, info.st_ino) not in inodes, "Duplicate asset file")
         inodes.add((info.st_dev, info.st_ino))
         files[path.name] = (path, info.st_size, digest(path))
-    images = {name for name in files if name.endswith(".img.xz")}
+    images = {name for name in files if name.endswith(".tar")}
     debs = {name for name in files if re.fullmatch(r"e87n-display_.+_all\.deb", name)}
     require(len(images) == len(debs) == 1 and set(files) == FIXED | images | debs,
             "Missing, duplicate, or unexpected release assets")
+    require(all(files[name][1] > 0 for name in images | debs), "Empty release payload")
     manifest = {}
     for line in files["SHA256SUMS"][0].read_text(encoding="utf-8").splitlines():
         match = re.fullmatch(r"([0-9a-fA-F]{64}) [ *]([A-Za-z0-9][A-Za-z0-9._+~-]*)", line)
@@ -123,6 +124,10 @@ def validate_assets(directory, source_commit):
                 all(metadata["target"].get(k) == v for k, v in TARGET.items()) and
                 metadata.get("collection_errors") == [], "Build metadata is not a successful current-source target")
         require(kind != "image" or metadata.get("image_static_audit") == "passed", "Image audit has not passed")
+        require(kind != "image" or metadata.get("factory_format") == "e87n-uboot-firmware-tar-v1",
+                "Factory firmware format mismatch")
+        require(kind != "image" or metadata.get("factory_static_audit") == "passed",
+                "Factory firmware audit has not passed")
     return files
 
 
@@ -175,8 +180,8 @@ def publish(args, files):
     # Only the two end-user downloads belong on Releases. The other validated
     # files are staging/evidence, not extra installation packages for users.
     downloads = {name: value for name, value in files.items()
-                 if name.endswith(".img.xz") or re.fullmatch(r"e87n-display_.+_all\.deb", name)}
-    require(len(downloads) == 2, "Release must contain one image and one display package")
+                 if name.endswith(".tar") or re.fullmatch(r"e87n-display_.+_all\.deb", name)}
+    require(len(downloads) == 2, "Release must contain one factory firmware tar and one display package")
     try:
         gh("release", "create", args.tag, "--repo", args.repository, "--target", args.source_commit,
            "--title", f"E87N {args.tag}", "--notes-file", files["RELEASE-NOTES.md"][0],

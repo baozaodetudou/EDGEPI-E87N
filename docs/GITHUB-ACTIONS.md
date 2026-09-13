@@ -1,6 +1,8 @@
 # GitHub Actions 手动构建与 tag 发布
 
-唯一工作流是 [build-e87n.yml](../.github/workflows/build-e87n.yml)，名称为 **E87N Debian 13 release**。**`on.workflow_dispatch` 不声明任何 inputs，只能手动运行；push、tag push、PR 和定时任务均不触发。** 每次运行重新构建本次 main 提交，固定 Debian 13 Trixie / Linux 6.18.51；全部验证成功后由 release job 自动生成 tag，发布最小镜像和独立 `e87n-display` Debian 包到 GitHub Releases。当前硬件未验收，因此发布为明确标记实验性的 **Pre-release**，不设为稳定 Latest，不执行刷写。
+唯一工作流是 [build-e87n.yml](../.github/workflows/build-e87n.yml)，名称为 **E87N Debian 13 release**。**`on.workflow_dispatch` 不声明任何 inputs，只能手动运行；push、tag push、PR 和定时任务均不触发。** 每次运行重新构建本次 main 提交，固定 Debian 13 Trixie / Linux 6.18.51；全部验证成功后由 release job 自动生成 tag，发布 `<basename>-uboot-firmware.tar` 和独立 `e87n-display` Debian 包两个公开附件。当前硬件未验收，因此发布为明确标记实验性的 **Pre-release**，不设为稳定 Latest，不执行刷写。
+
+新固件为[未压缩 USTAR](UBOOT-FIRMWARE.md)：`sysupgrade-edgepi-e87n/{kernel,root,CONTROL}`，kernel 是 LZMA 内核 + 原始 initrd + DTB 的 FIT，root 是含 `/boot` 的 Debian ext4。`.img` / `.img.xz` 仅为中间或历史文件，不可刷写、不作为新公开附件。本地 R4 已生成并独立审计 EXIT 0，但它重新打包历史 Actions RAW，没有完整重编内核。未来从新源码完整构建的手动工作流**尚未 dispatch**，不能称作新的 GitHub job 或 Release 完成。
 
 已知故障与复验：[2026-09-13 SSH keygen 审计误报修复](ci-keygen-fix-20260913.md)。原运行编译成功但审计失败，修复后的本地完整复验通过；历史 [run 34737922588](https://github.com/baozaodetudou/EDGEPI-E87N/actions/runs/34737922588) 的验证、独立显示包、完整镜像构建及审计已全部成功。它仅保留为历史构建证据和备用下载，不代表当前 main 已完成新构建或发布；原失败 run 的状态不会因此改变。**远端 Release 是否已成功发布尚未确认。**
 
@@ -23,7 +25,7 @@
 | 显示包版本 | `packaging/e87n-display/VERSION`；CI 不覆盖 `--version` |
 | 系统默认值 | 由镜像定制脚本维护：root / doumao、SSH、DHCP、Asia/Shanghai、zh_CN.UTF-8；见 [默认配置](DEFAULTS.md) |
 
-显示包 job 调用 `bash scripts/build-display-deb.sh --output-dir DIR`。镜像 job 调用现有 `build-armbian.sh`，由其复制 overlay 后在目标 chroot 构建并安装显示包；因此 Linux 镜像启动器不依赖主机先生成 `.deb`。两个 job 使用同一仓库提交和 VERSION，但打包环境与时间可能不同，不承诺两个包逐字节相同。APT 软件包源和 runner 软件也没有完整快照，不能据此宣称整个镜像逐字节可复现。
+显示包 job 调用 `bash scripts/build-display-deb.sh --output-dir DIR`。镜像 job 调用现有 `build-armbian.sh`，由其复制 overlay 后在目标 chroot 构建并安装显示包，再审计实际 GPT 中间镜像，调用 `scripts/build-factory-firmware.py --image RAW --output <basename>-uboot-firmware.tar` 并审计最终 TAR。RAW 是构建主机上的普通未压缩 `.img`。两个 job 使用同一仓库提交和 VERSION，但打包环境与时间可能不同，不承诺两个包逐字节相同。APT 软件包源和 runner 软件也没有完整快照，不能据此宣称整个固件逐字节可复现。
 
 ## Runner、资源和权限
 
@@ -43,10 +45,10 @@ GitHub 为公开仓库列出了该 ARM64 标签、4 核、16 GB 内存及 **14 G
 
 Release **只上传两个二进制附件**：
 
-- 完整 `.img.xz` 镜像，已经预装显示包。
+- `<basename>-uboot-firmware.tar` 未压缩 USTAR 固件，已经预装显示包。
 - 独立 `e87n-display_*_all.deb`，用于安装/升级屏幕控制程序。
 
-两个下载链接和 SHA-256 直接写进 Release 正文，不需要另外下载校验文本。GitHub 自动附带的 Source code zip/tar.gz 是源码，不是额外的系统镜像。构建器仍会生成包含内核包归档、构建证据、元数据和校验清单的 8 文件临时 staging，用于发布前完整验证；发布器明确只上传其中的镜像和显示包。原始内核包、元数据和日志仍保留在源 run 的 Actions artifacts（14 天），不作为额外安装附件发布。
+两个下载链接和 SHA-256 直接写进 Release 正文，不需要另外下载校验文本。GitHub 自动附带的 Source code zip/tar.gz 是源码，不是额外的系统固件。内部 staging 保留内核包归档、构建证据、元数据和校验清单供发布前验证；发布器只上传固件 TAR 和显示包。原始内核包、元数据和日志仍保留在源 run 的 Actions artifacts（14 天），不作为额外安装附件发布。
 
 release job 使用预检输出的自动 tag 名称，再检查同名 tag/Release，创建指向**本次工作流实际构建提交 `GITHUB_SHA`** 的 draft pre-release，上传明确列出的附件并核对远端文件；完成后才公开。不会给旧版本覆盖附件，也不会把 tag 指向后续漂移的 main。若 tag 冲突或上传/核对失败，作业报错，已有 draft/tag 保留供人工检查，不自动删除。需要重试发布时，重新点击 **Run workflow** 发起新的手动运行，获得新的 run ID，重新构建并自动生成新 tag。不要通过重跑失败 job 重试发布：重跑沿用原 run ID，可能仍会遇到同名 tag，且不同 attempt 的产物不会混用。发布行为参考 [GitHub CLI release create](https://cli.github.com/manual/gh_release_create)。
 
@@ -56,9 +58,9 @@ release job 使用预检输出的自动 tag 名称，再检查同名 tag/Release
 
 历史验证记录（2026-09-13，简化前版本）：当时两个工作流的 actionlint、CI ShellCheck 在 macOS 通过；工作流 19 项、发布准备 21 项、发布器 27 项、来源解析/手动发布契约 12 项，共 79 项测试在 macOS 与 ARM64 Debian 13 VM 均通过。使用 `34737922588` 的真实镜像/显示包 artifacts 完成 8 文件本地 staging，清单全数通过；发布器验证只有两个用户下载文件会上传，Release 正文的两个链接及摘要已核对。当时真实 GitHub 的显式 run ID、最近成功构建解析与只读发布预检均通过。没有调用真实发布或手动 dispatch，本地发布目录不等于远端 Release。
 
-上述 79 项是历史结果；独立发布入口及其来源解析代码和 12 项测试现已移除，Git 历史可恢复，不再提供选择历史构建的功能。新增一项真实 Shell 展开测试，覆盖不同 run ID 的自动 tag、分支限制和发布预检失败，不调用真实 GitHub。当前三组测试为工作流 20 项、发布准备 21 项、发布器 27 项，合计 68 项，在 macOS 与 ARM64 Debian 13 VM 均通过；actionlint 和 CI ShellCheck 在 macOS 通过。这些检查不代表新工作流已实际运行或发布成功。
+上述 79 项是历史结果；独立发布入口及其来源解析代码和 12 项测试已移除，不再提供选择历史构建的功能。其后的 GPT 发布版本增加真实 Shell 展开测试，覆盖不同 run ID 的自动 tag、分支限制和发布预检失败；当时工作流 20 项、发布准备 21 项、发布器 27 项，合计 68 项在 macOS 与 ARM64 Debian 13 VM 均通过，actionlint 和 CI ShellCheck 在 macOS 通过。这同样是 TAR 格式切换前的历史结果，不证明新固件工作流已通过或实际发布成功。
 
-## 实际镜像审计与失败输出
+## 中间镜像、最终 TAR 审计与失败输出
 
 镜像命令正常退出且发现新生成的 `.img.xz` 后，每个文件解压到 `RUNNER_TEMP` 下唯一的 `e87n-ci-audit.*` 目录，并执行：
 
@@ -68,27 +70,40 @@ sudo -n bash scripts/verify-image.sh --release trixie --require-usb-root \
   --require-display-fan --require-system "$audit_dir/candidate.img"
 ```
 
-这是对本次实际镜像的检查，验证器使用自己分配的只读 loop 与只读挂载；不执行镜像内程序。检查包含 GPT/文件系统、启动配置/initramfs、显示/风扇、目标系统默认值等现有验证器约束。任意解压或审计失败都会使 **build 步骤失败**，不会先把编译成功视为整个构建通过。依赖包含 device-tree-compiler、u-boot-tools、initramfs-tools-core、fdisk/gdisk、e2fsprogs、zstd、libcrypt1 和常规 Linux 工具。
+这是对本次实际中间镜像的检查，验证器使用自己分配的只读 loop 与只读挂载，不执行镜像内程序。检查包含 GPT/文件系统、历史中间 extlinux 配置/initramfs、显示/风扇、目标系统默认值等约束。随后必须转换并验证最终 TAR：
 
-`image.log` 保存完整构建/审计控制台，`image-audit-N.log` 保存独立审计结果，`image.exit-code` 保存退出码。临时 raw 镜像不上传，留在一次性 VM 直到作业销毁；不会为清理它而强制卸载未知挂载。脚本拒绝已有 `source/armbian-build/output`，避免将旧镜像当成本次成功结果。
+```sh
+sudo -n python3 scripts/build-factory-firmware.py \
+  --image /path/to/candidate.img \
+  --output /path/to/candidate-uboot-firmware.tar
+sudo -n python3 scripts/verify-factory-firmware.py /path/to/candidate-uboot-firmware.tar
+```
 
-每个 job 的收集及上传步骤使用 `always()`，普通失败后也尝试保留已经产生的镜像、包、日志和校验清单。原始 CI/框架日志另有独立上传步骤，所以收集失败不会阻断日志上传。机器失联、整体硬超时、强制取消、磁盘彻底耗尽或 GitHub artifacts 服务失败时，上传仍可能无法完成。关于失败与取消条件，见 [GitHub 状态检查函数](https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#status-check-functions)。
+转换在私有副本中重新整理 ext4：使用相同 UUID 的全新 735 MiB 文件系统，完整复制并比较目录树、文件 SHA、属主、模式、硬链接和 xattrs，不裁剪必要组件；原 `.img` 不变。本轮复制比较与 R4 独立最终审计均已通过，不包含硬件验收。新 root 内含 `/boot`，禁用通用 Armbian resize，改为校验完整原布局后仅扩 p5 内 ext4；在 DHCP 前只读 factory MAC，保留内核 hold。最终检查覆盖 USTAR、厂商 C 解析器、FIT/DTB 的 1 GiB/保留区、ext4/UUID、rootfs 策略与成套内核一致性；R4 还强化 Image 头/大小/对齐、FIT loadables/reservation map、root 4 KiB 块及额外 init 参数检查，详见[固件契约](UBOOT-FIRMWARE.md)。
+
+任何解压、镜像审计、转换或最终 TAR 审计失败都使 **build 步骤失败**。依赖包含 device-tree-compiler、u-boot-tools、initramfs-tools-core、fdisk/gdisk、e2fsprogs、主机 C 编译器、zstd、libcrypt1 和常规 Linux 工具。整个 TAR 必须 `<=768 MiB`，此静态政策不证明 Web 可用 RAM 足够。
+
+`image.log` 保存完整构建/审计控制台，`image-audit-N.log` 保存中间镜像审计，`factory-firmware-audit-1.log` 保存最终固件审计，`image.exit-code` 保存退出码。新流程从 `output/ci/firmware/` 收集 TAR，不上传 raw 或 `.img.xz` 中间镜像。脚本拒绝已有 Armbian/固件输出，避免混入旧文件；临时文件保留在一次性构建环境中供诊断。
+
+每个 job 的收集及上传步骤使用 `always()`，普通失败后也尝试保留已经产生的 TAR、包、日志和校验清单。原始 CI/框架日志另有独立上传步骤，所以收集失败不会阻断日志上传。机器失联、整体硬超时、强制取消、磁盘彻底耗尽或 GitHub artifacts 服务失败时，上传仍可能无法完成。关于失败与取消条件，见 [GitHub 状态检查函数](https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#status-check-functions)。
 
 下载对应 run / attempt 的候选 artifact 后，内部布局为：
 
 ```text
 SHA256SUMS
 build-metadata.json
-images/                 镜像 job 已生成的镜像（失败时可能不完整）
+images/                 -uboot-firmware.tar（失败时可能缺失或未通过全部检查）
 packages/armbian/        内核、DTB、BSP 等包，保留子目录
 packages/display/       独立显示包 job 的 .deb
 logs/ci/                CI、退出码和实际镜像审计日志
 logs/armbian/           框架日志（镜像 job）
 ```
 
-两个 job 的候选 artifact 分开保存，并非单个 artifact 同时包含所有目录。名称包含 `github.run_id` 和 `github.run_attempt`，保留 14 天；使用零额外压缩上传已经压缩的镜像和包。下载行为和保留限制见 [upload-artifact 官方说明](https://github.com/actions/upload-artifact/tree/043fb46d1a93c77aae656e7c1c64a875d1fc6a0a)。
+两个 job 的候选 artifact 分开保存，并非单个 artifact 同时包含所有目录。名称包含 `github.run_id` 和 `github.run_attempt`，保留 14 天；上传采用零额外压缩，固件自身仍是未压缩 USTAR。下载行为和保留限制见 [upload-artifact 官方说明](https://github.com/actions/upload-artifact/tree/043fb46d1a93c77aae656e7c1c64a875d1fc6a0a)。
 
-在解压后的 artifact 根目录运行 `sha256sum --check SHA256SUMS`（macOS 可用 `shasum -a 256 -c SHA256SUMS`）。同时检查 `build-metadata.json` 的 `build_step_outcome`、`image_static_audit` 和 `collection_errors`。校验正确只证明下载文件与清单一致；失败 job 的部分文件同样可以有正确校验值。元数据明确保留硬件待验收状态。
+在解压后的 artifact 根目录运行 `sha256sum --check SHA256SUMS`（macOS 可用 `shasum -a 256 -c SHA256SUMS`）。同时检查 `build-metadata.json` 的 `build_step_outcome`、`image_static_audit`、`factory_format=e87n-uboot-firmware-tar-v1`、`factory_static_audit` 和 `collection_errors`；只有两层审计通过才满足新交付契约。校验正确只证明文件与清单一致；失败 job 的部分文件同样可以有正确校验值。元数据保留硬件待验收状态。
+
+本轮原生 VM 已报告 902 dry-run、factory 24 项、root adapter 24 项及完整 ext4 复制比较通过；R4 TAR 独立最终审计 EXIT 0。完整 Linux `ci-regressions.sh` 已在磁盘临时目录全套通过，`regressions-disk.log` EXIT 0；此前缺 docs、AppleDouble 和 `/tmp` 满失败已解决，失败记录保留。静态 CI 85 项再次通过后，新增的 runtime/root preparer 两个编译检查目标也已复验通过。主机导出及 SHA-256 比对已完成，V3 已废弃，未来工作流未 dispatch，远端发布未确认。原生打包不等于新 GitHub job 完成，更不代表硬件验收；刷写条件见[首启准备](first-boot.md)。
 
 收集器仅收集已知输出目录和扩展名，拒绝符号链接，使用硬链接避免复制多 GB 镜像；跨文件系统时才复制。它不会上传缓存、`.tmp` rootfs、环境变量转储、私钥或设备采集目录，也不会覆盖已存在的收集目录。
 

@@ -94,7 +94,7 @@ def unique_object(pairs):
 def namespaces(kind):
     result = {"logs/ci": (".log", ".exit-code", ".txt")}
     if kind == "image":
-        result.update({"images": (".img.xz",), "packages/armbian": (".deb",),
+        result.update({"images": (".tar",), "packages/armbian": (".deb",),
                        "logs/armbian": (".log", ".txt", ".html", ".json", ".gz", ".xz", ".zst")})
     else:
         result["packages/display"] = (".deb",)
@@ -148,6 +148,8 @@ def validate(root, kind, args, version):
                 "kernel_commit": "f6388029ea9e2c9e807d73827658738ea131faee",
                 "display_version_source": version,
                 "image_static_audit": "passed" if kind == "image" else "not applicable"}
+    if kind == "image":
+        expected.update(factory_format="e87n-uboot-firmware-tar-v1", factory_static_audit="passed")
     for key, value in expected.items():
         require(metadata.get(key) == value, "metadata mismatch: " + kind + "." + key)
     require({f"logs/ci/{kind}.log", f"logs/ci/{kind}.exit-code"} <= files, "missing build log or exit-code")
@@ -158,7 +160,12 @@ def validate(root, kind, args, version):
     packages = sorted(n for n in files if n.startswith("packages/"))
     require(packages and all((root / n).stat().st_size for n in images + packages), "missing or empty payload")
     if kind == "image":
-        require(len(images) == 1, "expected exactly one .img.xz image (collision or missing payload)")
+        require(len(images) == 1, "expected exactly one factory firmware .tar (collision or missing payload)")
+        audit_name = "logs/ci/factory-firmware-audit-1.log"
+        require(audit_name in files, "missing required factory firmware audit log")
+        audit = small_text(root / audit_name, CHUNK, hashes[audit_name])
+        require(any(line.strip() == "PASS" or line.startswith(("PASS:", "PASS ")) for line in audit.splitlines()),
+                "factory firmware audit log is missing PASS")
     else:
         require(packages == [f"packages/display/e87n-display_{version}_all.deb"], "expected one standalone versioned display payload")
     hashes["SHA256SUMS"] = hashlib.sha256(manifest.encode("utf-8")).hexdigest()
@@ -213,11 +220,11 @@ def main():
 
 ## 下载 / Downloads
 
-- [系统镜像（.img.xz）]({download_base}/{quote(image_name, safe='')})
+- [实验性 U-Boot 系统固件（.tar）]({download_base}/{quote(image_name, safe='')})
 - [屏幕控制安装包（.deb）]({download_base}/{quote(display_name, safe='')})
 
-本 Release 仅有以上两个二进制附件：镜像已预装屏幕程序，独立安装包用于安装/升级。
-GitHub 自带的 Source code (zip/tar.gz) 是源码，不是可刷写镜像。
+本 Release 仅有以上两个二进制附件：系统固件已预装屏幕程序，独立安装包用于安装/升级。
+GitHub 自带的 Source code (zip/tar.gz) 是源码，不是可刷写固件。
 
 ## SHA-256
 
@@ -233,10 +240,23 @@ Default login: root / doumao over SSH port 22. First connect only to a trusted
 LAN; change the public default password immediately after login with `passwd`.
 Wired interfaces request DHCP; locale zh_CN.UTF-8, timezone Asia/Shanghai.
 
-Screen and fan support passed static checks only. No board has been validated:
-boot, networking, display and thermal behavior still require hardware testing.
-Do not flash this whole image over the original eMMC: the GPT, boot chain and
-factory data may be overwritten. This release provides no whole-eMMC installer.
+Experimental firmware: software validated by static checks only, NOT hardware validated.
+No board has been validated: boot, networking, display and thermal behavior still
+require hardware testing. The uncompressed USTAR archive uses format
+`e87n-uboot-firmware-tar-v1` and contains `sysupgrade-edgepi-e87n/kernel` (FIT)
+and `sysupgrade-edgepi-e87n/root` (ext4).
+
+Use this .tar only in the original U-Boot recovery page's `firmware` field.
+Never use the SIMG, GPT or FIP fields; never use LuCI sysupgrade or the OpenWrt
+`sysupgrade` command, despite the archive member names. Do not flash it as a
+whole-eMMC image. A complete, verified recovery backup (including the original
+eMMC GPT, boot chain and factory data) and a successful hardware RAM test boot
+of this candidate are required before any flash. This release does not establish
+either prerequisite and provides no whole-eMMC installer.
+
+此固件为实验版本，仅通过软件静态校验，尚未经过硬件验证。仅可用于原厂 U-Boot
+恢复页面的 `firmware` 字段，禁止用于 SIMG/GPT/FIP 或 LuCI sysupgrade。
+刷写前必须完成并验证恢复备份，并通过本候选固件的硬件 RAM 启动测试。
 
 The standalone e87n-display .deb comes from the independent display job.
 Kernel packages, metadata, checksum manifests and full logs remain in the
