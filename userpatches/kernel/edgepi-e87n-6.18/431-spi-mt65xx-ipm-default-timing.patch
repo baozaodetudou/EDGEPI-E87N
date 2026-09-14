@@ -1,0 +1,25 @@
+From 9e87n00000000000000000000000000000000001 Mon Sep 17 00:00:00 2001
+From: EdgePi E87N port <local>
+Date: Sun, 13 Sep 2026 20:00:00 +0800
+Subject: [PATCH] spi: mt65xx: use MT7987 IPM default tick delay
+
+The MT7987 IPM SPI controller needs a non-zero get-tick delay for reliable
+interrupt completion. The vendor/OpenWrt MT7987 port initializes this value
+to 2; the older generic Linux implementation leaves it at zero. Keep the
+change limited to the existing private chip configuration used by this
+kernel tree.
+
+---
+ drivers/spi/spi-mt65xx.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/spi/spi-mt65xx.c b/drivers/spi/spi-mt65xx.c
+--- a/drivers/spi/spi-mt65xx.c
++++ b/drivers/spi/spi-mt65xx.c
+@@ -238,5 +238,5 @@
+  */
+ static const struct mtk_chip_config mtk_default_chip_info = {
+ 	.sample_sel = 0,
+-	.tick_delay = 0,
++	.tick_delay = 2,
+ };
