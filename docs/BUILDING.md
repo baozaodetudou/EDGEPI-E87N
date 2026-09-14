@@ -1,6 +1,6 @@
 # 构建 E87N Armbian
 
-当前配方采用 [DEFAULTS.md](DEFAULTS.md) 定义的最小系统：`root` / `doumao`、SSH 22 密码登录、networkd/netplan DHCP、`Asia/Shanghai`、`zh_CN.UTF-8`、正常 APT 和预装版本化 `e87n-display` 包。没有首次创建用户向导或强制公钥门槛，额外存储模块默认 `E87N_EXTRA_STORAGE=no`。范围与待测项见 [SYSTEM-READINESS.md](SYSTEM-READINESS.md)。
+当前配方采用 [DEFAULTS.md](DEFAULTS.md) 定义的 headless 最小系统：`root` / `doumao`、SSH 22 密码登录、networkd/netplan DHCP、`Asia/Shanghai`、`zh_CN.UTF-8` 和正常 APT。显示包单独构建发布，暂不在基础镜像中自动加载。没有首次创建用户向导或强制公钥门槛，额外存储模块默认 `E87N_EXTRA_STORAGE=no`。
 
 当前交付为[原厂 U-Boot 未压缩 USTAR 固件](UBOOT-FIRMWARE.md)，Armbian `.img` / `.img.xz` 只作中间产物或历史证据，不可刷写。R4 本地已生成并独立审计 EXIT 0；R4 重新打包历史 Actions 34737922588 的原始 RAW，修正 DTB 的 1 GiB/保留区及 bootargs（含 902 等效修正），没有完整重编 Armbian 或内核。V3 因内核地址修正已废弃，主机导出及 SHA-256 比对已完成。没有 E87N 重启、刷写、完整恢复备份、已实测控制通道或板上 RAM 测试记录。
 
@@ -24,7 +24,7 @@
 | 用户空间与固件 | `board-support/`、`packaging/e87n-display/`、`scripts/build-display-deb.sh`、`userpatches/customize-image.sh`、`firmware/`；PHY 固件安装前检查 SHA-256 与大小 |
 | 额外存储模块 | `E87N_EXTRA_STORAGE=no`；只有显式设为 `yes` 才请求额外 DM/RAID 等模块 |
 
-这些 pin 固定框架和内核源码，不构成逐字节可复现的整个系统快照。`customize-image.sh` 从 Debian 签名软件源更新软件包、安装 SSH/网络/时间与 locale 基础依赖，并在目标 chroot 构建、用 APT 预装独立 `e87n-display` 包。显示包依赖 `python3`、`python3-pil` 和 `fonts-dejavu-core`，独立版本与升级方法见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)。配方核对 Debian 13 / Trixie 身份，但不锁定所有包的版本，也不强制未来构建仍显示 13.6。Docker 默认镜像标签同样会变化。
+这些 pin 固定框架和内核源码，不构成逐字节可复现的整个系统快照。`customize-image.sh` 从 Debian 签名软件源更新软件包并安装 SSH/网络/时间与 locale 基础依赖；`e87n-display` 由独立 job 构建。显示包依赖 `python3`、`python3-pil` 和 `fonts-dejavu-core`，独立版本与升级方法见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)。
 
 重建特定候选时，应保留该候选的仓库输入、框架兼容修补、最终内核配置、构建参数、主机/容器版本、包版本、日志和校验清单。候选记录中的冻结输入归档和 release 整理属于当次人工交付步骤，`build.sh` 不会自动生成同样的 release 目录或证明新镜像与旧镜像哈希相同。
 

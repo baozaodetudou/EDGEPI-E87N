@@ -56,7 +56,7 @@ Release 下载不受 Actions 的 14 天保留期约束。候选仍标记为 Pre-
 
 ## 历史最小配置构建证据与 Actions 下载（不可刷写）
 
-最小配置以 [DEFAULTS.md](DEFAULTS.md) 为准：`root` / `doumao`、SSH 22、DHCP、上海时区、中文 UTF-8、正常 APT 和预装版本化 `e87n-display` 包；额外存储默认 `E87N_EXTRA_STORAGE=no`。历史 run `34737922588` 的源码为 `2a60011`，镜像校验值与审计证据见[当次记录](ci-keygen-fix-20260913.md)，不代表当前 main 已完成新构建或发布。
+最小配置以 [DEFAULTS.md](DEFAULTS.md) 为准：`root` / `doumao`、SSH 22、DHCP、上海时区、中文 UTF-8 和正常 APT；`e87n-display` 作为独立包发布，额外存储默认 `E87N_EXTRA_STORAGE=no`。历史 run `34737922588` 的源码为 `2a60011`，镜像校验值与审计证据见[当次记录](ci-keygen-fix-20260913.md)，不代表当前 main 已完成新构建或发布。
 
 在上述成功 run 页面的 **Artifacts** 下载：
 

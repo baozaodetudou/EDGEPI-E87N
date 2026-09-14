@@ -20,13 +20,16 @@ install -d /usr/lib/firmware/mediatek/mt7987 /usr/share/doc/e87n-phy-firmware
 install -m 0644 mediatek/mt7987/*.bin /usr/lib/firmware/mediatek/mt7987/
 install -m 0644 LICENCE.mediatek README.md SHA256SUMS /usr/share/doc/e87n-phy-firmware/
 
-# Minimal OS essentials plus the separately upgradable display package.
-# No desktop, LuCI, Docker, RAID/LVM administration suite or fan daemon.
+# Minimal OS essentials. The current production profile is headless because
+# the NV3007 SPI driver is not yet hardware-validated. The display package is
+# built and released separately for later installation.
 apt-get -y --no-install-recommends install openssh-server ca-certificates \
   iproute2 netplan.io systemd-resolved systemd-timesyncd tzdata locales
-bash /tmp/overlay/e87n-package/scripts/build-display-deb.sh --output-dir /tmp/e87n-debs
-display_debs=(/tmp/e87n-debs/e87n-display_*_all.deb)
-[[ ${#display_debs[@]} == 1 && -f "${display_debs[0]}" ]] || exit 1
-apt-get -y --no-install-recommends install "${display_debs[0]}"
+if [[ ! -e /tmp/overlay/e87n-board-support/DISPLAY_DISABLED ]]; then
+  bash /tmp/overlay/e87n-package/scripts/build-display-deb.sh --output-dir /tmp/e87n-debs
+  display_debs=(/tmp/e87n-debs/e87n-display_*_all.deb)
+  [[ ${#display_debs[@]} == 1 && -f "${display_debs[0]}" ]] || exit 1
+  apt-get -y --no-install-recommends install "${display_debs[0]}"
+fi
 bash /tmp/overlay/e87n-board-support/image-defaults.sh --target-chroot
 apt-get clean

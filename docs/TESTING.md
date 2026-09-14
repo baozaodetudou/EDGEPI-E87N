@@ -2,7 +2,7 @@
 
 当前测试目标是 [DEFAULTS.md](DEFAULTS.md) 中的最小配置；本轮云端完整构建和实际镜像静态审计已通过，另有可丢弃 rootfs 副本的用户空间集成结果，详见[本轮记录](ci-keygen-fix-20260913.md)。诊断、网络与系统静态检查分别使用 `tests/test-doctor.py`、`tests/test-network-policy.py` 和 `tests/test-verify-system.py`；最后一项需要专用 Linux 构建环境的 root 身份来创建临时 root-owned 夹具，不挂载设备。网络测试要求 GNU patch，macOS 可用 `gpatch`，并会打印实际工具版本。
 
-新镜像必须执行 `verify-image.sh --release trixie --require-usb-root --require-display-fan --require-system candidate.img`。`--require-system` 核对 `root` / `doumao` 密码登录配置、首次 SSH 前生成独立身份的服务依赖、无串口自动登录、无旧初始化服务、networkd/netplan DHCP、上海时区、中文 UTF-8、签名 APT 源、预装 `e87n-display` 包和真实 DTB 的 GMAC aliases。它不要求默认安装 RAID/LVM 管理套件，也不自动调用 `verify-lts-platform.sh --require-storage`。这些都是静态检查，不执行镜像程序，也不能证明 SSH 已能登录。
+基础 headless 镜像必须执行 `verify-image.sh --release trixie --require-usb-root --headless --require-system candidate.img`。`--require-system` 核对 `root` / `doumao` 密码登录配置、首次 SSH 前生成独立身份的服务依赖、无串口自动登录、无旧初始化服务、networkd/netplan DHCP、上海时区、中文 UTF-8、签名 APT 源和真实 DTB 的 GMAC aliases；显示包单独执行显示包和静态显示审计。这些都是静态检查，不执行镜像程序，也不能证明 SSH 已能登录。
 
 历史上，2026-09-13 的 **Debian 13.6 Trixie / Linux 6.18.51 屏幕/风扇候选**已完成完整构建、真实镜像只读审计和导出校验，尚未上板启动或测试。已有结果与精确哈希见[历史候选记录](candidate-display-fan-20260913.md)。2026-09-13 11:10:49 CST 完成的旧配置 VM 构建也已被当前最小配置取代，不能作为当前测试结果。本文提供复跑入口，不把命令示例当作新的通过记录。
 
@@ -209,7 +209,7 @@ sudo apt-get install -y bash coreutils python3 util-linux fdisk mount gdisk \
 
 ```sh
 sudo bash scripts/verify-image.sh --release trixie \
-  --require-usb-root --require-display-fan --require-system \
+  --require-usb-root --headless --require-system \
   ./artifacts/current/candidate.img
 ```
 
@@ -221,7 +221,7 @@ sudo bash scripts/verify-image.sh --release trixie \
 2. 对打开的镜像文件新建专属只读 loop，确认分区只读、ext4 类型，并执行 `e2fsck -fn`，不修复文件系统。
 3. 在专用临时目录中以 `ro,noload,nodev,nosuid,noexec` 挂载，读取真实 root UUID 并调用产物检查。
 4. 用主机 `dumpimage`/`lsinitramfs` 检查 extlinux 选择的 initramfs，确认 `/init` 存在，不执行它。`--require-usb-root` 另外依据最终配置及 `modules.dep` 核对对应版本的 USB/SCSI/T-PHY 模块和递归依赖。
-5. `--require-display-fan` 调用当前版本的显示/风扇静态验证器，`--require-system` 调用最小系统静态验证器。结束时只释放本次创建的挂载和 loop，保留审计文件。
+5. `--headless --require-system` 调用基础系统静态验证器；显示包单独调用显示/风扇静态验证器。结束时只释放本次创建的挂载和 loop，保留审计文件。
 
 检查或清理失败都会返回非零结果。若清理失败，按打印的所属路径人工检查；脚本不会强制卸载、全局清理 loop，或拆除来源不符的挂载。`PASS` 只代表上述静态范围，不证明真实 U-Boot 能读取 USB、识别 extlinux、执行 `booti` 或启动这张镜像。
 

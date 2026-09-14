@@ -67,7 +67,7 @@ release job 使用预检输出的自动 tag 名称，再检查同名 tag/Release
 ```sh
 xz -dc -- generated.img.xz > "$audit_dir/candidate.img"
 sudo -n bash scripts/verify-image.sh --release trixie --require-usb-root \
-  --require-display-fan --require-system "$audit_dir/candidate.img"
+  --headless --require-system "$audit_dir/candidate.img"
 ```
 
 这是对本次实际中间镜像的检查，验证器使用自己分配的只读 loop 与只读挂载，不执行镜像内程序。检查包含 GPT/文件系统、历史中间 extlinux 配置/initramfs、显示/风扇、目标系统默认值等约束。随后必须转换并验证最终 TAR：

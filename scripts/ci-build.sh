@@ -77,7 +77,7 @@ printf 'Read-only image audit: %s -> %s/candidate.img\n' "$candidate" "$audit_di
 # tree. Retain it for the remainder of this disposable job, even on failure.
 xz -dc -- "$candidate" > "$audit_dir/candidate.img"
 sudo -n bash scripts/verify-image.sh --release trixie --require-usb-root \
-	--require-display-fan --require-system "$audit_dir/candidate.img" \
+	--headless --require-system "$audit_dir/candidate.img" \
 	2>&1 | tee output/ci/logs/image-audit-1.log
 
 image_basename=${candidate##*/}

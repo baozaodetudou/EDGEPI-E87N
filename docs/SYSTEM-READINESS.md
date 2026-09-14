@@ -34,7 +34,7 @@ R4 SHA-256：`b3587a5377edf7c95f0d620eb038e67643287ac75629f20cc1b071e5dfa47545`�
 | 设备身份 | 镜像清除 SSH host keys；首次 SSH 前生成独立密钥；空 machine-id 留待首启生成 | 副本上的密钥生成与持久性已测；完整首启服务时序仍待验证 |
 | 网络与时间 | 两个有线网口使用 networkd/netplan DHCP；helper 在 DHCP 前只读 p2 `0x24`/`0x2a` 的 factory MAC；resolved/timesyncd；`Asia/Shanghai` | 原系统只读确认 eth0/eth1 的 of_node 为 mac0/mac1；新 helper 顺序、DHCP/DNS/NTP 与跨重启地址仍待测，无固定管理 IP 或 LAN/WAN/NAT 预设 |
 | 语言与软件管理 | `zh_CN.UTF-8`、`LANGUAGE=zh_CN:zh`；Debian 签名源，正常 `apt update` / `apt install` | UTF-8 与真实 APT 安装已在副本测试；包与 locale 不代表硬件验证 |
-| 小屏与风扇 | 预装独立版本化 `e87n-display` 包；总览、20% 亮度、2 秒刷新；内核自动温控 | 包安装已在副本测试；实机显示、风扇起转与散热待测，没有第二个用户态风扇控制器 |
+| 小屏与风扇 | 内核自动温控；`e87n-display` 独立发布，基础镜像暂不自动加载屏幕驱动 | 风扇接口已实机读取；NV3007 驱动待修正，显示和散热完整验收待测 |
 | 额外存储 | `E87N_EXTRA_STORAGE=no`；DM/LUKS/LVM/RAID 等额外内核模块显式选择构建；管理套件按需安装 | 不预装 RAID/LVM 管理套件，不创建阵列、加密卷或格式化磁盘，不提供加密/LVM 根启动承诺 |
 | 诊断 | `e87nctl doctor` 检查身份、内存、根分区、网络、温控/屏幕注册和内核前提 | 始终报告 `hardware_validation=not-performed`，不会自动压力测试或写硬件 |
 | 更新 | Debian 签名仓库；保留内核/DTB/BSP hold；允许 apt update 和安装用户空间软件 | 不能解除内核 hold：单改 `/boot`/模块不会更新 p4 FIT；后续升级需成套重建 FIT/root/initrd/DTB/模块 |

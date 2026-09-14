@@ -4,7 +4,7 @@
 
 **用户要求完全准备好再刷。当前没有板卡重启、刷写、完整恢复备份、串口连接或板上 RAM 测试记录。** R4 本地已生成，独立最终审计 EXIT 0；factory 24 项、root adapter 24 项通过，完整 Linux `ci-regressions.sh` 已在磁盘临时目录运行并 EXIT 0。CI 85 项已再次通过；新增 runtime/root preparer 两个编译检查目标也已复验通过。主机导出与两文件摘要比对已完成；这不是硬件验收。R4 重新打包历史 Actions 34737922588 的原始 RAW，修正 DTB 的 1 GiB/保留区及 bootargs（含 902 等效修正），没有完整重编 Armbian 或内核。V3 已废弃，未来新源码工作流未 dispatch。这些结果不代替硬件和恢复准备，详见[阶段记录](SYSTEM-READINESS.md)。本文不提供刷写、修改环境或猜测 USB Type-C 针脚的步骤。
 
-[DEFAULTS.md](DEFAULTS.md) 定义新系统的 `root` / `doumao`、SSH 22 密码登录、networkd/netplan DHCP、`Asia/Shanghai`、`zh_CN.UTF-8`、正常 APT 和预装版本化 `e87n-display` 包。没有首次创建用户向导或强制公钥门槛，串口需要正常认证。这些设置只有在新系统实际启动后才适用，不会修改原 OpenWrt 或历史文件。
+[DEFAULTS.md](DEFAULTS.md) 定义新系统的 `root` / `doumao`、SSH 22 密码登录、networkd/netplan DHCP、`Asia/Shanghai`、`zh_CN.UTF-8` 和正常 APT。当前基础镜像暂不自动加载 NV3007；显示包单独发布，待驱动修正后安装。没有首次创建用户向导或强制公钥门槛，串口需要正常认证。
 
 ## 1. 刷写前的准备条件
 

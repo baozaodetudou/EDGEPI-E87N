@@ -223,7 +223,7 @@ def main():
 - [实验性 U-Boot 系统固件（.tar）]({download_base}/{quote(image_name, safe='')})
 - [屏幕控制安装包（.deb）]({download_base}/{quote(display_name, safe='')})
 
-本 Release 仅有以上两个二进制附件：系统固件已预装屏幕程序，独立安装包用于安装/升级。
+本 Release 仅有以上两个二进制附件：系统固件是稳定基础系统，屏幕程序作为独立安装包提供，待屏幕驱动完成实机验证后安装/升级。
 GitHub 自带的 Source code (zip/tar.gz) 是源码，不是可刷写固件。
 
 ## SHA-256

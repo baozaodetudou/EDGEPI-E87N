@@ -5,7 +5,7 @@ export LC_ALL=C
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 usage() {
 	printf '%s\n' \
-		'Usage: sudo bash scripts/verify-image.sh [--release bookworm|trixie] [--require-usb-root] [--require-display-fan] [--require-system] [--] existing.img' \
+		'Usage: sudo bash scripts/verify-image.sh [--release bookworm|trixie] [--require-usb-root] [--headless] [--require-display-fan] [--require-system] [--] existing.img' \
 		'Linux/root only; accepts a regular, uncompressed .img, never a device.' \
 		'Target Debian release defaults to trixie (13); use --release bookworm for Debian 12 candidates.' \
 		'Checks GPT (16 MiB offset, 256 MiB boot, root at 272 MiB), ext4 and fsck -fn.' \
@@ -23,6 +23,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 release=trixie
 require_usb_root=no
 require_display_fan=no
+headless=no
 require_system=no
 while (( $# )); do
 	case "$1" in
@@ -34,6 +35,7 @@ while (( $# )); do
 		--release=*) release=${1#--release=}; shift ;;
 		--require-usb-root) require_usb_root=yes; shift ;;
 		--require-display-fan) require_display_fan=yes; shift ;;
+		--headless) headless=yes; shift ;;
 		--require-system) require_system=yes; shift ;;
 		--) shift; break ;;
 		-*) printf 'FAIL: unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
@@ -58,6 +60,7 @@ if [[ "$require_usb_root" == yes ]]; then
 	[[ -f "$script_dir/verify-initramfs.py" ]] || fail 'sibling verify-initramfs.py missing'
 fi
 if [[ "$require_display_fan" == yes ]]; then
+	[[ "$headless" == no ]] || fail '--headless conflicts with --require-display-fan'
 	[[ "$release" == trixie ]] || fail 'display/fan candidate requires Debian 13'
 	[[ -f "$script_dir/verify-display-fan.py" ]] || fail 'sibling verify-display-fan.py missing'
 fi
@@ -208,7 +211,9 @@ if [[ "$require_display_fan" == yes ]]; then
 		--dtb "$audit_dir/boot/dtb-6.18.51-current-filogic/mediatek/mt7987a-edgepi-e87n.dtb"
 fi
 if [[ "$require_system" == yes ]]; then
-	python3 "$script_dir/verify-system.py" --rootfs "$audit_dir/root" --bootfs "$audit_dir/boot"
+	verify_args=(--rootfs "$audit_dir/root" --bootfs "$audit_dir/boot")
+	[[ "$headless" == yes ]] && verify_args+=(--headless)
+	python3 "$script_dir/verify-system.py" "${verify_args[@]}"
 	bash "$script_dir/verify-lts-platform.sh" \
 		--config "$audit_dir/boot/config-6.18.51-current-filogic" \
 		--dtb "$audit_dir/boot/dtb-6.18.51-current-filogic/mediatek/mt7987a-edgepi-e87n.dtb"

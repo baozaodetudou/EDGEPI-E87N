@@ -4,7 +4,7 @@
 
 ## 当前配置与历史候选 — 2026-09-13
 
-当前最小配方预装独立、版本化 `e87n-display` Debian 包，包含小屏、CLI 与只读诊断；可单独升级，见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)。系统默认值见 [DEFAULTS.md](DEFAULTS.md)：`root` / `doumao`、SSH 22、DHCP、`Asia/Shanghai`、`zh_CN.UTF-8` 和正常 APT。
+当前基础镜像暂不安装或自动加载 `e87n-display`，以保证 NV3007 驱动问题不影响 SSH 和 systemd；独立包仍会构建发布，驱动修正后可安装升级，见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)。
 
 [9 月 13 日历史屏幕/风扇候选](candidate-display-fan-20260913.md)保留其当次构建、静态检查、导出与哈希证据。9 月 12 日的 Trixie 与 Bookworm 镜像也属历史候选；这些文件均不能作为当前最小配置交付。
 
@@ -46,7 +46,7 @@ e87nctl display on
 
 ```bash
 sudo bash scripts/verify-image.sh --release trixie \
-  --require-usb-root --require-display-fan --require-system /absolute/path/to/new.img
+  --require-usb-root --headless --require-system /absolute/path/to/new.img
 ```
 
 验证器只读挂载其自行创建的 loop，检查实际镜像中的内核配置、DTB、模块、Python 语法、依赖文件、默认配置及服务链接；不会执行镜像程序，也不会接触板子的 eMMC。测试中的假 sysfs 和预览 PNG 只验证代码与布局，不能充当物理屏幕或风扇测试。

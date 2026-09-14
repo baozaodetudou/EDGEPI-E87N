@@ -24,6 +24,9 @@ audit = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(audit)
 PACKAGES = """python3 python3-pil fonts-dejavu-core e87n-display openssh-server
 ca-certificates iproute2 netplan.io tzdata locales apt systemd-resolved systemd-timesyncd""".split()
+DISPLAY_SOURCES = {"e87nctl", "systemd/e87n-display.service",
+                   "e87n/doctor.py", "e87n/__main__.py", "e87n/hardware.py",
+                   "e87n/display.py", "e87n/__init__.py"}
 PAIRS = {
     "e87nctl": "/usr/bin/e87nctl",
     "network/10-e87n-dhcp.yaml": "/etc/netplan/10-e87n-dhcp.yaml",
@@ -50,7 +53,7 @@ def password_matches(encoded):
     return bool(result and not result.startswith(b"*") and result.decode("ascii") == encoded)
 
 
-def check(root, boot):
+def check(root, boot, headless=False):
     def path(name):
         return audit.rooted(root, name)
 
@@ -77,7 +80,9 @@ def check(root, boot):
     passwd = data("/etc/passwd").decode().splitlines()
     require(not any(1000 <= int(line.split(":")[2]) < 65534 for line in passwd),
             "generic image contains a pre-created human account")
-    for source, dest in PAIRS.items():
+    pairs = {source: dest for source, dest in PAIRS.items()
+             if not headless or source not in DISPLAY_SOURCES}
+    for source, dest in pairs.items():
         expected = (REPO / "board-support" / source).read_bytes()
         require(data(dest) == expected, "installed source mismatch: " + dest)
         info = path(dest).stat()
@@ -89,7 +94,10 @@ def check(root, boot):
     for name in ("e87n-provision-seed", "e87n-provision-console"):
         require(not os.path.lexists(root / "usr/lib/systemd/system" / (name + ".service")),
                 "superseded provisioning gate remains installed")
-    for name in ("e87n-display", "ssh", "systemd-networkd", "systemd-resolved", "systemd-timesyncd"):
+    enabled_units = ("ssh", "systemd-networkd", "systemd-resolved", "systemd-timesyncd")
+    if not headless:
+        enabled_units = ("e87n-display",) + enabled_units
+    for name in enabled_units:
         links = [root / "etc/systemd/system" / target / (name + ".service")
                  for target in ("multi-user.target.wants", "sysinit.target.wants")]
         require(any(link.is_symlink() and audit.rooted(root, "/" + str(link.relative_to(root))).is_file()
@@ -143,17 +151,21 @@ def check(root, boot):
             installed.add(fields.get("Package"))
         if fields.get("Status") == "hold ok installed":
             held.add(fields.get("Package"))
-    require(set(PACKAGES) <= installed, "missing installed base/display packages: " + ", ".join(sorted(set(PACKAGES) - installed)))
+    required_packages = set(PACKAGES)
+    if headless:
+        required_packages -= {"python3", "python3-pil", "fonts-dejavu-core", "e87n-display"}
+    require(required_packages <= installed, "missing installed base packages: " + ", ".join(sorted(required_packages - installed)))
     require({"linux-image-current-filogic", "linux-dtb-current-filogic"} <= held,
             "experimental image/DTB packages are not held")
-    owned = set(data("/var/lib/dpkg/info/e87n-display.list").decode().splitlines())
-    require({dest for dest in PAIRS.values() if dest.startswith(("/usr/bin/", "/usr/lib/python3/"))}
-            | {"/etc/e87n/display.json", "/etc/modules-load.d/e87n-display.conf",
-               "/usr/lib/systemd/system/e87n-display.service"} <= owned,
-            "display files are not owned by the installed Debian package")
-    require(set(data("/var/lib/dpkg/info/e87n-display.conffiles").decode().splitlines()) ==
-            {"/etc/e87n/display.json", "/etc/modules-load.d/e87n-display.conf"},
-            "display conffiles are not registered for upgrade preservation")
+    if not headless:
+        owned = set(data("/var/lib/dpkg/info/e87n-display.list").decode().splitlines())
+        require({dest for dest in PAIRS.values() if dest.startswith(("/usr/bin/", "/usr/lib/python3/"))}
+                | {"/etc/e87n/display.json", "/etc/modules-load.d/e87n-display.conf",
+                   "/usr/lib/systemd/system/e87n-display.service"} <= owned,
+                "display files are not owned by the installed Debian package")
+        require(set(data("/var/lib/dpkg/info/e87n-display.conffiles").decode().splitlines()) ==
+                {"/etc/e87n/display.json", "/etc/modules-load.d/e87n-display.conf"},
+                "display conffiles are not registered for upgrade preservation")
     require(data("/etc/timezone").strip() == b"Asia/Shanghai", "wrong default timezone")
     require(data("/etc/localtime") == data("/usr/share/zoneinfo/Asia/Shanghai"), "localtime does not match Shanghai")
     locale = data("/etc/default/locale").decode()
@@ -178,16 +190,18 @@ def check(root, boot):
                                 capture_output=True, text=True, timeout=10, check=False)
         require(result.returncode == 0 and result.stdout.strip() ==
                 "/soc/ethernet@15100000/mac@" + str(index), "missing/wrong GMAC alias in actual DTB")
-    print("PASS: root password SSH profile, unique first-boot identity, DHCP, Shanghai/zh_CN.UTF-8, signed APT sources and display package (static only).")
+    print("PASS: root password SSH profile, unique first-boot identity, DHCP, Shanghai/zh_CN.UTF-8 and signed APT sources%s (static only)." %
+          ("" if headless else ", display package"))
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rootfs", required=True, type=Path)
     parser.add_argument("--bootfs", required=True, type=Path)
+    parser.add_argument("--headless", action="store_true")
     args = parser.parse_args()
     try:
-        check(args.rootfs.resolve(strict=True), args.bootfs.resolve(strict=True))
+        check(args.rootfs.resolve(strict=True), args.bootfs.resolve(strict=True), args.headless)
     except (OSError, ValueError, SyntaxError, audit.Invalid) as error:
         parser.exit(1, "FAIL: " + str(error) + "\n")
 
