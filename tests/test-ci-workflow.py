@@ -290,7 +290,7 @@ export -f uname sudo xz dpkg-deb
         for required in ("RELEASE=trixie", "BUILD_MINIMAL=yes", "BUILD_DESKTOP=no", "PREFER_DOCKER=no", "E87N_EXTRA_STORAGE=no", "COMPRESS_OUTPUTIMAGE=xz", "CARD_DEVICE=", "SEND_TO_SERVER="):
             self.assertIn(required, args)
         audit = (self.root / "audit-args").read_text().splitlines()
-        self.assertEqual(audit[:-1], ["-n", "bash", "scripts/verify-image.sh", "--release", "trixie", "--require-usb-root", "--require-display-fan", "--require-system"])
+        self.assertEqual(audit[:-1], ["-n", "bash", "scripts/verify-image.sh", "--release", "trixie", "--require-usb-root", "--headless", "--require-system"])
         raw = Path(audit[-1])
         self.assertEqual(raw.read_text(), "fixture raw image")
         self.assertTrue(raw.parent.name.startswith("e87n-ci-audit."))
