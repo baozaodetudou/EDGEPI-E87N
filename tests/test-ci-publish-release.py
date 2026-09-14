@@ -279,6 +279,17 @@ class PublisherTests(unittest.TestCase):
         self.assertTrue(self.fake.published and self.fake.tag_exists)
         self.assertTrue(calls[-1][-1].endswith(f"git/ref/tags/{TAG}"))
 
+    def test_draft_view_fallback_when_rest_list_hides_draft(self):
+        with mock.patch.object(publisher, "find_release", return_value=None), \
+                mock.patch.object(publisher, "view_release", return_value=self.fake.release):
+            self.assertEqual(self.run_cli(), 0, self.errors.getvalue())
+
+    def test_missing_created_release_is_a_clean_validation_failure(self):
+        with mock.patch.object(publisher, "find_release", return_value=None), \
+                mock.patch.object(publisher, "view_release", return_value=None):
+            self.assertNotEqual(self.run_cli(), 0)
+            self.assertNotIn("Traceback", self.errors.getvalue())
+
     def test_publish_repeats_preflight_and_rejects_new_collision(self):
         self.assertEqual(self.run_cli("preflight"), 0)
         self.fake.tag_exists = True

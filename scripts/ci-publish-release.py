@@ -135,7 +135,7 @@ def check_release(release, args, draft, release_id=None):
     # GitHub may normalize target_commitish to the repository's default branch
     # when a release is created with a commit SHA. The tag check below remains
     # authoritative for the exact source commit after publication.
-    target = release.get("target_commitish")
+    target = release.get("target_commitish") if isinstance(release, dict) else None
     require(isinstance(release, dict) and type(release.get("id")) is int and release["id"] > 0 and
             (release_id is None or release["id"] == release_id) and release.get("tag_name") == args.tag and
             release.get("draft") is draft and release.get("prerelease") is True and
@@ -143,6 +143,28 @@ def check_release(release, args, draft, release_id=None):
             (release.get("published_at") is None if draft else bool(release.get("published_at"))),
             "Release identity, source, or publication state mismatch")
     return release["id"]
+
+
+def view_release(args):
+    """Read a draft that GitHub omits from the authenticated REST list."""
+    result = gh("release", "view", args.tag, "--repo", args.repository,
+                "--json", "databaseId,tagName,isDraft,isPrerelease,targetCommitish,publishedAt",
+                capture=True)
+    if result.returncode != 0:
+        return None
+    try:
+        data = json.loads(result.stdout)
+        return {"id": data["databaseId"], "tag_name": data["tagName"],
+                "draft": data["isDraft"], "prerelease": data["isPrerelease"],
+                "target_commitish": data["targetCommitish"],
+                "published_at": data["publishedAt"]}
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("gh release view returned invalid release JSON") from None
+
+
+def find_created_release(args):
+    release = find_release(args)
+    return release if release is not None else view_release(args)
 
 
 def check_remote_assets(args, release_id, files):
@@ -190,7 +212,7 @@ def publish(args, files):
         gh("release", "create", args.tag, "--repo", args.repository, "--target", args.source_commit,
            "--title", f"E87N {args.tag}", "--notes-file", files["RELEASE-NOTES.md"][0],
            "--draft", "--prerelease", "--latest=false")
-        release_id = check_release(find_release(args), args, True)
+        release_id = check_release(find_created_release(args), args, True)
         check_remote_assets(args, release_id, {})  # Never adopt or overwrite preexisting assets.
         gh("release", "upload", args.tag, "--repo", args.repository, "--", *(v[0] for v in downloads.values()))
         check_release(api(args.repository, f"releases/{release_id}"), args, True, release_id)
