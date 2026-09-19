@@ -144,7 +144,7 @@ def make_fit(boot, work, root_uuid):
     return fit
 
 
-def build(image, output):
+def build(image, output, headless=False):
     require(sys.platform == "linux" and os.geteuid() == 0, "Linux root host required")
     image = regular(image)
     require(image.suffix == ".img", "input must be an uncompressed audited .img")
@@ -182,14 +182,19 @@ def build(image, output):
             run(sys.executable, SCRIPTS / "prepare-factory-rootfs.py", "--root", root_dir,
                 "--boot", boot_dir, "--uuid", root_uuid)
             fit = make_fit(root_dir / "boot", work, root_uuid)
+            profile_args = ["--headless"] if headless else []
             run(sys.executable, SCRIPTS / "verify-system.py", "--rootfs", root_dir,
-                "--bootfs", root_dir / "boot")
-            run(sys.executable, SCRIPTS / "verify-display-fan.py", "--rootfs", root_dir,
+                "--bootfs", root_dir / "boot", *profile_args)
+            if not headless:
+                run(sys.executable, SCRIPTS / "verify-display-fan.py", "--rootfs", root_dir,
+                    "--config", root_dir / "boot" / ("config-" + RELEASE),
+                    "--dtb", work / "board.dtb")
+            run("bash", SCRIPTS / "verify-lts-platform.sh",
                 "--config", root_dir / "boot" / ("config-" + RELEASE),
                 "--dtb", work / "board.dtb")
     run("e2fsck", "-fn", root_image)
     compact_rootfs(root_image, work, root_uuid)
-    manifest = {"format": FORMAT, "kernel_release": RELEASE, "debian": "13",
+    manifest = {"format": FORMAT, "kernel_release": RELEASE, "debian": "13", "headless": headless,
                 "layout": LAYOUT, "root_uuid": root_uuid, "source_image_sha256": before,
                 "hardware_validation": "pending", "upload_limit_policy_bytes": UPLOAD_LIMIT,
                 "payloads": {p.name: {"bytes": p.stat().st_size, "sha256": sha(p)}
@@ -207,7 +212,7 @@ def build(image, output):
     require(candidate.stat().st_size <= UPLOAD_LIMIT, "firmware exceeds conservative upload RAM policy")
     require(sha(image) == before, "input image changed during conversion")
     # Full independent audit before exposing a completed product to CI.
-    run(sys.executable, SCRIPTS / "verify-factory-firmware.py", candidate)
+    run(sys.executable, SCRIPTS / "verify-factory-firmware.py", candidate, *profile_args)
     os.link(candidate, output)  # Same-filesystem atomic no-overwrite publication.
     output.chmod(0o644)
     print("PASS: factory-layout firmware produced (static only):", output)
@@ -218,9 +223,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--headless", action="store_true",
+                        help="require the headless system profile without the display package")
     args = parser.parse_args()
     try:
-        build(args.image, args.output)
+        build(args.image, args.output, args.headless)
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
         parser.exit(1, "FAIL: " + str(error) + "\n")
 

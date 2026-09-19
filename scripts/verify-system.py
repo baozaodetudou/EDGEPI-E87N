@@ -89,6 +89,19 @@ def check(root, boot, headless=False):
         require(info.st_uid == 0 and not info.st_mode & 0o022, "writable/unowned system file: " + dest)
         if dest.endswith(".py"):
             ast.parse(expected, filename=dest)
+    if headless:
+        require(data("/etc/modprobe.d/e87n-headless.conf") ==
+                (REPO / "board-support/e87n-headless.conf").read_bytes(),
+                "headless NV3007 automatic-probe blacklist missing or changed")
+        for directory in audit.UNIT_DIRS:
+            require(not os.path.lexists(root / directory.lstrip("/") / "e87n-display.service"),
+                    "headless image contains a display service")
+        for directory in ("etc/modules-load.d", "usr/lib/modules-load.d",
+                          "usr/local/lib/modules-load.d", "run/modules-load.d"):
+            for config in (root / directory).glob("*.conf"):
+                names = [line.split("#", 1)[0].split(";", 1)[0].strip()
+                         for line in data("/" + str(config.relative_to(root)), True).decode().splitlines()]
+                require("fb_nv3007" not in names, "headless image explicitly auto-loads NV3007")
     require(data("/etc/systemd/system/sshd@.service.d/e87n.conf") ==
             data("/etc/systemd/system/ssh.service.d/e87n.conf"), "inetd SSH missing key generation dependency")
     for name in ("e87n-provision-seed", "e87n-provision-console"):
@@ -154,6 +167,7 @@ def check(root, boot, headless=False):
     required_packages = set(PACKAGES)
     if headless:
         required_packages -= {"python3", "python3-pil", "fonts-dejavu-core", "e87n-display"}
+        require("e87n-display" not in installed, "headless image has e87n-display installed")
     require(required_packages <= installed, "missing installed base packages: " + ", ".join(sorted(required_packages - installed)))
     require({"linux-image-current-filogic", "linux-dtb-current-filogic"} <= held,
             "experimental image/DTB packages are not held")

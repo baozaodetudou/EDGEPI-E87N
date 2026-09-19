@@ -43,7 +43,7 @@ CONTROL：875 字节
 在专用 Linux 构建主机上，转换器接受已审计的、未压缩的 Armbian 两分区 GPT 普通文件：
 
 ```sh
-sudo -n python3 scripts/build-factory-firmware.py \
+sudo -n python3 scripts/build-factory-firmware.py --headless \
   --image /path/to/Armbian-candidate.img \
   --output /path/to/candidate-uboot-firmware.tar
 ```
@@ -60,6 +60,11 @@ sysupgrade-edgepi-e87n/
 ```
 
 外层 TAR 不使用 gzip/xz/zstd，也不使用 PAX/GNU 扩展。FIT 中使用原始 `initrd.img-<版本>`，不嵌套带 legacy U-Boot 头的 `uInitrd`；“原始”描述去掉 legacy 包装，不要求解开 initramfs 自身的压缩。`root` 是 ext4 文件系统镜像，不是文件目录归档、squashfs 或 OpenWrt overlay。`CONTROL` 是审计元数据，不是第三个刷写 payload。内核、DTB、initrd、模块与 `/boot` 必须对应同一套经审计输入。
+
+当前无屏幕镜像需要在转换和最终审计时都指定 `--headless`：
+`sudo -n python3 scripts/verify-factory-firmware.py --headless candidate-uboot-firmware.tar`。
+`CONTROL` 会记录 `headless: true`，验证器核对该标记，并继续检查内核、DTB、存储布局、
+SSH、DHCP、APT、locale 和内核温控。省略参数仍按历史显示版契约审计。
 
 ### R4：依据实际 ARM64 Image 头修正地址
 

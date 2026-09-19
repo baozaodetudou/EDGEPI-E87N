@@ -15,19 +15,18 @@
 
 默认密码是公开的，只在可信内网首启，登录后运行 `passwd` 改密。没有首次创建用户的向导或强制公钥门槛；串口也不自动免密登录。镜像不携带共用 SSH host keys，首次启动在 SSH 前生成设备自己的密钥。
 
-从路由器 DHCP 租约或小屏获取实际 IP 后：
+从路由器 DHCP 租约获取实际 IP 后：
 
 ```sh
 ssh root@<设备IP>
 passwd
 apt update
 apt install --no-install-recommends curl
-e87nctl status
-e87nctl display screen overview
-e87nctl display brightness 20
-e87nctl display off
-e87nctl display on
 ```
+
+基础镜像不安装 `e87n-display`，因此没有 `e87nctl` 命令。配置
+`/etc/modprobe.d/e87n-headless.conf` 会阻止 NV3007 被 udev 自动探测，initramfs
+也携带该配置。温度与风扇仍由内核管理；显示驱动和用户空间包待后续验证后再启用。
 
 不预装桌面、Web 管理后台、Docker、LuCI 或额外 RAID/LVM 管理套件；没有 DHCP 服务器、NAT、LAN/WAN 角色划分。根据用途再安装软件，避免镜像承担未使用的后台服务。内核仍保留正常 Linux 底层和板级驱动；额外存储模块为[可选构建项](OPTIONAL-STORAGE.md)。
 

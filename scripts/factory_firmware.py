@@ -244,6 +244,7 @@ def inspect_tar(path, work):
             tail_size += len(chunk)
     require(tail_size >= 1024, "truncated TAR end marker")
     control = json.loads(paths["CONTROL"].read_text())
+    require(type(control.get("headless", False)) is bool, "invalid headless firmware profile")
     require(control.get("format") == FORMAT and control.get("layout") == LAYOUT and
             control.get("kernel_release") == RELEASE and control.get("hardware_validation") == "pending",
             "wrong firmware manifest contract")

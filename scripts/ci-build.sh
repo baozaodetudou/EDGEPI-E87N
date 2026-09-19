@@ -84,9 +84,9 @@ image_basename=${candidate##*/}
 firmware_output="$repo_dir/output/ci/firmware/${image_basename%.img.xz}-uboot-firmware.tar"
 mkdir -p "$repo_dir/output/ci/firmware"
 sudo -n python3 scripts/build-factory-firmware.py \
-	--image "$audit_dir/candidate.img" --output "$firmware_output"
+	--image "$audit_dir/candidate.img" --output "$firmware_output" --headless
 # The runner owns this log directory; only the verifier needs root privileges.
 # shellcheck disable=SC2024
-sudo -n python3 scripts/verify-factory-firmware.py "$firmware_output" \
+sudo -n python3 scripts/verify-factory-firmware.py "$firmware_output" --headless \
 	> output/ci/logs/factory-firmware-audit-1.log 2>&1
 printf 'PASS: image and factory firmware static audits passed; hardware validation is pending.\n'

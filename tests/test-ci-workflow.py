@@ -255,14 +255,14 @@ sudo() {
     [[ $1 == -n && $2 == python3 ]] || return 99
     case $3 in
         scripts/build-factory-firmware.py)
-            [[ $# == 7 && $4 == --image && $6 == --output ]] || return 99
+            [[ $# == 8 && $4 == --image && $6 == --output && $8 == --headless ]] || return 99
             printf 'firmware-build\\n' >> build-events
             printf '%s\\n' "$@" > factory-build-args
             printf 'fixture firmware' > "$7"
             return "${E87N_MOCK_FACTORY_BUILD_EXIT:-0}"
             ;;
         scripts/verify-factory-firmware.py)
-            [[ $# == 4 && -s $4 ]] || return 99
+            [[ $# == 5 && -s $4 && $5 == --headless ]] || return 99
             printf 'firmware-audit\\n' >> build-events
             printf '%s\\n' "$@" > factory-audit-args
             printf '%s\\n' "${E87N_MOCK_FACTORY_AUDIT_OUTPUT:-PASS: fixture factory firmware audit}"
@@ -297,9 +297,9 @@ export -f uname sudo xz dpkg-deb
         self.assertNotIn("output", raw.parts)
         firmware = self.root / "output/ci/firmware/test-uboot-firmware.tar"
         self.assertEqual((self.root / "factory-build-args").read_text().splitlines(),
-                         ["-n", "python3", "scripts/build-factory-firmware.py", "--image", str(raw), "--output", str(firmware)])
+                         ["-n", "python3", "scripts/build-factory-firmware.py", "--image", str(raw), "--output", str(firmware), "--headless"])
         self.assertEqual((self.root / "factory-audit-args").read_text().splitlines(),
-                         ["-n", "python3", "scripts/verify-factory-firmware.py", str(firmware)])
+                         ["-n", "python3", "scripts/verify-factory-firmware.py", str(firmware), "--headless"])
         self.assertEqual(firmware.read_text(), "fixture firmware")
         self.assertEqual((self.root / "source/armbian-build/output/images/test.img.xz").read_text(), "fixture image")
         self.assertEqual((self.root / "build-events").read_text().splitlines(),

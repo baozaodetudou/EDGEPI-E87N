@@ -20,7 +20,7 @@ from factory_firmware import RELEASE, check_vendor_parser, inspect_tar, mounted,
 SCRIPTS = Path(__file__).resolve().parent
 
 
-def verify(path):
+def verify(path, headless=False):
     require(sys.platform == "linux" and os.geteuid() == 0, "Linux root host required")
     path = regular(path)
     # Debian can mount /tmp as RAM-backed tmpfs. A firmware audit expands a
@@ -31,6 +31,8 @@ def verify(path):
     work = Path(tempfile.mkdtemp(prefix="e87n-factory-audit.", dir=scratch))
     print("Read-only firmware audit scratch retained:", work, flush=True)
     paths, control, payloads = inspect_tar(path, work)
+    require(control.get("headless", False) == headless,
+            "firmware profile mismatch: use --headless only for a headless firmware")
     check_vendor_parser(path, work)
     run("e2fsck", "-fn", paths["root"])
     uuid = run("blkid", "-p", "-s", "UUID", "-o", "value", paths["root"],
@@ -60,22 +62,28 @@ def verify(path):
                 "initramfs contains uncontrolled expansion helper")
         require("scripts/local" in listing and "scripts/functions" in listing,
                 "initramfs missing normal local root resolver")
-        for script, arguments in (
-            ("verify-system.py", ["--rootfs", root, "--bootfs", boot]),
-            ("verify-display-fan.py", ["--rootfs", root, "--config", boot / ("config-" + RELEASE), "--dtb", dtb]),
-        ):
-            run(sys.executable, SCRIPTS / script, *arguments)
+        if headless:
+            require("etc/modprobe.d/e87n-headless.conf" in listing.splitlines(),
+                    "headless initramfs lacks the NV3007 automatic-probe blacklist")
+        profile_args = ["--headless"] if headless else []
+        run(sys.executable, SCRIPTS / "verify-system.py", "--rootfs", root, "--bootfs", boot, *profile_args)
+        if not headless:
+            run(sys.executable, SCRIPTS / "verify-display-fan.py", "--rootfs", root,
+                "--config", boot / ("config-" + RELEASE), "--dtb", dtb)
         run("bash", SCRIPTS / "verify-lts-platform.sh", "--config", boot / ("config-" + RELEASE), "--dtb", dtb)
     print("PASS: E87N firmware TAR, FIT hashes/load bounds, 1 GiB DTB, ext4 UUID, original-partition contract,")
-    print("      minimal system/display/fan files verified. Hardware boot and recovery test still pending.")
+    print("      %s verified. Hardware boot and recovery test still pending." %
+          ("headless system and thermal/fan configuration" if headless else "minimal system/display/fan files"))
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("firmware", type=Path)
+    parser.add_argument("--headless", action="store_true",
+                        help="require the headless profile recorded in CONTROL")
     args = parser.parse_args()
     try:
-        verify(args.firmware)
+        verify(args.firmware, args.headless)
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
         parser.exit(1, "FAIL: " + str(error) + "\n")
 

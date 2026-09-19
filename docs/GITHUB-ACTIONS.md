@@ -25,7 +25,7 @@
 | 显示包版本 | `packaging/e87n-display/VERSION`；CI 不覆盖 `--version` |
 | 系统默认值 | 由镜像定制脚本维护：root / doumao、SSH、DHCP、Asia/Shanghai、zh_CN.UTF-8；见 [默认配置](DEFAULTS.md) |
 
-显示包 job 调用 `bash scripts/build-display-deb.sh --output-dir DIR`。镜像 job 调用现有 `build-armbian.sh`，由其复制 overlay 后在目标 chroot 构建并安装显示包，再审计实际 GPT 中间镜像，调用 `scripts/build-factory-firmware.py --image RAW --output <basename>-uboot-firmware.tar` 并审计最终 TAR。RAW 是构建主机上的普通未压缩 `.img`。两个 job 使用同一仓库提交和 VERSION，但打包环境与时间可能不同，不承诺两个包逐字节相同。APT 软件包源和 runner 软件也没有完整快照，不能据此宣称整个固件逐字节可复现。
+显示包 job 调用 `bash scripts/build-display-deb.sh --output-dir DIR`。镜像 job 调用现有 `build-armbian.sh` 构建无屏幕系统，审计 GPT 中间镜像，再调用 `scripts/build-factory-firmware.py --headless --image RAW --output <basename>-uboot-firmware.tar` 转换。转换器内部和 CI 再次调用的 `verify-factory-firmware.py` 都使用 `--headless`，与 TAR 的 `CONTROL` 标记对应。显示包单独发布，不预装进基础镜像。APT 软件源和 runner 没有完整快照，不能据此宣称整个固件逐字节可复现。
 
 ## Runner、资源和权限
 
@@ -73,10 +73,10 @@ sudo -n bash scripts/verify-image.sh --release trixie --require-usb-root \
 这是对本次实际中间镜像的检查，验证器使用自己分配的只读 loop 与只读挂载，不执行镜像内程序。检查包含 GPT/文件系统、历史中间 extlinux 配置/initramfs、显示/风扇、目标系统默认值等约束。随后必须转换并验证最终 TAR：
 
 ```sh
-sudo -n python3 scripts/build-factory-firmware.py \
+sudo -n python3 scripts/build-factory-firmware.py --headless \
   --image /path/to/candidate.img \
   --output /path/to/candidate-uboot-firmware.tar
-sudo -n python3 scripts/verify-factory-firmware.py /path/to/candidate-uboot-firmware.tar
+sudo -n python3 scripts/verify-factory-firmware.py --headless /path/to/candidate-uboot-firmware.tar
 ```
 
 转换在私有副本中重新整理 ext4：使用相同 UUID 的全新 735 MiB 文件系统，完整复制并比较目录树、文件 SHA、属主、模式、硬链接和 xattrs，不裁剪必要组件；原 `.img` 不变。本轮复制比较与 R4 独立最终审计均已通过，不包含硬件验收。新 root 内含 `/boot`，禁用通用 Armbian resize，改为校验完整原布局后仅扩 p5 内 ext4；在 DHCP 前只读 factory MAC，保留内核 hold。最终检查覆盖 USTAR、厂商 C 解析器、FIT/DTB 的 1 GiB/保留区、ext4/UUID、rootfs 策略与成套内核一致性；R4 还强化 Image 头/大小/对齐、FIT loadables/reservation map、root 4 KiB 块及额外 init 参数检查，详见[固件契约](UBOOT-FIRMWARE.md)。

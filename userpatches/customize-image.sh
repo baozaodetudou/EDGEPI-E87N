@@ -30,6 +30,9 @@ if [[ ! -e /tmp/overlay/e87n-board-support/DISPLAY_DISABLED ]]; then
   display_debs=(/tmp/e87n-debs/e87n-display_*_all.deb)
   [[ ${#display_debs[@]} == 1 && -f "${display_debs[0]}" ]] || exit 1
   apt-get -y --no-install-recommends install "${display_debs[0]}"
+else
+  install -d /etc/modprobe.d
+  install -m 0644 /tmp/overlay/e87n-board-support/e87n-headless.conf /etc/modprobe.d/e87n-headless.conf
 fi
 bash /tmp/overlay/e87n-board-support/image-defaults.sh --target-chroot
 apt-get clean

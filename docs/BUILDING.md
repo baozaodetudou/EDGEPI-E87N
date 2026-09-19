@@ -183,10 +183,10 @@ output/ci/firmware/                  CI 最终 -uboot-firmware.tar
 在专用 Linux 构建主机完成实际 raw 镜像审计后，使用普通 `.img` 文件作为输入：
 
 ```sh
-sudo -n python3 scripts/build-factory-firmware.py \
+sudo -n python3 scripts/build-factory-firmware.py --headless \
   --image /path/to/Armbian-candidate.img \
   --output /path/to/candidate-uboot-firmware.tar
-sudo -n python3 scripts/verify-factory-firmware.py /path/to/candidate-uboot-firmware.tar
+sudo -n python3 scripts/verify-factory-firmware.py --headless /path/to/candidate-uboot-firmware.tar
 ```
 
 转换器处理主机私有文件副本，不连接板卡或修改输入镜像。需要 Linux root、loop/只读挂载工具、Python 3、e2fsprogs、device-tree-compiler、u-boot-tools、initramfs-tools-core 及主机 C 编译器等；完整依赖以脚本和 CI 准备步骤为准。`./build.sh` 生成中间镜像不等于已完成这两步。

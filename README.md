@@ -67,7 +67,7 @@ cd EDGEPI-E87N
 
 Linux 由 Armbian 执行构建；macOS 默认使用 Docker 的特权构建容器。需要网络、足够磁盘空间以及相应管理员/容器权限；详细前置条件和输出位置见 [构建指南](docs/BUILDING.md)。不要并发启动多个构建。
 
-Armbian 中间镜像和包位于 `source/armbian-build/output/images/`、`source/armbian-build/output/debs/`。原始 `.img` 审计后由 `scripts/build-factory-firmware.py --image RAW --output <basename>-uboot-firmware.tar` 转换；这里 RAW 是主机上的普通 `.img` 文件。CI 的 TAR 输出位于 `output/ci/firmware/`。转换和最终固件审计见[构建指南](docs/BUILDING.md)，不能仅以旧同名压缩包或中间镜像生成成功判定交付完成。
+Armbian 中间镜像和包位于 `source/armbian-build/output/images/`、`source/armbian-build/output/debs/`。原始 `.img` 审计后由 `scripts/build-factory-firmware.py --headless --image RAW --output <basename>-uboot-firmware.tar` 转换；这里 RAW 是主机上的普通 `.img` 文件。CI 的 TAR 输出位于 `output/ci/firmware/`。转换和最终固件审计见[构建指南](docs/BUILDING.md)，不能仅以旧同名压缩包或中间镜像生成成功判定交付完成。
 
 | 构建输入 | 固定值 |
 | --- | --- |

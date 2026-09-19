@@ -87,6 +87,63 @@ class SystemAudit(unittest.TestCase):
     def test_good(self):
         self.check()
 
+    def prepare_headless(self):
+        for source in module.DISPLAY_SOURCES:
+            self.file(module.PAIRS[source]).unlink()
+        self.file("/etc/systemd/system/multi-user.target.wants/e87n-display.service").unlink()
+        status = self.file("/var/lib/dpkg/status")
+        status.write_text("\n\n".join(
+            p for p in status.read_text().split("\n\n")
+            if not p.startswith("Package: e87n-display\n")))
+        for name in ("list", "conffiles"):
+            self.file("/var/lib/dpkg/info/e87n-display." + name).unlink()
+        self.put("/etc/modprobe.d/e87n-headless.conf",
+                 (REPO / "board-support/e87n-headless.conf").read_bytes())
+
+    def test_headless_system_without_display_package(self):
+        self.prepare_headless()
+        module.check(self.root, self.boot, headless=True)
+        with self.assertRaises(OSError):
+            self.check()
+
+    def test_headless_still_requires_ssh_and_apt(self):
+        self.prepare_headless()
+        status = self.file("/var/lib/dpkg/status")
+        contents = status.read_text()
+        for package in ("openssh-server", "apt"):
+            with self.subTest(package=package):
+                status.write_text(contents.replace("Package: " + package + "\n", "Package: absent\n"))
+                with self.assertRaisesRegex(ValueError, "missing installed base packages"):
+                    module.check(self.root, self.boot, headless=True)
+
+    def test_headless_missing_automatic_probe_blacklist(self):
+        self.prepare_headless()
+        self.file("/etc/modprobe.d/e87n-headless.conf").unlink()
+        with self.assertRaises(OSError):
+            module.check(self.root, self.boot, headless=True)
+
+    def test_headless_rejects_display_service_and_explicit_module_load(self):
+        self.prepare_headless()
+        for name, contents, message in (
+            ("/usr/lib/systemd/system/e87n-display.service", b"[Service]\n", "display service"),
+            ("/etc/modules-load.d/other.conf", b"fb_nv3007 # unintended\n", "auto-loads NV3007"),
+            ("/usr/lib/modules-load.d/e87n.conf", b"fb_nv3007\n", "auto-loads NV3007"),
+        ):
+            with self.subTest(name=name):
+                self.put(name, contents)
+                with self.assertRaisesRegex(ValueError, message):
+                    module.check(self.root, self.boot, headless=True)
+                self.file(name).unlink()
+
+    def test_headless_rejects_installed_display_package(self):
+        self.prepare_headless()
+        version = (REPO / "packaging/e87n-display/VERSION").read_text().strip()
+        status = self.file("/var/lib/dpkg/status")
+        status.write_text(status.read_text() +
+                          "\n\nPackage: e87n-display\nStatus: install ok installed\nVersion: " + version)
+        with self.assertRaisesRegex(ValueError, "has e87n-display installed"):
+            module.check(self.root, self.boot, headless=True)
+
     def test_absolute_keygen_command(self):
         unit = self.file("/usr/lib/systemd/system/sshd-keygen.service")
         unit.write_text(unit.read_text().replace("ExecStart=ssh-keygen", "ExecStart=/usr/bin/ssh-keygen"))

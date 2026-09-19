@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Small host fixtures only; never mount, connect, or write a block device."""
 import hashlib
+import contextlib
+import importlib.util
 import io
 import json
 import lzma
@@ -10,10 +12,21 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import factory_firmware as fw
+
+SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+def load_script(name):
+    spec = importlib.util.spec_from_file_location(name.replace("-", "_"), SCRIPTS / (name + ".py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+builder = load_script("build-factory-firmware")
+verifier = load_script("verify-factory-firmware")
 
 UUID = "ee0d711d-5cce-4fa5-9425-50d0bcb26096"
 
@@ -211,6 +224,14 @@ class TarTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "contract"):
             self.inspect(self.archive(change=lambda c: c.update(layout={})))
 
+    def test_headless_profile_recorded_in_manifest(self):
+        _, control, _ = self.inspect(self.archive(change=lambda c: c.update(headless=True)))
+        self.assertIs(control["headless"], True)
+
+    def test_invalid_headless_profile_rejected(self):
+        with self.assertRaisesRegex(ValueError, "headless firmware profile"):
+            self.inspect(self.archive(change=lambda c: c.update(headless="yes")))
+
     def test_root_boundary_must_be_exact(self):
         with self.assertRaisesRegex(ValueError, "boundary"):
             self.inspect(self.archive(root=self.root + bytes(512)))
@@ -249,6 +270,98 @@ class TarTests(unittest.TestCase):
         alias.symlink_to(target)
         with self.assertRaises(ValueError):
             fw.regular(alias)
+
+
+class ProfilePipelineTests(unittest.TestCase):
+    """Run the real converter flow on sparse files with external operations mocked."""
+
+    def test_converter_propagates_profile_to_all_audits(self):
+        for headless in (False, True):
+            with self.subTest(headless=headless), tempfile.TemporaryDirectory() as temporary:
+                work = Path(temporary)
+                image = work / "source.img"
+                with image.open("wb") as stream:
+                    stream.truncate(557056 * 512 + 65536)
+                output = work / "test-uboot-firmware.tar"
+                table = {"partitiontable": {"label": "gpt", "sectorsize": 512, "partitions": [
+                    {"start": 32768, "size": 524288}, {"start": 557056, "size": 128}]}}
+
+                @contextlib.contextmanager
+                def mount(_image, target, **_kwargs):
+                    target.mkdir()
+                    yield target
+
+                def fit(_boot, target, _uuid):
+                    path = target / "kernel"
+                    path.write_bytes(fixture())
+                    return path
+
+                with mock.patch.object(builder.sys, "platform", "linux"), \
+                        mock.patch.object(builder.os, "geteuid", return_value=0), \
+                        mock.patch.object(builder, "command", side_effect=[json.dumps(table), UUID]), \
+                        mock.patch.object(builder, "mounted", side_effect=mount), \
+                        mock.patch.object(builder, "make_fit", side_effect=fit), \
+                        mock.patch.object(builder, "compact_rootfs"), \
+                        mock.patch.object(builder, "run") as run:
+                    builder.build(image, output, headless)
+                commands = [list(map(str, call.args)) for call in run.call_args_list]
+                system = next(cmd for cmd in commands if str(SCRIPTS / "verify-system.py") in cmd)
+                final = next(cmd for cmd in commands if str(SCRIPTS / "verify-factory-firmware.py") in cmd)
+                self.assertEqual("--headless" in system, headless)
+                self.assertEqual("--headless" in final, headless)
+                self.assertEqual(any(str(SCRIPTS / "verify-display-fan.py") in cmd for cmd in commands), not headless)
+                self.assertTrue(any(str(SCRIPTS / "verify-lts-platform.sh") in cmd for cmd in commands))
+                with tarfile.open(output) as archive:
+                    control = json.load(archive.extractfile(fw.PREFIX + "CONTROL"))
+                self.assertIs(control["headless"], headless)
+
+    def test_final_verifier_propagates_profile_and_keeps_platform_checks(self):
+        for headless in (False, True):
+            with self.subTest(headless=headless), tempfile.TemporaryDirectory() as temporary:
+                work = Path(temporary)
+                root = work / "root"
+                boot = root / "boot"
+                boot.mkdir(parents=True)
+                fdt = boot / ("dtb-" + fw.RELEASE) / "mediatek/mt7987a-edgepi-e87n.dtb"
+                fdt.parent.mkdir(parents=True)
+                fdt.write_bytes(b"fixture dtb")
+                (boot / ("vmlinuz-" + fw.RELEASE)).write_bytes(b"fixture kernel")
+                (boot / ("initrd.img-" + fw.RELEASE)).write_bytes(b"fixture initrd")
+                for name, contents in (
+                    ("etc/fstab", f"UUID={UUID} / ext4 defaults 0 1\n"),
+                    ("root/.no_rootfs_resize", ""),
+                    ("usr/lib/e87n/factory-boot.py", "# fixture\n"),
+                ):
+                    target = root / name
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(contents)
+                mask = root / "etc/systemd/system/armbian-resize-filesystem.service"
+                mask.parent.mkdir(parents=True)
+                mask.symlink_to("/dev/null")
+                firmware = work / "firmware.tar"
+                firmware.write_bytes(b"fixture")
+                payloads = {"fdt": b"fixture dtb", "kernel": lzma.compress(b"fixture kernel"), "ramdisk": b"fixture initrd"}
+                control = {"root_uuid": UUID, "headless": headless}
+
+                def run_command(*cmd, **_kwargs):
+                    out = UUID if cmd[0] == "blkid" else "scripts/local\nscripts/functions\netc/modprobe.d/e87n-headless.conf\n"
+                    return mock.Mock(stdout=out)
+
+                with mock.patch.object(verifier.sys, "platform", "linux"), \
+                        mock.patch.object(verifier.os, "geteuid", return_value=0), \
+                        mock.patch.object(verifier.tempfile, "mkdtemp", return_value=str(work)), \
+                        mock.patch.object(verifier, "inspect_tar", return_value=({"root": work / "root.img"}, control, payloads)), \
+                        mock.patch.object(verifier, "check_vendor_parser"), \
+                        mock.patch.object(verifier, "mounted", return_value=contextlib.nullcontext(root)), \
+                        mock.patch.object(verifier, "run", side_effect=run_command) as run:
+                    verifier.verify(firmware, headless)
+                    commands = [list(map(str, call.args)) for call in run.call_args_list]
+                    system = next(cmd for cmd in commands if str(SCRIPTS / "verify-system.py") in cmd)
+                    self.assertEqual("--headless" in system, headless)
+                    self.assertEqual(any(str(SCRIPTS / "verify-display-fan.py") in cmd for cmd in commands), not headless)
+                    self.assertTrue(any(str(SCRIPTS / "verify-lts-platform.sh") in cmd for cmd in commands))
+                    with self.assertRaisesRegex(ValueError, "profile mismatch"):
+                        verifier.verify(firmware, not headless)
 
 
 if __name__ == "__main__":
