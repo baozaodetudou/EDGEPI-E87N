@@ -1,8 +1,8 @@
 # GitHub Actions 手动构建与 tag 发布
 
-唯一工作流是 [build-e87n.yml](../.github/workflows/build-e87n.yml)，名称为 **E87N Debian 13 release**。**`on.workflow_dispatch` 不声明任何 inputs，只能手动运行；push、tag push、PR 和定时任务均不触发。** 每次运行重新构建本次 main 提交，固定 Debian 13 Trixie / Linux 6.18.51；全部验证成功后由 release job 自动生成 tag，发布 `<basename>-uboot-firmware.tar` 和独立 `e87n-display` Debian 包两个公开附件。当前硬件未验收，因此发布为明确标记实验性的 **Pre-release**，不设为稳定 Latest，不执行刷写。
+唯一工作流是 [build-e87n.yml](../.github/workflows/build-e87n.yml)，名称为 **E87N Debian 13 release**。**`on.workflow_dispatch` 不声明任何 inputs，只能手动运行；push、tag push、PR 和定时任务均不触发。** 每次运行重新构建本次 main 提交，固定 Debian 13 Trixie / Linux 6.18.52；全部验证成功后由 release job 自动生成 tag，发布 `<basename>-uboot-firmware.tar` 和独立 `e87n-display` Debian 包两个公开附件。当前硬件未验收，因此发布为明确标记实验性的 **Pre-release**，不设为稳定 Latest，不执行刷写。
 
-新固件为[未压缩 USTAR](UBOOT-FIRMWARE.md)：`sysupgrade-edgepi-e87n/{kernel,root,CONTROL}`，kernel 是 LZMA 内核 + 原始 initrd + DTB 的 FIT，root 是含 `/boot` 的 Debian ext4。`.img` / `.img.xz` 仅为中间或历史文件，不可刷写、不作为新公开附件。本地 R4 已生成并独立审计 EXIT 0，但它重新打包历史 Actions RAW，没有完整重编内核。未来从新源码完整构建的手动工作流**尚未 dispatch**，不能称作新的 GitHub job 或 Release 完成。
+新固件为[未压缩 USTAR](UBOOT-FIRMWARE.md)：`sysupgrade-edgepi-e87n/{kernel,root,CONTROL}`，kernel 是 LZMA 内核 + 原始 initrd + DTB 的 FIT，root 是含 `/boot` 的 Debian ext4。`.img` / `.img.xz` 仅为中间或历史文件，不可刷写、不作为新公开附件。candidate3 已在本地完成完整构建和同产物 QEMU 验收；远端 GitHub job/Release 仍需实际手动运行确认。
 
 已知故障与复验：[2026-09-13 SSH keygen 审计误报修复](ci-keygen-fix-20260913.md)。原运行编译成功但审计失败，修复后的本地完整复验通过；历史 [run 34737922588](https://github.com/baozaodetudou/EDGEPI-E87N/actions/runs/34737922588) 的验证、独立显示包、完整镜像构建及审计已全部成功。它仅保留为历史构建证据和备用下载，不代表当前 main 已完成新构建或发布；原失败 run 的状态不会因此改变。**远端 Release 是否已成功发布尚未确认。**
 
@@ -14,12 +14,12 @@
 
 没有 tag、run ID 或内核输入框，也没有第二个发布工作流。新运行实际重建本次 main 提交，不查找或复用历史成功构建。其他分支在预检阶段拒绝；工作流必须已进入默认分支，操作者须有仓库写权限，见 [GitHub 手动运行说明](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)。本机能通过 SSH 推送 Git，不代表 GitHub CLI 的 API 账号也有发布/dispatch 权限；不需要把个人 token 放进仓库，云端使用作业自身的 `GITHUB_TOKEN`。
 
-`validate` 根据本次手动运行的 ID 自动计算 tag 名称 `e87n-trixie-6.18.51-<GITHUB_RUN_ID>` 并预检，不创建远端 tag。验证成功后，`image` 与 `display` 并行构建；三者全部成功后，`release` 创建远端 tag 和 Release 并上传附件。整个过程只需这一次手动运行，不会由 tag push 触发构建。更换内核必须修改并审查源码 pin、补丁、验证器和工作流。
+`validate` 根据本次手动运行的 ID 自动计算 tag 名称 `e87n-trixie-6.18.52-<GITHUB_RUN_ID>-<GITHUB_RUN_ATTEMPT>` 并预检，不创建远端 tag。验证成功后，`image` 与 `display` 并行构建；三者全部成功后，`release` 创建远端 tag 和 Release 并上传附件。整个过程只需这一次手动运行，不会由 tag push 触发构建。更换内核必须修改并审查源码 pin、补丁、验证器和工作流。
 
 | 构建配置 | 固定来源 |
 | --- | --- |
 | Debian / 桌面 | `RELEASE=trixie`、`BUILD_MINIMAL=yes`、`BUILD_DESKTOP=no` |
-| Linux | `6.18.51`，`f6388029ea9e2c9e807d73827658738ea131faee` |
+| Linux | `6.18.52`，`a638fabe36f293e58ab6be002af04b866959c546` |
 | Armbian | `7c1bb29eb0e7bd75b0703d86fe654b2680e646da`，经现有启动器与框架准备脚本检查 |
 | 额外存储栈 | CI 明确传入 `E87N_EXTRA_STORAGE=no` |
 | 显示包版本 | `packaging/e87n-display/VERSION`；CI 不覆盖 `--version` |
@@ -101,7 +101,7 @@ logs/armbian/           框架日志（镜像 job）
 
 两个 job 的候选 artifact 分开保存，并非单个 artifact 同时包含所有目录。名称包含 `github.run_id` 和 `github.run_attempt`，保留 14 天；上传采用零额外压缩，固件自身仍是未压缩 USTAR。下载行为和保留限制见 [upload-artifact 官方说明](https://github.com/actions/upload-artifact/tree/043fb46d1a93c77aae656e7c1c64a875d1fc6a0a)。
 
-在解压后的 artifact 根目录运行 `sha256sum --check SHA256SUMS`（macOS 可用 `shasum -a 256 -c SHA256SUMS`）。同时检查 `build-metadata.json` 的 `build_step_outcome`、`image_static_audit`、`factory_format=e87n-uboot-firmware-tar-v1`、`factory_static_audit` 和 `collection_errors`；只有两层审计通过才满足新交付契约。校验正确只证明文件与清单一致；失败 job 的部分文件同样可以有正确校验值。元数据保留硬件待验收状态。
+在解压后的 artifact 根目录运行 `sha256sum --check SHA256SUMS`（macOS 可用 `shasum -a 256 -c SHA256SUMS`）。同时检查 `build-metadata.json` 的 `build_step_outcome`、`image_static_audit`、`factory_format=e87n-uboot-firmware-tar-v2`、`factory_static_audit`、`simulation_validation=passed` 和 `collection_errors`；只有两层审计及同产物模拟门禁通过才满足新交付契约。校验正确只证明文件与清单一致；失败 job 的部分文件同样可以有正确校验值。元数据保留硬件待验收状态。
 
 本轮原生 VM 已报告 902 dry-run、factory 24 项、root adapter 24 项及完整 ext4 复制比较通过；R4 TAR 独立最终审计 EXIT 0。完整 Linux `ci-regressions.sh` 已在磁盘临时目录全套通过，`regressions-disk.log` EXIT 0；此前缺 docs、AppleDouble 和 `/tmp` 满失败已解决，失败记录保留。静态 CI 85 项再次通过后，新增的 runtime/root preparer 两个编译检查目标也已复验通过。主机导出及 SHA-256 比对已完成，V3 已废弃，未来工作流未 dispatch，远端发布未确认。原生打包不等于新 GitHub job 完成，更不代表硬件验收；刷写条件见[首启准备](first-boot.md)。
 

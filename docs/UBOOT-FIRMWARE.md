@@ -2,6 +2,12 @@
 
 当前交付格式为 `<basename>-uboot-firmware.tar`：面向这台 E87N 原厂 U-Boot Web 恢复页 plain firmware（Web 类型 `fw`）的**未压缩 USTAR**。包内运行的是 Debian 13 Trixie / Armbian；`sysupgrade-` 目录名只是厂商解析器约定，不表示采用 OpenWrt rootfs，也不表示可用 LuCI sysupgrade 安装。
 
+## 当前 candidate3
+
+candidate3 已完成 Debian 13.7 / Linux 6.18.52 的完整构建、最终 TAR 独立审计和同产物 Docker/QEMU 验收。当前 TAR SHA-256 为 `efef220d81ad7f97155cc82d9246c3e1443ce8e4b9fa544002e39e050c2cc35d`，显示包 SHA-256 为 `cc8bf0e71ae852c1e284c127ed00ee0460a0f731f4d0da99d390a05145327a12`，完整记录见[最终验收记录](FINAL-VALIDATION-20260920.md)。这仍不是实体板卡验收；刷写前的备份、U-Boot 恢复路径、RAM 诊断启动和真实外设测试仍未完成。下方 R4 内容是历史产物记录，不能替代当前 candidate3。
+
+## 历史 R4 记录
+
 **R4 已生成，对同一 TAR 的独立最终审计 EXIT 0，随后以不覆盖已有文件的方式暴露最终文件。** R4 重新打包历史 Actions 34737922588 的原始 RAW，修正 DTB 的 1 GiB/保留区及 bootargs（含 902 等效修正），没有完整重编 Armbian 或内核。主机导出及 SHA-256 比对已完成，未来新源码完整构建的手动工作流未 dispatch，远端发布未确认。V3 因内核地址修正已废弃。板上 RAM 测试、备份、可恢复控制通道及硬件验收仍未完成；用户“完全准备好再刷”的条件尚未满足。
 
 | 本轮阶段结果 | 已报告结果 |

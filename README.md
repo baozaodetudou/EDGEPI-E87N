@@ -5,9 +5,10 @@
 [Frank-W MT7987 内核](https://github.com/frank-w/BPI-Router-Linux/tree/6.18-main)，
 通过 Armbian 框架构建，保留 E87N 自身的设备树和原厂 U-Boot 分区契约。
 
-当前正在进行完整编译及 Docker/QEMU 验证。旧镜像的静态检查结果不代表新版通过；
-实机启动、双网口、eMMC、USB/NVMe、温控与屏幕仍需后续硬件验收。
-[路线复核](docs/PORTING-REVIEW-20260920.md)与[验收标准](docs/REFACTOR-ACCEPTANCE.md)记录了依据和边界。
+当前冻结候选已完成完整编译、最终 U-Boot TAR 审计和同产物 Docker/QEMU 验收。
+候选为 Debian 13.7 / Linux 6.18.52；QEMU 已验证 systemd、SSH、DHCP、DNS、APT、重启、持久化和独立显示包生命周期。
+MT7987 实机启动、双网口、eMMC、USB/NVMe、温控、风扇、屏幕和真实 U-Boot 交接仍需上板验收。
+详细结果见[最终验收记录](docs/FINAL-VALIDATION-20260920.md)、[路线复核](docs/PORTING-REVIEW-20260920.md)与[验收标准](docs/REFACTOR-ACCEPTANCE.md)。
 
 ## 系统配置
 
@@ -20,8 +21,8 @@
 | 时区与编码 | `Asia/Shanghai`、`zh_CN.UTF-8` |
 | 首次启动 | 自动生成独立 SSH host keys；没有强制创建用户向导 |
 | 默认体积 | 命令行系统，不预装桌面、LuCI、Docker 服务或 RAID/LVM 管理套件 |
-| 风扇 | 由内核温控；实机验证待完成 |
-| 小屏 | 独立 `e87n-display` Debian 包；基础镜像暂不自动加载显示驱动 |
+| 风扇 | 由内核温控；QEMU 只能验证系统集成，实机转速/温度仍待完成 |
+| 小屏 | 独立 `e87n-display` Debian 包；驱动默认不自动加载，实机显示仍待完成 |
 
 镜像使用独立的 `linux-image-current-edgepi-e87n` 和 `linux-dtb-current-edgepi-e87n`
 包名，避免通用 Filogic 软件包替换本板内核。内核/DTB 保持锁定；板级升级要求成套
@@ -64,7 +65,7 @@ UUID，使模拟测试和发布附件能够对应同一产物。
 
 源码 zip/tar.gz 不是系统镜像。完整 GPT `.img` 是中间产物，不能直接通过原厂 Web
 固件入口写入 eMMC。固件封装使用 `sysupgrade-` 目录约定，用户空间依然是 Debian。
-当前不执行实机安装；[旧版下载记录](docs/DOWNLOADS.md)中的 6.18.51 文件不属于本轮新产物。
+当前本地 candidate3 已完成软件验收，但尚未声明已发布 GitHub Release 或完成实机刷写；[下载记录](docs/DOWNLOADS.md)中的 6.18.51 文件均为历史产物。
 
 ## 使用与维护
 

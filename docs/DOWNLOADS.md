@@ -1,8 +1,7 @@
 # U-Boot 固件获取、发布状态与校验
 
-> 当前正在完整重构并编译 Debian 13.7 / 6.18.52，必须通过同产物 Docker/QEMU 门禁后
-> 才产生新版交付。下列 6.18.51 / R4 哈希仅为历史记录，不能当作新版验收结果。
-> 新构建以仓库 README、版本清单和对应发布报告为准。
+> 当前 candidate3 已完成 Debian 13.7 / 6.18.52 构建、最终固件审计和同产物 Docker/QEMU 门禁。
+> 当前产物摘要见[最终验收记录](FINAL-VALIDATION-20260920.md)；下列 6.18.51 / R4 内容均为历史记录。
 
 本仓库公开的是构建源码、板级补丁、Debian 小屏程序、测试与文档。
 **R4 本地已生成，对同一 TAR 的独立最终审计 EXIT 0，准确文件信息见下文。** R4 重新打包历史 Actions 34737922588 的原始 RAW，修正 DTB 的 1 GiB/保留区及 bootargs（含 902 等效修正），没有完整重编 Armbian 或内核。V3 因内核地址修正已废弃，不作为交付、不发布其哈希。主机导出及 SHA-256 比对已完成，未来新源码工作流未 dispatch，远端 Release 发布未确认。
@@ -10,7 +9,20 @@
 `git clone` 不会下载之前本地生成的 `.img.xz`、内核包、完整日志或构建缓存。
 可按 [构建指南](BUILDING.md) 自行生成，或在 [GitHub Actions](GITHUB-ACTIONS.md) 对应 run 成功并上传 artifacts 后取得文件，再校验。工作流文件存在、任务开始运行与成功产物上传是不同状态；artifacts 也不等同于 Release。
 
-## 已生成的本地 R4（不是远端发布记录）
+## 当前 candidate3（本地验收记录，不是远端发布记录）
+
+```text
+文件名：Armbian-trixie-6.18.52-e87n-679b7d5-uboot-firmware.tar
+SHA-256：efef220d81ad7f97155cc82d9246c3e1443ce8e4b9fa544002e39e050c2cc35d
+显示包：e87n-display_1.1.0-1_all.deb
+显示包 SHA-256：cc8bf0e71ae852c1e284c127ed00ee0460a0f731f4d0da99d390a05145327a12
+QEMU 验收：PASS
+硬件验收：未完成
+```
+
+当前 candidate3 的本地文件和完整证据不写入 Git；GitHub Release 需要手动运行唯一工作流生成。
+
+## 历史 R4（不是远端发布记录）
 
 ```text
 文件名：Armbian-trixie-6.18.51-e87n-r4-uboot-firmware.tar
@@ -50,9 +62,9 @@ TAR 外层不能重新压缩或换成 SIMG/GPT/FIP 文件；`sysupgrade-` 前缀
 
 1. 打开 [E87N Debian 13 release](https://github.com/baozaodetudou/EDGEPI-E87N/actions/workflows/build-e87n.yml)，点击 **Run workflow**。
 2. 保持默认分支 `main`；无需填写任何参数，没有 tag、run ID 或内核输入框。
-3. 点击 **Run workflow**。验证成功后，系统固件和显示包并行构建；系统 job 需完成中间镜像审计、TAR 转换及最终固件审计，全部成功后由 release job 自动生成并发布 `e87n-trixie-6.18.51-<GITHUB_RUN_ID>`，其中 ID 是本次手动运行的 ID。
+3. 点击 **Run workflow**。验证成功后，系统固件和显示包并行构建；系统 job 需完成中间镜像审计、TAR 转换、最终固件审计和同产物 QEMU 验收，全部成功后由 release job 自动生成并发布 `e87n-trixie-6.18.52-<GITHUB_RUN_ID>-<GITHUB_RUN_ATTEMPT>`。
 
-固定目标为 Debian 13 Trixie / Linux 6.18.51。每次手动运行实际重建当次 main 提交，不选择或复用历史成功构建；没有第二个发布入口。自动生成 tag 仅发生在这次手动运行内部，tag 指向镜像实际构建的提交，不会跟随运行期间更新的 main 移动。
+固定目标为 Debian 13 Trixie / Linux 6.18.52。每次手动运行实际重建当次 main 提交，不选择或复用历史成功构建；没有第二个发布入口。自动生成 tag 仅发生在这次手动运行内部，tag 指向镜像实际构建的提交，不会跟随运行期间更新的 main 移动。
 
 这是操作说明，**不是该 tag 已经发布的声明**。遇到同名 tag/Release 时不会覆盖；上传或核对失败时保留已有 draft/tag 供检查。需要重试发布时，重新点击 **Run workflow** 发起一次新的手动运行，以获取新的 run ID、重新构建并生成新 tag；不要通过重跑失败 job 重试发布，因为重跑沿用原 run ID。
 

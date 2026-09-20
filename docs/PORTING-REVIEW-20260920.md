@@ -1,6 +1,6 @@
 # E87N Debian/Armbian 路线复核（2026-09-20）
 
-结论：Debian 13 ARM64 用户空间、Armbian 构建框架、MT7987 专用内核及 E87N 设备树、现有 U-Boot/FIT 的路线成立。当前属于非官方板级移植，尚未完成实机验收。此前的诊断方法和测试包存在确定缺陷，不能把构建或上传成功当成系统可用，也不能只凭网络失联就判定 U-Boot 损坏或内核未启动。
+结论：Debian 13 ARM64 用户空间、Armbian 构建框架、MT7987 专用内核及 E87N 设备树、现有 U-Boot/FIT 的路线成立。candidate3 已完成完整构建、最终固件审计和同产物 Docker/QEMU 软件验收，但仍属于非官方板级移植，尚未完成实机验收。此前的诊断方法和测试包存在确定缺陷，不能把构建或上传成功当成硬件可用，也不能只凭网络失联就判定 U-Boot 损坏或内核未启动。
 
 ## 官方资料与可复用参考
 
@@ -21,8 +21,8 @@
 ## 内核版本与支持边界
 
 - [Debian 官方](https://www.debian.org/releases/trixie/) 当日显示 Debian 13.7，架构包含 ARM64。
-- [kernel.org 版本信息](https://www.kernel.org/releases.json) 当日列出的最新 6.18 longterm 是 6.18.52。现有 6.18.51 是 LTS 的旧维护版本，不能继续称为最新。
-- 当前 pin `f6388029ea9e2c9e807d73827658738ea131faee` 的[上游 Makefile](https://github.com/gregkh/linux/blob/f6388029ea9e2c9e807d73827658738ea131faee/Makefile) 确认为 6.18.51。
+- [kernel.org 版本信息](https://www.kernel.org/releases.json) 当日列出的最新 6.18 longterm 是 6.18.52。当前构建固定该维护版本。
+- 当前 pin `a638fabe36f293e58ab6be002af04b866959c546` 的 Frank-W MT7987 源码确认为 6.18.52，实际 guest release 为 `6.18.52-current-edgepi-e87n`。
 - 上游 v6.18.51 的 MediaTek DTS、时钟目录未见 MT7987 专用文件，`mtk_eth_soc.c` 无 MT7987 匹配。新 LTS 不等于完整本板支持，仍需要下游适配。不能泛化成“整个上游完全没有 MT7987 代码”。
 - 本项目禁用了未验证 DVFS，部分硬件卸载也未提供。最小系统可以裁剪应用，但底层功能不能用编译成功代替硬件验证。
 
@@ -48,4 +48,4 @@
 5. RAM 启动及恢复链路通过后，才按已验证的原厂分区契约安装。完整 GPT 中间镜像不能当作厂商 Web Firmware 文件使用。
 6. 同步设计 FIT、内核包、模块、DTB、initrd 的更新与回退。当前 kernel hold 可以防止不匹配，但不是完整的长期内核更新方案。最后再接回独立屏幕包并完成实机功能测试。
 
-本次路线复核期间仅对 U-Boot 执行只读查询；没有新上传/启动测试，没有保存环境或写入 eMMC。设备查询仍返回 U-Boot 版本。正式镜像的启动与稳定性验收尚未完成。
+本次 candidate3 已在 ARM64 Docker/QEMU 中用最终 FIT、initrd 和 rootfs 完成启动与稳定性软件验收；没有上传、写入或启动实体 E87N，设备查询和真实 U-Boot 交接仍待实机验证。

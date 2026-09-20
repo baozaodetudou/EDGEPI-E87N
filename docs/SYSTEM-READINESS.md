@@ -1,6 +1,8 @@
 # E87N 最小系统范围与验证状态
 
-目标是 **Debian 13 Trixie / Linux 6.18.51 最小命令行系统**，包含正常 APT、有线 DHCP、SSH 和小屏。默认配置以 [DEFAULTS.md](DEFAULTS.md) 为准；这仍是实验性 E87N 移植，尚无 Debian 实机首启与硬件验收记录。
+目标已冻结为 **Debian 13.7 Trixie / Linux 6.18.52 最小命令行系统**，包含正常 APT、有线 DHCP、SSH 和独立小屏包。candidate3 已通过完整构建、最终固件审计和同产物 Docker/QEMU 软件验收；这仍是实验性 E87N 移植，尚无 Debian 实机首启与硬件验收记录。
+
+当前 candidate3 的正式摘要见[最终验收记录](FINAL-VALIDATION-20260920.md)。QEMU 报告为 `PASS`，但不模拟 MT7987 物理网口、eMMC、SPI 屏幕、PWM 风扇、factory MAC 或原厂 U-Boot，因此不能替代上板验证。
 
 当前交付为 [U-Boot 未压缩 USTAR 固件](UBOOT-FIRMWARE.md)，包含 FIT kernel、含 `/boot` 的 Debian ext4 root 和 CONTROL。**R4 本地已生成，独立最终审计 EXIT 0**；R4 重新打包历史 Actions 34737922588 的原始 RAW，修正 DTB 的 1 GiB/保留区及 bootargs（含 902 等效修正），没有完整重编 Armbian 或内核。主机导出及 SHA-256 比对已完成，V3 已废弃。完整 `.img` / `.img.xz` 仅为中间或历史文件，不可刷写。
 
