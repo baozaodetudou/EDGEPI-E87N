@@ -37,10 +37,13 @@ class RamdiagHelpersTest(unittest.TestCase):
         init = INIT.read_text()
         services = SERVICES.read_text()
         self.assertIn("service_pid=$!", init)
+        self.assertIn("child_running()", init)
+        self.assertIn('[ "$stat_state" != Z ]', init)
         self.assertIn('wait "$service_pid"', init)
         self.assertIn("while :; do", init)
         self.assertNotIn('[ "$$" = 1 ] || exit 1', services)
-        self.assertIn("sshd -D -e", services)
+        self.assertIn("command -v sshd", services)
+        self.assertIn('"$sshd_path" -D -e', services)
         self.assertIn('wait "$pid"', services)
 
     def test_runtime_mounts_are_idempotent_but_not_block_backed(self):
@@ -50,6 +53,10 @@ class RamdiagHelpersTest(unittest.TestCase):
         self.assertIn("mount_or_existing()", init)
         for filesystem in ("proc", "sysfs", "devtmpfs", "tmpfs"):
             self.assertIn(f"mount_or_existing {filesystem}", init)
+        self.assertIn("mount_or_existing devpts", init)
+        self.assertIn("ptmxmode=0666", init)
+        self.assertIn('mkdir -p /dev/pts', init)
+        self.assertIn('ln -s pts/ptmx /dev/ptmx', init)
         self.assertNotIn("/dev/mmc", init)
         self.assertNotIn("mount /dev/", init)
         for forbidden in ("mkfs", "blkdiscard", "fdisk", "parted", "saveenv", "mmc write"):
@@ -62,6 +69,10 @@ class RamdiagHelpersTest(unittest.TestCase):
             self.assertIn("/sys/class/block/mmcblk*", source)
             self.assertIn("unexpected MMC block device", source)
         self.assertIn("mmc@11230000/status", INIT.read_text())
+
+    def test_fit_limit_matches_e87n_uboot_strict_bootm_limit(self):
+        self.assertEqual(fit_common.E87N_UBOOT_BOOTM_LEN, 0x06000000)
+        self.assertEqual(fit_common.MAX_FIT_BYTES, 0x05FFFFFF)
 
     def test_udp_and_watchdog_assets_are_ram_only(self):
         beacon = BEACON.read_text()
@@ -131,6 +142,20 @@ class RamdiagHelpersTest(unittest.TestCase):
         self.assertEqual(header["image_size"], len(raw))
         self.assertEqual(lzma.decompress(payload, format=lzma.FORMAT_ALONE), bytes(raw))
 
+    def test_auto_reuses_lzma_input_after_validation(self):
+        raw = bytearray(4096)
+        struct.pack_into("<Q", raw, 8, 0)
+        struct.pack_into("<Q", raw, 16, len(raw))
+        raw[56:60] = b"ARM\x64"
+        packed = fit_common.compress_kernel(bytes(raw))
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "Image.lzma"
+            source.write_bytes(packed)
+            payload, compression, header = fit_common.normalize_kernel(source, "auto")
+        self.assertEqual(compression, "lzma")
+        self.assertEqual(header["image_size"], len(raw))
+        self.assertEqual(lzma.decompress(payload, format=lzma.FORMAT_ALONE), bytes(raw))
+
     def test_ram_only_bootargs_reject_disk_root(self):
         self.assertNotIn("root=", fit_common.BOOTARGS_DEFAULT.split())
         self.assertNotIn("rw", fit_common.BOOTARGS_DEFAULT.split())
@@ -146,6 +171,8 @@ class RamdiagHelpersTest(unittest.TestCase):
         helper = (ROOT / "scripts/ramdiag/assets/stop-watchdog.py").read_text()
         self.assertIn("WDIOC_SETOPTIONS", helper)
         self.assertIn("WDIOS_DISABLECARD", helper)
+        self.assertIn("WDIOC_KEEPALIVE", helper)
+        self.assertIn("def keepalive", helper)
         self.assertIn("/dev/watchdog0", helper)
 
     def test_diagnostic_password_hash_is_sha512_crypt(self):

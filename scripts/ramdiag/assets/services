@@ -15,16 +15,13 @@ mkdir -p /run/ssh /run/sshd
 chmod 0755 /run/sshd
 echo 'RAMDIAG STAGE generating ephemeral SSH host key'
 ssh-keygen -q -t ed25519 -N '' -f /run/ssh/ssh_host_ed25519_key || fail hostkey
-/usr/sbin/sshd -t -f /etc/ssh/sshd_config || fail sshd-config
+sshd_path=$(command -v sshd 2>/dev/null) || fail sshd-not-found
+"$sshd_path" -t -f /etc/ssh/sshd_config || fail sshd-config
 echo 'RAMDIAG SSH READY: root password is doumao'
 while :; do
     assert_no_mmc
-    /usr/sbin/sshd -D -e -f /etc/ssh/sshd_config >>/run/ramdiag/sshd.log 2>&1 &
+    "$sshd_path" -D -e -f /etc/ssh/sshd_config >>/run/ramdiag/sshd.log 2>&1 &
     pid=$!
-    while kill -0 "$pid" 2>/dev/null; do
-        assert_no_mmc
-        sleep 2
-    done
     wait "$pid" 2>/dev/null || :
     echo 'RAMDIAG SSH exited; retrying in 5 seconds' >&2
     sleep 5

@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 import sys
 
-from fit_common import fdt, regular, sha256_bytes
+from fit_common import MAX_FIT_BYTES, fdt, regular, sha256_bytes
 
 
 def main() -> int:
@@ -22,7 +22,7 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
     try:
-        fit_path = regular(args.fit, 128 * 1024 * 1024)
+        fit_path = regular(args.fit, MAX_FIT_BYTES)
         props = fdt(fit_path.read_bytes())
         output_dir = args.output_dir.absolute()
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -59,4 +59,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

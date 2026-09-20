@@ -293,7 +293,7 @@ class PatchTests(unittest.TestCase):
             board = target.read_text()
             self.assertIn("reg = <0 0x40000000 0 0x40000000>", board)
             self.assertIn("reg = <0 0x7ff70000 0 0x10000>", board)
-            self.assertIn("reg = <0 0x7ff80000 0 0x80000>;\n\t\t\tno-map;", board)
+            self.assertIn("reg = <0 0x7ff80000 0 0x80000>;\n\t\tno-map;", board)
             self.assertIn("ethernet0 = &gmac0;", board)
             self.assertIn('#include "mt7987a.dtsi"', board)
 

@@ -32,7 +32,11 @@ RAM_END = 0x80000000
 RAMDISK_LOAD = 0x43000000
 FDT_LOAD = 0x45E00000
 FIT_UPLOAD_BUFFER = 0x46000000
-MAX_FIT_BYTES = 128 * MIB
+# The reference E87N U-Boot sets CONFIG_SYS_BOOTM_LEN=0x06000000 and its
+# RAM-loader rejects datasize >= that value. Keep this limit strict so a FIT
+# accepted by the host audit is also accepted by the vendor RAM path.
+E87N_UBOOT_BOOTM_LEN = 0x06000000
+MAX_FIT_BYTES = E87N_UBOOT_BOOTM_LEN - 1
 MAX_KERNEL_UNCOMPRESSED = 64 * MIB
 E87N_MEMORY = struct.pack(">4I", 0, RAM_BASE, 0, RAM_BASE)
 E87N_COMPATIBLE = b"edgepi,e87n"
@@ -140,7 +144,10 @@ def normalize_kernel(path: Path, requested: str) -> tuple[bytes, str, dict[str, 
     data = regular(path, MAX_KERNEL_UNCOMPRESSED)
     payload = data.read_bytes()
     if requested == "auto":
-        requested = "lzma" if is_lzma_alone(payload) else "lzma"
+        # The captured E87N factory U-Boot (p3-fip.bin) advertises LZMA FIT
+        # support and the production factory package uses this exact profile.
+        # Keep diagnostics byte-for-byte compatible with that loader.
+        requested = "lzma"
     if requested == "none":
         require(not is_lzma_alone(payload),
                 "--kernel-compression=none requires an uncompressed ARM64 Image")

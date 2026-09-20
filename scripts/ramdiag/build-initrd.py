@@ -270,6 +270,7 @@ def build(source_root: Path, boot: Path, output: Path) -> dict[str, object]:
         tree.destination.joinpath("lib").symlink_to("usr/lib")
         tree.destination.joinpath("lib64").symlink_to("usr/lib64" if (source_root / "usr/lib64").exists() else "usr/lib")
         for directory, mode in (("proc", 0o555), ("sys", 0o555), ("dev", 0o755),
+                                ("dev/pts", 0o755),
                                 ("run", 0o755), ("tmp", 0o1777), ("root", 0o700),
                                 ("var/empty", 0o755), ("run/ssh", 0o700), ("run/sshd", 0o755),
                                 ("run/ramdiag", 0o755)):

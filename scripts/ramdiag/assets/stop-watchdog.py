@@ -7,11 +7,31 @@ import errno
 import fcntl
 import os
 import struct
+import time
 
 
 # Linux watchdog-api.h: _IOW('W', 4, int) and WDIOS_DISABLECARD.
 WDIOC_SETOPTIONS = 0x40045704
 WDIOS_DISABLECARD = 0x0001
+WDIOC_KEEPALIVE = 0x80045705
+
+
+def keepalive(fd: int, path: str) -> int:
+    """Keep a watchdog armed when the driver does not support disabling it."""
+    while True:
+        try:
+            # WDIOC_KEEPALIVE is an _IOR ioctl; use a writable four-byte
+            # buffer so both 32-bit and 64-bit Python hosts pass a pointer.
+            fcntl.ioctl(fd, WDIOC_KEEPALIVE, bytearray(4), True)
+        except OSError:
+            try:
+                # Linux watchdog drivers also accept a write as a ping.  A
+                # NUL is deliberately not the magic-close character 'V'.
+                os.write(fd, b"\0")
+            except OSError as error:
+                print(f"RAMDIAG WATCHDOG KEEPER STOPPED: {path}: {error}")
+                return 1
+        time.sleep(0.5)
 
 
 def main() -> int:
@@ -25,11 +45,14 @@ def main() -> int:
             continue
         seen = True
         try:
-            fcntl.ioctl(fd, WDIOC_SETOPTIONS, struct.pack("I", WDIOS_DISABLECARD))
-            print(f"RAMDIAG WATCHDOG DISABLED: {path}")
-            return 0
-        except OSError as error:
-            print(f"RAMDIAG WARN: disable {path}: {error}")
+            try:
+                fcntl.ioctl(fd, WDIOC_SETOPTIONS, struct.pack("I", WDIOS_DISABLECARD))
+                print(f"RAMDIAG WATCHDOG DISABLED: {path}")
+                return 0
+            except OSError as error:
+                print(f"RAMDIAG WATCHDOG DISABLE UNSUPPORTED: {path}: {error}")
+                print(f"RAMDIAG WATCHDOG KEEPALIVE: {path}")
+                return keepalive(fd, path)
         finally:
             os.close(fd)
     if not seen:

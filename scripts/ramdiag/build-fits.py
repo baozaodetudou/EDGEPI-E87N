@@ -171,7 +171,7 @@ def build_one(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--kernel", type=Path, required=True,
-                        help="uncompressed ARM64 Image or vendor-compatible Image.lzma")
+                        help="ARM64 Image or vendor-compatible Image.lzma")
     parser.add_argument("--dtb", type=Path, required=True,
                         help="E87N DTB describing 1 GiB RAM")
     parser.add_argument("--initrd", type=Path,
@@ -179,7 +179,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, required=True,
                         help="new or existing directory for FITs and JSON reports")
     parser.add_argument("--variant", choices=["all", *VARIANTS], default="all")
-    parser.add_argument("--kernel-compression", choices=["auto", "lzma", "none"], default="auto")
+    parser.add_argument(
+        "--kernel-compression", choices=["auto", "lzma", "none"], default="auto",
+                        help="FIT kernel compression; auto (default) uses the production LZMA profile",
+    )
     parser.add_argument("--bootargs", default=BOOTARGS_DEFAULT,
                         help="base RAM-only bootargs; rdinit=/init is added only for initrd variants")
     parser.add_argument("--ramdisk-load", type=lambda value: int(value, 0), default=RAMDISK_LOAD)
@@ -256,4 +259,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

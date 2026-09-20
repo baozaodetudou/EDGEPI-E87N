@@ -59,7 +59,10 @@ python3 scripts/ramdiag/build-fits.py \
   --output-dir output/ramdiag-run-20260920
 ```
 
-`--kernel-compression=auto` 对原始 ARM64 `Image` 使用生产侧相同的 LZMA-Alone 参数（8 MiB dictionary、`lc=1 lp=2 pb=2`），对已有 `Image.lzma` 做校验后直接复用。输出目录中会有每个 FIT 的 JSON 报告和一个 `MANIFEST.json`。脚本默认拒绝覆盖已有文件；若输入只有无 initrd 变体，可运行：
+
+`--kernel-compression=auto`（默认）使用生产侧相同的 LZMA-Alone 参数（8 MiB dictionary、`lc=1 lp=2 pb=2`）。实机保存的 E87N 原厂 U-Boot FIP 中包含 `lzma`、`lzmadec` 和 FIT compression 支持，因此默认诊断 FIT 与生产 FIT 保持一致；如果要做未压缩 A/B 实验，可显式传 `--kernel-compression=none`。FIT 文件还必须严格小于 `0x06000000`（96 MiB）；这是 E87N U-Boot `CONFIG_SYS_BOOTM_LEN` 和 RAM loader 的硬上限，生成器、验证器和提取器统一按 `0x05ffffff` 拒绝更大的 FIT。输出目录中会有每个 FIT 的 JSON 报告和一个 `MANIFEST.json`。脚本默认拒绝覆盖已有文件；若输入只有无 initrd 变体，可运行：
+
+`verify-fit.py` 默认要求 `compression = "lzma"`；只有明确要审计未压缩实验 FIT 时，才传 `--kernel-compression=none`。`--kernel-compression=auto` 仅用于读取 FIT 元数据。
 
 ```sh
 python3 scripts/ramdiag/build-fits.py \
@@ -191,7 +194,7 @@ RAMDIAG READY
 ssh -o PreferredAuthentications=password -o PubkeyAuthentication=no root@192.168.1.1
 ```
 
-但 SSH 只有在该 initrd 的 `/init` 确实包含绝对路径 `/usr/sbin/sshd`、临时 host key 和监听配置时才是有效检查项。过去的失败正是裸调用 `sshd -D` 使 PID 1 退出；不能只看内核启动线就认为 SSH initrd 合格。
+但 SSH 只有在该 initrd 的 `/init` 确实包含临时 host key、监听配置、`devpts`/PTY 和可执行的 `sshd` 服务时才是有效检查项。当前服务脚本从 `PATH` 解析 `sshd`，并用 `wait` 回收退出的 sshd，避免非 merged-/usr 布局或僵尸子进程造成误判。过去的失败正是裸调用 `sshd -D` 使 PID 1 退出；不能只看内核启动线就认为 SSH initrd 合格。
 
 ### 2. `40080000-initrd`
 
