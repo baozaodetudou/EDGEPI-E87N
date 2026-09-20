@@ -171,6 +171,12 @@ class ReleasePreparation(unittest.TestCase):
         self.manifest("image")
         self.rejected("incomplete RAM diagnostic matrix")
 
+    def test_empty_ramdiag_payload_is_rejected(self):
+        payload = self.root / "image/diagnostics/E87N-ramdiag-40000000-initrd.itb"
+        payload.write_bytes(b"")
+        self.manifest("image")
+        self.rejected("empty RAM diagnostic payload")
+
     def test_failed_or_absent_success(self):
         for kind in ("image", "display"):
             for outcome in ("failure", "cancelled", "skipped", "", None):

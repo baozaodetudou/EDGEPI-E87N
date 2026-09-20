@@ -175,6 +175,8 @@ def validate(root, kind, args, version):
                        if name.startswith("diagnostics/")}
         require(diagnostics == RAMDIAG_FILES,
                 "incomplete RAM diagnostic matrix")
+        require(all((root / "diagnostics" / name).stat().st_size for name in diagnostics),
+                "empty RAM diagnostic payload")
         require(len(images) == 1, "expected exactly one factory firmware .tar (collision or missing payload)")
         audit_name = "logs/ci/factory-firmware-audit-1.log"
         require(audit_name in files, "missing required factory firmware audit log")

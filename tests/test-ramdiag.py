@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 import lzma
 from pathlib import Path
+import subprocess
 import struct
 import sys
 import tempfile
@@ -14,6 +15,11 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "scripts/ramdiag/fit_common.py"
+INIT = ROOT / "scripts/ramdiag/assets/init-network-first"
+SERVICES = ROOT / "scripts/ramdiag/assets/services"
+BEACON = ROOT / "scripts/ramdiag/assets/beacon.py"
+WATCHDOG = ROOT / "scripts/ramdiag/assets/stop-watchdog.py"
+BUILD_INITRD = ROOT / "scripts/ramdiag/build-initrd.py"
 SPEC = importlib.util.spec_from_file_location("e87n_ramdiag_fit_common", MODULE)
 assert SPEC and SPEC.loader
 fit_common = importlib.util.module_from_spec(SPEC)
@@ -22,6 +28,55 @@ SPEC.loader.exec_module(fit_common)
 
 
 class RamdiagHelpersTest(unittest.TestCase):
+    def test_shell_assets_parse_on_host(self):
+        for asset in (INIT, SERVICES):
+            result = subprocess.run(["/bin/sh", "-n", str(asset)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, f"{asset}: {result.stderr}")
+
+    def test_initrd_supervisor_keeps_pid_one_alive(self):
+        init = INIT.read_text()
+        services = SERVICES.read_text()
+        self.assertIn("service_pid=$!", init)
+        self.assertIn('wait "$service_pid"', init)
+        self.assertIn("while :; do", init)
+        self.assertNotIn('[ "$$" = 1 ] || exit 1', services)
+        self.assertIn("sshd -D -e", services)
+        self.assertIn('wait "$pid"', services)
+
+    def test_runtime_mounts_are_idempotent_but_not_block_backed(self):
+        init = INIT.read_text()
+        self.assertIn("mounted_type()", init)
+        self.assertIn("mount_or_existing()", init)
+        for filesystem in ("proc", "sysfs", "devtmpfs", "tmpfs"):
+            self.assertIn(f"mount_or_existing {filesystem}", init)
+        self.assertNotIn("/dev/mmc", init)
+        self.assertNotIn("mount /dev/", init)
+        for forbidden in ("dd ", "mkfs", "blkdiscard", "fdisk", "parted", "saveenv", "mmc write"):
+            self.assertNotIn(forbidden, init + SERVICES)
+
+    def test_mmc_absence_is_checked_for_all_block_names(self):
+        for asset in (INIT, SERVICES):
+            source = asset.read_text()
+            self.assertIn("/sys/class/block/mmcblk*", source)
+            self.assertIn("unexpected MMC block device", source)
+        self.assertIn("mmc@11230000/status", INIT.read_text())
+
+    def test_udp_and_watchdog_assets_are_ram_only(self):
+        beacon = BEACON.read_text()
+        watchdog = WATCHDOG.read_text()
+        self.assertIn("socket.AF_INET", beacon)
+        self.assertIn("192.168.1.2", beacon)
+        self.assertIn("/dev/watchdog", watchdog)
+        self.assertNotIn("/dev/mmc", beacon + watchdog)
+
+    def test_initrd_builder_handles_modern_python_and_static_ldd(self):
+        source = BUILD_INITRD.read_text()
+        self.assertIn("import crypt as crypt_module", source)
+        self.assertIn('["openssl", "passwd", "-6", "-stdin"]', source)
+        self.assertIn("check=False", source)
+        self.assertIn("not a dynamic executable", source)
+        self.assertIn('"usr/sbin/ip", "usr/bin/ip"', source)
+
     def test_variant_matrix_is_exactly_three_experiments(self):
         self.assertEqual(
             list(fit_common.VARIANTS),
@@ -90,6 +145,16 @@ class RamdiagHelpersTest(unittest.TestCase):
         self.assertIn("WDIOC_SETOPTIONS", helper)
         self.assertIn("WDIOS_DISABLECARD", helper)
         self.assertIn("/dev/watchdog0", helper)
+
+    def test_diagnostic_password_hash_is_sha512_crypt(self):
+        build = ROOT / "scripts/ramdiag/build-initrd.py"
+        spec = importlib.util.spec_from_file_location("e87n_ramdiag_build_initrd", build)
+        self.assertIsNotNone(spec)
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        self.assertTrue(module.password_hash("doumao").startswith("$6$"))
 
 
 if __name__ == "__main__":

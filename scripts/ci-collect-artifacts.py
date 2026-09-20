@@ -94,6 +94,8 @@ def check_ramdiag_shape(source, errors):
             if entry.is_symlink() or not entry.is_file():
                 errors.append("RAM diagnostic output contains a non-regular entry: " + entry.name)
                 continue
+            if entry.stat().st_size == 0:
+                errors.append("RAM diagnostic output contains an empty file: " + entry.name)
             actual.add(entry.name)
         if actual != RAMDIAG_FILES:
             missing = sorted(RAMDIAG_FILES - actual)

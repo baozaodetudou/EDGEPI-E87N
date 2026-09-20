@@ -480,6 +480,15 @@ export -f uname sudo xz dpkg-deb
         self.assertEqual(result.returncode, 1)
         self.assertIn("incomplete RAM diagnostic matrix", result.stdout)
 
+    def test_successful_collection_rejects_empty_ramdiag_file(self):
+        self.prepare_mocks()
+        self.assertEqual(self.run_script("ci-build.sh", "image").returncode, 0)
+        (self.root / "output/ci/ramdiag/MANIFEST.json").write_bytes(b"")
+        self.put("source/armbian-build/output/debs/kernel.deb")
+        result = self.collect("image", "success")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("empty file", result.stdout)
+
     def test_failed_image_collection_and_checksums(self):
         image = self.put("output/ci/firmware/candidate-uboot-firmware.tar", "partial firmware")
         for name in ("candidate.img", "candidate.img.xz", "candidate.img.gz", "candidate.img.zst", "wrong.tar"):

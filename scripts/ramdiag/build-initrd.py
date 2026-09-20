@@ -10,7 +10,6 @@ RAM.  It never mounts, opens, or writes a block device.
 from __future__ import annotations
 
 import argparse
-import crypt
 import hashlib
 import os
 from pathlib import Path
@@ -134,6 +133,39 @@ def resolve_command(root: Path, *candidates: str) -> str:
     raise ValueError("none of the target commands exist: " + ", ".join(candidates))
 
 
+def password_hash(password: str) -> str:
+    """Return a SHA-512 crypt hash without making Python's ``crypt`` mandatory.
+
+    Python 3.13 removed the stdlib ``crypt`` module.  The image builder still
+    needs to work on a newer host, so use it when available and fall back to
+    the host's OpenSSL command without putting the password in argv.
+    """
+    encoded = ""
+    try:
+        import crypt as crypt_module  # type: ignore[import-not-found]
+    except (ImportError, ModuleNotFoundError):
+        pass
+    else:
+        encoded = crypt_module.crypt(password, crypt_module.mksalt(crypt_module.METHOD_SHA512))
+    # Some platforms expose ``crypt`` but only implement legacy DES; do not
+    # silently place that weak 13-character hash in the diagnostic image.
+    if not encoded.startswith("$6$"):
+        try:
+            result = subprocess.run(
+                ["openssl", "passwd", "-6", "-stdin"],
+                input=(password + "\n").encode(),
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        except (FileNotFoundError, subprocess.CalledProcessError) as error:
+            raise ValueError("need SHA-512 crypt support or host openssl for the diagnostic password hash") from error
+        encoded = result.stdout.decode("ascii", errors="strict").strip()
+    require(encoded.startswith("$6$") and len(encoded) > 20,
+            "failed to create a SHA-512 crypt password hash")
+    return encoded
+
+
 def add_runtime_dependencies(tree: InitrdTree, root: Path) -> None:
     # ldd must execute inside the native ARM64 target root.  The image job is
     # deliberately native ARM64, so this does not need a host emulator.
@@ -144,8 +176,19 @@ def add_runtime_dependencies(tree: InitrdTree, root: Path) -> None:
         if relative in processed:
             continue
         processed.add(relative)
-        output = run("chroot", root, "/usr/bin/ldd", "/" + relative,
-                     capture=True)
+        result = subprocess.run(
+            ["chroot", str(root), "/usr/bin/ldd", "/" + relative],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        output = result.stdout + result.stderr
+        # ldd returns non-zero for static ELF files.  That is a valid result:
+        # there are no shared libraries to copy for such a binary.
+        if "not a dynamic executable" in output or "statically linked" in output:
+            continue
+        require(result.returncode == 0, f"ldd failed for /{relative}: {output.strip()}")
         for dependency in parse_ldd(output):
             dependency_relative = dependency.lstrip("/")
             before = len(tree.copied)
@@ -156,8 +199,7 @@ def add_runtime_dependencies(tree: InitrdTree, root: Path) -> None:
 
 def write_system_files(tree: InitrdTree) -> None:
     tree.write("etc/passwd", b"root:x:0:0:root:/root:/bin/sh\n")
-    password = crypt.crypt("doumao", crypt.mksalt(crypt.METHOD_SHA512))
-    require(password and password != "*", "failed to create diagnostic password hash")
+    password = password_hash("doumao")
     tree.write("etc/shadow", f"root:{password}:20000:0:99999:7:::\n".encode(), 0o600)
     tree.write("etc/group", b"root:x:0:\n")
     tree.write("etc/nsswitch.conf", b"passwd: files\ngroup: files\nshadow: files\nhosts: files\n")
@@ -179,17 +221,46 @@ def build(source_root: Path, boot: Path, output: Path) -> dict[str, object]:
     with tempfile.TemporaryDirectory(prefix="e87n-ramdiag-initrd-", dir=output) as temporary:
         work = Path(temporary)
         tree = InitrdTree(source_root, work / "root")
-        for candidate in (
-            "/bin/sh", "/usr/bin/mount", "/usr/bin/sleep", "/usr/bin/mkdir",
-            "/usr/bin/chmod", "/usr/bin/ln", "/usr/bin/hostname", "/usr/bin/readlink",
-            "/usr/bin/tr", "/usr/bin/ssh-keygen", "/usr/bin/python3", "/usr/bin/ip",
-            "/usr/bin/true", "/usr/bin/false", "/usr/bin/kill", "/usr/sbin/sshd",
-            "/usr/sbin/modprobe", "/usr/bin/dmesg",
-            "/usr/lib/openssh/sshd-session", "/usr/lib/openssh/sshd-auth",
-        ):
-            tree.copy_file(candidate.lstrip("/"), required=candidate not in ("/usr/bin/dmesg",))
+        commands = (
+            "/bin/sh", "/usr/bin/mount", "/bin/mount", "/usr/bin/sleep",
+            "/bin/sleep", "/usr/bin/mkdir", "/bin/mkdir", "/usr/bin/chmod",
+            "/bin/chmod", "/usr/bin/ln", "/bin/ln", "/usr/bin/hostname",
+            "/bin/hostname", "/usr/bin/readlink", "/bin/readlink", "/usr/bin/tr",
+            "/bin/tr", "/usr/bin/ssh-keygen", "/usr/bin/python3", "/usr/bin/true",
+            "/bin/true", "/usr/bin/false", "/bin/false", "/usr/bin/kill", "/bin/kill",
+            "/usr/sbin/sshd", "/usr/bin/sshd", "/usr/sbin/modprobe", "/usr/bin/modprobe",
+            "/usr/bin/dmesg", "/bin/dmesg",
+        )
+        selected: set[str] = set()
+        for command in commands:
+            # Several entries are merged-/usr aliases.  Copy the first existing
+            # spelling only; duplicate copies inflate the initrd and can mask
+            # non-merged-/usr target layouts.
+            basename = Path(command).name
+            if basename in selected:
+                continue
+            if (source_root / command.lstrip("/")).exists() or (source_root / command.lstrip("/")).is_symlink():
+                tree.copy_file(command.lstrip("/"), required=True)
+                selected.add(basename)
+        command_paths = {
+            "sshd": ("usr/sbin/sshd", "usr/bin/sshd", "sbin/sshd", "bin/sshd"),
+            "ip": ("usr/sbin/ip", "usr/bin/ip", "sbin/ip", "bin/ip"),
+            "modprobe": ("usr/sbin/modprobe", "usr/bin/modprobe", "sbin/modprobe", "bin/modprobe"),
+        }
+        for name, candidates in command_paths.items():
+            command = resolve_command(source_root, *candidates)
+            tree.copy_file(command.lstrip("/"), required=True)
+            selected.add(name)
+        tree.copy_file("usr/lib/openssh/sshd-session", required=True)
+        # OpenSSH releases differ: some ship sshd-auth, while newer releases
+        # use sshd-session for the complete server-side session path.
+        tree.copy_file("usr/lib/openssh/sshd-auth", required=False)
+        tree.copy_file("usr/bin/dmesg", required=False)
         require("usr/bin/python3" in tree.copied, "target python3 is required for the UDP beacon")
-        require("usr/sbin/sshd" in tree.copied, "target openssh-server is required for the diagnostic")
+        sshd_command = command_paths["sshd"]
+        sshd_path = resolve_command(source_root, *sshd_command)
+        require(sshd_path.lstrip("/") in tree.copied,
+                "target openssh-server is required for the diagnostic")
         tree.copy_tree(f"usr/lib/modules/{RELEASE}")
         tree.copy_tree("usr/lib/firmware", required=False)
         python_dirs = sorted((source_root / "usr/lib").glob("python3.*"))
@@ -212,8 +283,10 @@ def build(source_root: Path, boot: Path, output: Path) -> dict[str, object]:
         add_runtime_dependencies(tree, source_root)
         run("chroot", tree.destination, "/bin/sh", "-n", "/init")
         run("chroot", tree.destination, "/bin/sh", "-n", "/usr/lib/ramdiag/services")
-        run("chroot", tree.destination, "/usr/sbin/sshd", "-t", "-f", "/etc/ssh/sshd_config")
-        run("chroot", tree.destination, "/usr/bin/modprobe", "--dry-run", "--set-version", RELEASE, "realtek")
+        run("chroot", tree.destination, "/" + sshd_path.lstrip("/"), "-t", "-f", "/etc/ssh/sshd_config")
+        modprobe_path = command_paths["modprobe"]
+        run("chroot", tree.destination, "/" + resolve_command(source_root, *modprobe_path).lstrip("/"),
+            "--dry-run", "--set-version", RELEASE, "realtek")
         cpio = work / "ramdiag.cpio"
         with cpio.open("xb") as stream:
             listing = subprocess.Popen(["find", ".", "-print0"], cwd=tree.destination, stdout=subprocess.PIPE)
