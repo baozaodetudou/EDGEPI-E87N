@@ -309,7 +309,22 @@ def build(source_root: Path, boot: Path, output: Path) -> dict[str, object]:
         add_runtime_dependencies(tree, source_root)
         run("chroot", tree.destination, "/bin/sh", "-n", "/init")
         run("chroot", tree.destination, "/bin/sh", "-n", "/usr/lib/ramdiag/services")
-        run("chroot", tree.destination, "/" + sshd_path.lstrip("/"), "-t", "-f", "/etc/ssh/sshd_config")
+        # The diagnostic creates a fresh host key in RAM at boot.  Generate a
+        # throw-away key only for the offline sshd configuration audit, then
+        # remove both files before cpio publication so every board boot gets a
+        # unique host identity and no private key is embedded in the FIT.
+        temporary_host_key = tree.destination / "run/ssh/ssh_host_ed25519_key"
+        run("chroot", tree.destination, "/usr/bin/ssh-keygen", "-q", "-t", "ed25519",
+            "-N", "", "-f", "/run/ssh/ssh_host_ed25519_key")
+        try:
+            run("chroot", tree.destination, "/" + sshd_path.lstrip("/"), "-t", "-f",
+                "/etc/ssh/sshd_config")
+        finally:
+            for path in (temporary_host_key, temporary_host_key.with_name(temporary_host_key.name + ".pub")):
+                try:
+                    path.unlink()
+                except FileNotFoundError:
+                    pass
         modprobe_path = command_paths["modprobe"]
         run("chroot", tree.destination, "/" + resolve_command(source_root, *modprobe_path).lstrip("/"),
             "--dry-run", "--set-version", RELEASE, "realtek")

@@ -191,6 +191,10 @@ class RamdiagHelpersTest(unittest.TestCase):
 
     def test_diagnostic_password_hash_is_sha512_crypt(self):
         build = ROOT / "scripts/ramdiag/build-initrd.py"
+        source = build.read_text()
+        self.assertIn("temporary_host_key", source)
+        self.assertIn('"/usr/bin/ssh-keygen", "-q", "-t", "ed25519"', source)
+        self.assertIn("temporary_host_key.with_name", source)
         spec = importlib.util.spec_from_file_location("e87n_ramdiag_build_initrd", build)
         self.assertIsNotNone(spec)
         assert spec and spec.loader
