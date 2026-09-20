@@ -7,17 +7,16 @@ Keep the shared wmcpu reservation at 0x50000000 intact. These overrides
 apply to E87N only, after 901; other MT7987 boards are unchanged.
 
 Replace the inherited 256 MiB memory node explicitly instead of relying on
-same-path source merging. Add the extra reserved regions through a path
-reference so the shared wmcpu reservation remains owned by mt7987.dtsi.
-Use one 64 KiB ramoops record within the observed region. This record policy
-is explicit port configuration, not a claim about vendor sizes. The secure
-monitor must never be mapped into normal Linux memory.
+same-path source merging. Use one 64 KiB ramoops record within the observed
+region. This record policy is explicit port configuration, not a claim about
+vendor sizes. The secure monitor must never be mapped into normal Linux
+memory.
 
 ---
 diff --git a/arch/arm64/boot/dts/mediatek/mt7987a-edgepi-e87n.dts b/arch/arm64/boot/dts/mediatek/mt7987a-edgepi-e87n.dts
 --- a/arch/arm64/boot/dts/mediatek/mt7987a-edgepi-e87n.dts
 +++ b/arch/arm64/boot/dts/mediatek/mt7987a-edgepi-e87n.dts
-@@ -12,6 +12,12 @@
+@@ -12,6 +12,29 @@
  	model = "EdgePi E87N";
  	compatible = "edgepi,e87n", "mediatek,mt7987a", "mediatek,mt7987";
  
@@ -27,29 +26,23 @@ diff --git a/arch/arm64/boot/dts/mediatek/mt7987a-edgepi-e87n.dts b/arch/arm64/b
 +		reg = <0 0x40000000 0 0x40000000>;
 +	};
 +
++	reserved-memory {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++
++		ramoops@7ff70000 {
++			compatible = "ramoops";
++			reg = <0 0x7ff70000 0 0x10000>;
++			record-size = <0x10000>;
++		};
++
++		secmon@7ff80000 {
++			reg = <0 0x7ff80000 0 0x80000>;
++			no-map;
++		};
++	};
++
  	aliases {
  		serial0 = &uart0;
  		ethernet0 = &gmac0;
-@@ -92,7 +98,20 @@
- 		regulator-max-microvolt = <3300000>;
- 		regulator-boot-on;
- 		regulator-always-on;
- 	};
- };
- 
-+&{/reserved-memory} {
-+	ramoops@7ff70000 {
-+		compatible = "ramoops";
-+		reg = <0 0x7ff70000 0 0x10000>;
-+		record-size = <0x10000>;
-+	};
-+
-+	secmon@7ff80000 {
-+		reg = <0 0x7ff80000 0 0x80000>;
-+		no-map;
-+	};
-+};
-+
- &eth {
- 	mediatek,sgmiisys = <&sgmiisys0>;
- 	status = "okay";
