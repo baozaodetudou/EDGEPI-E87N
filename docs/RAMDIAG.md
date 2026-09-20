@@ -94,6 +94,27 @@ macOS：
 sudo ifconfig en7 inet 192.168.1.2 netmask 255.255.255.0 up
 ```
 
+### 网络硬门禁
+
+下面的门禁必须全部满足后，才允许上传或启动任何 RAMdiag FIT。`ifconfig`、`route`、`arp`、`ping` 和 `curl` 只检查主机与网络状态；它们不会写 E87N 闪存。
+
+```sh
+ifconfig en7
+route -n get 192.168.1.1
+arp -an | grep '192.168.1.1' || true
+ping -c 2 -W 1000 192.168.1.1 || true
+curl --connect-timeout 2 --max-time 4 -sS -D - -o /dev/null http://192.168.1.1/
+```
+
+至少要看到：
+
+1. 直连接口为 `status: active`，且主机确实有 `192.168.1.2/24`；
+2. 到 `192.168.1.1` 的路由走直连接口；
+3. ARP 不是 `(incomplete)`；
+4. HTTP 页面能够证明自己是 E87N U-Boot 恢复页，而不是 OpenWrt LuCI。
+
+U-Boot 未必响应 ICMP，所以单独 `ping` 失败不能判定 U-Boot 不在；但如果接口是 inactive、主机没有 `192.168.1.2`、ARP 仍为 incomplete，或网页完全不可达，就必须把控制通道视为**未建立**。此时停止，不上传 FIT、不点击临时启动、不点击升级，也不要用网页显示的 `success` 推断 Linux 已启动。若观察到 `en7: status: inactive` 或没有 `192.168.1.2`，就是未通过该门禁。
+
 Linux：
 
 ```sh
@@ -170,6 +191,39 @@ bootm ${loadaddr}
 ```
 
 `0x48000000` 只是此前保存环境中的上传地址示例，最终以本次 `bdinfo`/`printenv` 为准。如果 `ping` 不通、TFTP 失败、`iminfo` 报 FIT 错误或 U-Boot 报内存重叠，停止，不要尝试 `saveenv` 或刷生产包。
+
+## 绝对禁止的命令和入口
+
+在本次 RAM 诊断阶段不要执行以下会改变持久化环境、eMMC、SPI-NAND/NOR 或整盘布局的操作：
+
+```text
+saveenv
+env save
+fw_setenv
+mmc write
+mmc erase
+sf write
+sf erase
+nand write
+nand erase
+gpt write
+mtkupgradefw
+fastboot flash
+sysupgrade
+```
+
+Linux 侧同样禁止把任何输出重定向到设备节点，或改变分区/文件系统：
+
+```text
+dd of=/dev/mmc*
+mkfs /dev/mmc*
+blkdiscard /dev/mmc*
+parted 修改 eMMC
+sgdisk --zap-all
+resize2fs /dev/mmcblk0p5
+```
+
+`setenv` 不会立即写闪存，但会改变当前 U-Boot 会话；在网络硬门禁通过并且已记录原值前不要使用，任何情况下都不要配合 `saveenv`。`bootm` 只允许用于已经通过主机 SHA-256/结构审计、且明确装入 RAM 临时地址的 RAMdiag FIT；生产 TAR、SIMG、GPT、FIP 或 LuCI sysupgrade 都不是 RAMdiag 输入。诊断过程中也不要反复执行 `reset`/`reboot`，否则会丢失看门狗、地址冲突和内核崩溃的时序证据。
 
 ## 三个变体的测试顺序和判定
 
