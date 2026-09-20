@@ -213,10 +213,18 @@ def add_runtime_dependencies(tree: InitrdTree, root: Path) -> None:
 
 
 def write_system_files(tree: InitrdTree) -> None:
-    tree.write("etc/passwd", b"root:x:0:0:root:/root:/bin/sh\n")
+    # Debian OpenSSH refuses to validate its configuration unless the
+    # privilege-separation account exists.  Keep the initrd small, but retain
+    # the service identities required by the target's sshd instead of reducing
+    # passwd/group to root only.
+    tree.write(
+        "etc/passwd",
+        b"root:x:0:0:root:/root:/bin/sh\n"
+        b"sshd:x:989:65534:sshd user:/run/sshd:/usr/sbin/nologin\n",
+    )
     password = password_hash("doumao")
     tree.write("etc/shadow", f"root:{password}:20000:0:99999:7:::\n".encode(), 0o600)
-    tree.write("etc/group", b"root:x:0:\n")
+    tree.write("etc/group", b"root:x:0:\nnogroup:x:65534:\n")
     tree.write("etc/nsswitch.conf", b"passwd: files\ngroup: files\nshadow: files\nhosts: files\n")
     tree.write("etc/hostname", b"e87n-ramdiag\n")
     tree.write("etc/hosts", b"127.0.0.1 localhost\n192.168.1.1 e87n-ramdiag\n")

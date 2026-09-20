@@ -75,6 +75,10 @@ mkdir "$input"
 # checkout or the source RAMDIAG tree in a CI job.
 ramdiag_source="$work/ramdiag"
 cp -a -- "$repo_dir/scripts/ramdiag" "$ramdiag_source"
+# fit_common imports the bounded DTB parser from factory_firmware.py.  The
+# RAMDIAG tree is staged outside the checkout, so stage that single dependency
+# beside it instead of relying on the caller's PYTHONPATH.
+cp -a -- "$repo_dir/scripts/factory_firmware.py" "$work/factory_firmware.py"
 if [[ ! -e "$ramdiag_source/assets/init" ]]; then
   [[ -f "$ramdiag_source/assets/init-network-first" ]] || {
     printf 'FAIL: RAMDIAG source is missing both assets/init and assets/init-network-first\n' >&2
@@ -91,7 +95,8 @@ cat >"$output/README.txt" <<'EOF'
 E87N RAM-only diagnostics (not installation firmware)
 
 First test E87N-ramdiag-40000000-initrd.itb. It disables eMMC in its DTB,
-boots a custom initrd entirely from RAM, configures eth0 as 192.168.1.1,
+ boots a custom initrd entirely from RAM, configures the linked Ethernet port
+ as 192.168.1.1,
 emits one-way UDP status to 192.168.1.2:6666, and starts root/doumao SSH.
 The initrd probes eth0 and eth1, selects the linked E87N MAC device (mac@0 or
 mac@1), and assigns 192.168.1.1 to that interface. Do not upload these FIT

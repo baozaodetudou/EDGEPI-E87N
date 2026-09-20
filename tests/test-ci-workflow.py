@@ -70,6 +70,7 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertIn("scripts/ci-build-ramdiag.sh", ramdiag)
         ramdiag_builder = (REPO / "scripts/ci-build-ramdiag.sh").read_text()
         self.assertIn('ramdiag_source="$work/ramdiag"', ramdiag_builder)
+        self.assertIn('cp -a -- "$repo_dir/scripts/factory_firmware.py" "$work/factory_firmware.py"', ramdiag_builder)
         self.assertIn("ln -s init-network-first", ramdiag_builder)
 
     def test_release_is_manual_main_only_after_all_success(self):
