@@ -45,14 +45,16 @@ class RamdiagHelpersTest(unittest.TestCase):
 
     def test_runtime_mounts_are_idempotent_but_not_block_backed(self):
         init = INIT.read_text()
+        services = SERVICES.read_text()
         self.assertIn("mounted_type()", init)
         self.assertIn("mount_or_existing()", init)
         for filesystem in ("proc", "sysfs", "devtmpfs", "tmpfs"):
             self.assertIn(f"mount_or_existing {filesystem}", init)
         self.assertNotIn("/dev/mmc", init)
         self.assertNotIn("mount /dev/", init)
-        for forbidden in ("dd ", "mkfs", "blkdiscard", "fdisk", "parted", "saveenv", "mmc write"):
-            self.assertNotIn(forbidden, init + SERVICES)
+        for forbidden in ("mkfs", "blkdiscard", "fdisk", "parted", "saveenv", "mmc write"):
+            self.assertNotIn(forbidden, init + services)
+        self.assertNotRegex(init + services, r"(?m)(^|[;&|() \t])dd(?:[ \t]|$)")
 
     def test_mmc_absence_is_checked_for_all_block_names(self):
         for asset in (INIT, SERVICES):
