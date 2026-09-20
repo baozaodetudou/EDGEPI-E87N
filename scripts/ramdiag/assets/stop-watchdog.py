@@ -56,7 +56,11 @@ def main() -> int:
         finally:
             os.close(fd)
     if not seen:
+        # A device node can appear a fraction of a second after PID 1.  Let
+        # the initrd supervisor retry instead of treating that race as a
+        # successful stop while firmware may still be counting down.
         print("RAMDIAG WATCHDOG: no watchdog device present")
+        return 2
     return 0
 
 

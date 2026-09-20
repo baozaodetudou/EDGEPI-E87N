@@ -224,11 +224,15 @@ output/ramdiag-run-20260920/
 `uboot-*.txt` 至少包含 `version`、`bdinfo`、上述 `printenv`、`ping`/TFTP/上传结果和 U-Boot `bootm` 输出。不要把完整 U-Boot 环境、MAC、序列号、密码或恢复备份公开到 Git；本地证据可按需脱敏。
 
 如果串口显示 Linux Oops/panic，先看是否真的是 U-Boot 复位。当前诊断
-initrd 会把 watchdog 停止在 RAM 中，并保持独立的 shell supervisor 作为 PID 1；
+initrd 会在 `devtmpfs`/`/run` 刚准备好时就启动 watchdog keeper，并在设备节点
+出现竞态或 ioctl 暂时失败时自动重试；同时保持独立的 shell supervisor 作为 PID 1；
 这样 `sshd` 或其他诊断服务退出时不会把 PID 1 杀掉而触发内核的
 `Attempted to kill init` panic：
 
 - `panic=0` 下 Linux 应停住；仍然周期性重新出现 U-Boot banner，说明是 watchdog/电源/bootloader 复位或内核在其他路径主动复位；
+- 如果只看到 `RAMDIAG WATCHDOG device did not become available`，先保存
+  `/run/ramdiag/watchdog.log` 和串口；不要继续上传生产固件，因为这表示诊断环境
+  没有拿到可确认的 watchdog 控制权；
 - 只出现一次 `Starting kernel` 后无任何输出，比较两个 kernel load 变体，并检查 `bootm_low/bootm_size/initrd_high/fdt_high`；
 - no-initrd 能跑到 VFS 错误、initrd 变体不能，说明 kernel/FDT 早期路径基本成立，问题集中到 FIT ramdisk 装载、initrd 内容或 `/init`；
 - RAM-only initrd 能 SSH、生产固件仍重启，说明不能把诊断结果外推为生产 rootfs/首启/驱动完整通过。

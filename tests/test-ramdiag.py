@@ -174,6 +174,17 @@ class RamdiagHelpersTest(unittest.TestCase):
         self.assertIn("WDIOC_KEEPALIVE", helper)
         self.assertIn("def keepalive", helper)
         self.assertIn("/dev/watchdog0", helper)
+        self.assertIn("return 2", helper)
+
+    def test_watchdog_keeper_starts_before_diagnostic_assertions(self):
+        init = INIT.read_text()
+        self.assertIn("watchdog_loop()", init)
+        self.assertIn("watchdog_loop &", init)
+        self.assertIn("/run/ramdiag/watchdog.log", init)
+        self.assertLess(init.index("watchdog_loop &"), init.index("assert_no_mmc"))
+        self.assertLess(init.index("watchdog_loop &"), init.index("modprobe realtek"))
+        self.assertIn("keeper exited status=$status; retrying", init)
+        self.assertIn("/run/ramdiag/boot.log", init)
 
     def test_diagnostic_password_hash_is_sha512_crypt(self):
         build = ROOT / "scripts/ramdiag/build-initrd.py"

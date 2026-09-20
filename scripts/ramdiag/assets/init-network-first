@@ -3,7 +3,11 @@
 # eMMC controller, and this init never mounts or writes a block device.
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=C PYTHONDONTWRITEBYTECODE=1
 umask 077
-fail() { echo "RAMDIAG FAIL: $*" >&2; while :; do sleep 60; done; }
+log_line() {
+    echo "$*" >&2
+    echo "$*" >>/run/ramdiag/boot.log 2>/dev/null || :
+}
+fail() { log_line "RAMDIAG FAIL: $*"; while :; do sleep 60; done; }
 [ "$$" = 1 ] || exit 1
 
 mounted_type() {
@@ -31,12 +35,46 @@ mount_or_existing() {
 mount_or_existing proc nosuid,nodev,noexec /proc
 mount_or_existing sysfs ro,nosuid,nodev,noexec /sys
 mount_or_existing devtmpfs nosuid,noexec,mode=0755 /dev
+
+# The MTK watchdog is already armed before Linux starts PID 1.  Start the
+# RAM-only keeper as soon as devtmpfs exists, before any diagnostic assertion
+# can enter its failure loop.  The previous ordering waited until after the
+# eMMC/DT checks; a bad or stale DTB therefore caused a silent ~31-second
+# watchdog reset and looked like a kernel hang.
+mkdir -p /run || fail run-directory
+mount_or_existing tmpfs nosuid,nodev,noexec,mode=0755,size=64m /run
+mkdir -p /run/ramdiag || fail ramdiag-directory
+watchdog_loop() {
+    attempt=0
+    while :; do
+        if [ -e /dev/watchdog0 ] || [ -e /dev/watchdog ]; then
+            /usr/bin/python3 -I /usr/lib/ramdiag/stop-watchdog.py \
+                >>/run/ramdiag/watchdog.log 2>&1 &
+            watchdog_pid=$!
+            wait "$watchdog_pid"
+            status=$?
+            # Exit status 0 means the card was disabled or no longer exists;
+            # a non-zero status is retried so a transient device/ioctl error
+            # cannot leave the board armed and unattended.
+            [ "$status" -eq 0 ] && return 0
+            log_line "RAMDIAG WATCHDOG keeper exited status=$status; retrying"
+        fi
+        attempt=$((attempt + 1))
+        [ "$attempt" -lt 120 ] || {
+            echo 'RAMDIAG WATCHDOG device did not become available' \
+                >>/run/ramdiag/watchdog.log
+            return 1
+        }
+        sleep 0.25
+    done
+}
+watchdog_loop &
+
 mkdir -p /dev/pts || fail devpts-directory
 mount_or_existing devpts nosuid,noexec,mode=0620,ptmxmode=0666 /dev/pts
 [ -e /dev/ptmx ] || ln -s pts/ptmx /dev/ptmx || fail ptmx
-mount_or_existing tmpfs nosuid,nodev,noexec,mode=0755,size=64m /run
 mount_or_existing tmpfs nosuid,nodev,noexec,mode=1777,size=32m /tmp
-mkdir -p /run/ramdiag /run/ssh /run/sshd || fail directories
+mkdir -p /run/ssh /run/sshd || fail directories
 chmod 0755 /run/sshd
 exec </dev/console >/dev/console 2>&1
 
@@ -58,14 +96,6 @@ status_path=/sys/firmware/devicetree/base/soc/mmc@11230000/status
 [ -r "$status_path" ] || fail 'eMMC DT status is unavailable'
 [ "$(tr -d '\000' <"$status_path")" = disabled ] || fail 'eMMC DT is not disabled'
 hostname e87n-ramdiag
-
-# The MTK watchdog may be handed over already armed by firmware.  A RAM-only
-# test must not reboot merely because the diagnostic intentionally has no
-# production watchdog service.  The helper disables it when possible; if the
-# driver refuses that ioctl, it stays open in the background and keeps the
-# watchdog alive from RAM.
-/usr/bin/python3 -I /usr/lib/ramdiag/stop-watchdog.py \
-    >/run/ramdiag/watchdog.log 2>&1 &
 
 modprobe realtek || echo 'RAMDIAG WARN: realtek PHY module unavailable'
 modprobe mtk-2p5ge || echo 'RAMDIAG WARN: mtk-2p5ge PHY module unavailable'
