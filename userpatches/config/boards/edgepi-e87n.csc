@@ -54,14 +54,14 @@ function custom_kernel_config__edgepi_e87n_first_boot() {
 	local -a remaining_builtin=()
 	for option in "${opts_y[@]}"; do
 		case "${option#CONFIG_}" in
-			CPU_FREQ|CPU_THERMAL|FRAMEBUFFER_CONSOLE|PANIC_ON_OOPS|WATCHDOG_PRETIMEOUT_GOV_PANIC|WATCHDOG_PRETIMEOUT_DEFAULT_GOV_PANIC) ;;
+			CPU_FREQ|CPU_THERMAL|FRAMEBUFFER_CONSOLE|PANIC_ON_OOPS|WATCHDOG_HANDLE_BOOT_ENABLED|WATCHDOG_NOWAYOUT|WATCHDOG_PRETIMEOUT_GOV_PANIC|WATCHDOG_PRETIMEOUT_DEFAULT_GOV_PANIC) ;;
 			*) remaining_builtin+=("${option}") ;;
 		esac
 	done
 	opts_y=("${remaining_builtin[@]}")
 	for option in "${opts_m[@]}"; do
 		case "${option#CONFIG_}" in
-			EXT4_FS|THERMAL|THERMAL_OF|MTK_THERMAL|MTK_LVTS_THERMAL|HWMON|PWM|PWM_MEDIATEK|SENSORS_PWM_FAN|NVMEM|NVMEM_MTK_EFUSE|CPU_FREQ|CPU_THERMAL|SPI|SPI_MASTER|SPI_MT65XX|STAGING|FB|FB_DEVICE|BACKLIGHT_CLASS_DEVICE|BACKLIGHT_PWM|FRAMEBUFFER_CONSOLE|PANIC_ON_OOPS|WATCHDOG_PRETIMEOUT_GOV_PANIC|WATCHDOG_PRETIMEOUT_DEFAULT_GOV_PANIC) ;;
+			EXT4_FS|THERMAL|THERMAL_OF|MTK_THERMAL|MTK_LVTS_THERMAL|HWMON|PWM|PWM_MEDIATEK|SENSORS_PWM_FAN|NVMEM|NVMEM_MTK_EFUSE|CPU_FREQ|CPU_THERMAL|SPI|SPI_MASTER|SPI_MT65XX|STAGING|FB|FB_DEVICE|BACKLIGHT_CLASS_DEVICE|BACKLIGHT_PWM|FRAMEBUFFER_CONSOLE|PANIC_ON_OOPS|WATCHDOG_HANDLE_BOOT_ENABLED|WATCHDOG_NOWAYOUT|WATCHDOG_PRETIMEOUT_GOV_PANIC|WATCHDOG_PRETIMEOUT_DEFAULT_GOV_PANIC) ;;
 			*) remaining_modules+=("${option}") ;;
 		esac
 	done
@@ -69,6 +69,7 @@ function custom_kernel_config__edgepi_e87n_first_boot() {
 	opts_y+=(
 		ARCH_MEDIATEK OF PINCTRL_MT7987 COMMON_CLK_MT7987
 		REGULATOR_FIXED_VOLTAGE
+		WATCHDOG_HANDLE_BOOT_ENABLED
 		WATCHDOG MEDIATEK_WATCHDOG MFD_SYSCON NVMEM NVMEM_MTK_EFUSE
 		MMC MMC_BLOCK MMC_MTK PARTITION_ADVANCED EFI_PARTITION
 		SERIAL_8250 SERIAL_8250_CONSOLE SERIAL_8250_MT6577
@@ -86,9 +87,13 @@ function custom_kernel_config__edgepi_e87n_first_boot() {
 	# Do not hide a first-boot driver fault behind an automatic reset.  The
 	# factory watchdog may be left enabled, but its pretimeout governor must not
 	# turn a warning into a panic while the board is being brought up.
-	opts_n+=(PANIC_ON_OOPS WATCHDOG_PRETIMEOUT_GOV_PANIC WATCHDOG_PRETIMEOUT_DEFAULT_GOV_PANIC)
+	opts_n+=(PANIC_ON_OOPS WATCHDOG_NOWAYOUT WATCHDOG_PRETIMEOUT_GOV_PANIC WATCHDOG_PRETIMEOUT_DEFAULT_GOV_PANIC)
 	opts_y+=(WATCHDOG_PRETIMEOUT_GOV_NOOP WATCHDOG_PRETIMEOUT_DEFAULT_GOV_NOOP)
 	opts_val["PANIC_TIMEOUT"]="0"
+	# The factory U-Boot can leave the MTK watchdog running while Linux starts.
+	# Let the watchdog core take ownership and ping it before userspace exists;
+	# without this, a healthy kernel can be reset during early boot.
+	opts_val["WATCHDOG_OPEN_TIMEOUT"]="0"
 	# The serial console remains available; fbcon must not overwrite the dashboard.
 	# udev and modules-load load the board-specific SPI panel after rootfs is ready.
 	opts_m+=(FB_TFT FB_TFT_NV3007)

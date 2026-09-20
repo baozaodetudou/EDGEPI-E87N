@@ -31,7 +31,7 @@ ZONE = "/thermal-zones/cpu-thermal"
 REQUIRED_Y = """ARM64 ARCH_MEDIATEK OF PINCTRL_MT7987 COMMON_CLK_MT7987
 THERMAL THERMAL_OF MTK_THERMAL MTK_LVTS_THERMAL THERMAL_GOV_STEP_WISE
 THERMAL_DEFAULT_GOV_STEP_WISE PWM PWM_MEDIATEK HWMON SENSORS_PWM_FAN
-NVMEM NVMEM_MTK_EFUSE""".split()
+NVMEM NVMEM_MTK_EFUSE WATCHDOG_HANDLE_BOOT_ENABLED""".split()
 # Opt-in contract for rebuilt images; legacy releases remain auditable without
 # this flag. Names/select dependencies checked against the 6.18.51 headers'
 # drivers/md/Kconfig, drivers/md/persistent-data/Kconfig and net/xfrm/Kconfig.
@@ -83,6 +83,10 @@ def check_config(data, require_storage=False):
             raise Invalid("malformed config assignment: " + line)
     for key in REQUIRED_Y:
         require(options.get(key) == "y", "CONFIG_%s must be built-in (=y)" % key)
+    require(options.get("WATCHDOG_NOWAYOUT", "n") == "n",
+            "CONFIG_WATCHDOG_NOWAYOUT must be disabled for recoverable boot diagnostics")
+    require(options.get("WATCHDOG_OPEN_TIMEOUT") == "0",
+            "CONFIG_WATCHDOG_OPEN_TIMEOUT must be zero for kernel keepalive")
     require(options.get("CPU_FREQ") == "n", "CONFIG_CPU_FREQ must be explicitly disabled")
     # Kconfig may omit CPU_THERMAL entirely when its CPU_FREQ dependency is off.
     require(options.get("CPU_THERMAL", "n") == "n", "CONFIG_CPU_THERMAL must be disabled")

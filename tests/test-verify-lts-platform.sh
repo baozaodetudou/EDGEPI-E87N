@@ -30,9 +30,10 @@ FAN = "/pwm-fan"
 BUILTIN = """ARM64 ARCH_MEDIATEK OF PINCTRL_MT7987 COMMON_CLK_MT7987
 THERMAL THERMAL_OF MTK_THERMAL MTK_LVTS_THERMAL THERMAL_GOV_STEP_WISE
 THERMAL_DEFAULT_GOV_STEP_WISE PWM PWM_MEDIATEK HWMON SENSORS_PWM_FAN
-NVMEM NVMEM_MTK_EFUSE""".split()
+NVMEM NVMEM_MTK_EFUSE WATCHDOG_HANDLE_BOOT_ENABLED""".split()
 CONFIG = "# Linux/arm64 6.18.51 Kernel Configuration\n" + "".join(
     "CONFIG_%s=y\n" % name for name in BUILTIN) + (
+    "# CONFIG_WATCHDOG_NOWAYOUT is not set\nCONFIG_WATCHDOG_OPEN_TIMEOUT=0\n" +
     "# CONFIG_CPU_FREQ is not set\n# CONFIG_CPU_THERMAL is not set\n")
 STORAGE_Y = "MODULES BLOCK MD NET INET IPV6 XFRM CRYPTO DM_UEVENT".split()
 STORAGE_M = """BLK_DEV_DM DM_CRYPT DM_SNAPSHOT DM_THIN_PROVISIONING
@@ -258,6 +259,8 @@ with tempfile.TemporaryDirectory(prefix="e87n-lts-platform-tests.") as scratch:
     check("CPU_FREQ enabled", config=CONFIG.replace("# CONFIG_CPU_FREQ is not set", "CONFIG_CPU_FREQ=y"), error="CPU_FREQ")
     check("CPU_FREQ missing", config=CONFIG.replace("# CONFIG_CPU_FREQ is not set\n", ""), error="CPU_FREQ")
     check("CPU_THERMAL enabled", config=CONFIG.replace("# CONFIG_CPU_THERMAL is not set", "CONFIG_CPU_THERMAL=y"), error="CPU_THERMAL")
+    check("watchdog nowayout enabled", config=CONFIG.replace("# CONFIG_WATCHDOG_NOWAYOUT is not set", "CONFIG_WATCHDOG_NOWAYOUT=y"), error="WATCHDOG_NOWAYOUT")
+    check("watchdog open timeout finite", config=CONFIG.replace("CONFIG_WATCHDOG_OPEN_TIMEOUT=0", "CONFIG_WATCHDOG_OPEN_TIMEOUT=30"), error="WATCHDOG_OPEN_TIMEOUT")
     check("duplicate config symbol", config=CONFIG + "CONFIG_THERMAL=y\n", error="duplicate config symbol")
     check("malformed config", config=CONFIG + "CONFIG_BAD LINE\n", error="malformed config assignment")
     for symbol in BUILTIN:
