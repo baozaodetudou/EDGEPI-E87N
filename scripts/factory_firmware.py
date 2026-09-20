@@ -5,6 +5,7 @@ Reference: Yuzhii0718/bl-mt798x-dhcpd@4d5f0ffe02c5410c545bfb3f4112346877c75a72
 board/mediatek/common/{untar,mmc_helper}.c. Hardware acceptance remains separate.
 """
 import contextlib
+import fnmatch
 import gzip
 import hashlib
 import io
@@ -214,6 +215,79 @@ def module_name(path):
     return match[1].replace("-", "_")
 
 
+def audit_softdeps(base, names, builtins):
+    """Describe kmod's optional pre/post requests, never turn them into hard edges.
+
+    Alias targets may be modules or builtins. Unresolved requests are optional;
+    tokens preceding pre:/post: are ignored by kmod (e.g. candidate2's cifs
+    declarations). kmod selects the first matching declaration for each owner.
+    Binary-index resolution is independently checked by verify_module_indexes.
+    """
+    def alias_file(filename):
+        result = []
+        for line in regular(base / filename).read_text().splitlines():
+            words = line.split("#", 1)[0].split()
+            if not words:
+                continue
+            require(len(words) == 3 and words[0] == "alias", "invalid " + filename + " entry")
+            result.append((words[1], words[2].replace("-", "_")))
+        return result
+    aliases = alias_file("modules.alias")
+    symbols = alias_file("modules.symbols") if (base / "modules.symbols").exists() else []
+    builtin_aliases = []
+    builtin_info = base / "modules.builtin.modinfo"
+    if builtin_info.exists():
+        for record in regular(builtin_info).read_bytes().split(b"\0"):
+            name, separator, pattern = record.partition(b".alias=")
+            if separator:
+                builtin_aliases.append((pattern.decode("ascii"), name.decode("ascii").replace("-", "_")))
+
+    def matches(name, pattern):
+        return fnmatch.fnmatchcase(name.replace("-", "_"), pattern.replace("-", "_"))
+
+    def resolve(request):
+        name = request.replace("-", "_")
+        # Match kmod's first nonempty lookup source. In particular, candidate2
+        # aes resolves to aes_arm64, not also to the aes_generic builtin alias.
+        targets = {name} if name in names else set()
+        for source in (symbols, aliases):
+            if not targets:
+                targets = {target for pattern, target in source if matches(request, pattern)}
+        if not targets:
+            targets = {name} if name in builtins else {
+                target for pattern, target in builtin_aliases if matches(request, pattern)}
+        require(targets <= set(names) | builtins, "softdep alias points at missing module: " + request)
+        return {"request": request, "modules": sorted(targets & set(names)),
+                "builtins": sorted(targets & builtins), "optional_missing": not targets}
+
+    path = base / "modules.softdep"
+    if not path.exists():
+        return []
+    require(path.is_file() and not path.is_symlink() and path.stat().st_size <= CONTROL_LIMIT,
+            "invalid modules.softdep file")
+    records, selected = [], set()
+    for line in path.read_text().splitlines():
+        words = line.split("#", 1)[0].split()
+        if not words:
+            continue
+        require(len(words) >= 2 and words[0] == "softdep" and not line.endswith("\\"),
+                "invalid modules.softdep declaration")
+        owner = words[1]
+        owners = {name for name in set(names) | builtins if matches(name, owner)} - selected
+        selected.update(owners)
+        entry = {"owner": owner, "effective_for": sorted(owners), "pre": [], "post": [], "ignored": []}
+        section = None
+        for word in words[2:]:
+            if word in ("pre:", "post:"):
+                section = word[:-1]
+            elif section is None:
+                entry["ignored"].append(word)
+            else:
+                entry[section].append(resolve(word))
+        records.append(entry)
+    return records
+
+
 def audit_modules(root, config):
     base = rooted(root, "lib/modules/" + RELEASE)
     if not base.is_dir():
@@ -246,23 +320,7 @@ def audit_modules(root, config):
         for dependency in filter(None, info["depends"].replace("-", "_").split(",")):
             require(dependency in builtins or dependency in names and names[dependency] in deps[path],
                     "module metadata dependency missing from modules.dep: " + dependency)
-    # Include soft dependencies needed by modprobe (e.g. pre: crypto helpers).
-    softdep = base / "modules.softdep"
-    if softdep.exists():
-        for line in softdep.read_text().splitlines():
-            words = line.split("#", 1)[0].split()
-            if not words:
-                continue
-            require(len(words) >= 3 and words[0] == "softdep", "invalid modules.softdep")
-            owner = words[1].replace("-", "_")
-            require(owner in names or owner in builtins, "unknown softdep owner")
-            for dependency in words[2:]:
-                if dependency in ("pre:", "post:"):
-                    continue
-                dependency = dependency.replace("-", "_")
-                require(dependency in names or dependency in builtins, "missing soft dependency: " + dependency)
-                if owner in names and dependency in names:
-                    deps[names[owner]].add(names[dependency])
+    softdeps = audit_softdeps(base, names, builtins)
     for metadata in ("modules.alias", "modules.dep.bin", "modules.alias.bin"):
         regular(base / metadata)
     require(config.get("MEDIATEK_2P5GE_PHY") == "m" and config.get("MTK_NET_PHYLIB") in ("m", "y"),
@@ -274,6 +332,7 @@ def audit_modules(root, config):
     for name in deps:
         module_closure(deps, name)
     return {"tree": tree_record(base), "count": len(modules),
+            "softdeps": softdeps,
             "vermagic": next(iter(infos.values()))["vermagic"]}, deps
 
 
@@ -513,13 +572,29 @@ def verify_module_indexes(root, deps):
     base = rooted(root, "lib/modules/" + RELEASE)
     if not base.is_dir():
         base = rooted(root, "usr/lib/modules/" + RELEASE)
-    # kmod's --dirname is not chroot: an absolute /lib symlink in the image
-    # would otherwise resolve in the host. Only expose the already-resolved tree.
+    names = {module_name(path): path for path in deps}
+    builtins = {module_name(relative_path(line)) for line in regular(base / "modules.builtin").read_text().splitlines() if line}
+    softdeps = audit_softdeps(base, names, builtins)
+    # kmod's --dirname is not chroot. Expose the resolved tree through a
+    # private view without modules.softdep: optional pre/post requests must
+    # not inflate (or mask corruption in) the hard dependency index check.
     with tempfile.TemporaryDirectory(prefix="e87n-kmod-index-") as temporary:
         stage = Path(temporary).resolve()
         linked = stage / "lib/modules" / RELEASE
-        linked.parent.mkdir(parents=True)
-        linked.symlink_to(base, target_is_directory=True)
+        linked.mkdir(parents=True)
+        for item in base.iterdir():
+            if item.name != "modules.softdep":
+                (linked / item.name).symlink_to(item, target_is_directory=item.is_dir())
+        requests = {request["request"]: request for entry in softdeps for section in ("pre", "post")
+                    for request in entry[section]}
+        for request, resolution in sorted(requests.items()):
+            expected = set(resolution["modules"]) | set(resolution["builtins"])
+            result = subprocess.run(["modprobe", "--resolve-alias", "--config", "/dev/null",
+                                     "--dirname", str(stage), "--set-version", RELEASE, request],
+                                    capture_output=True, text=True, timeout=30, check=False)
+            actual = {name.replace("-", "_") for name in result.stdout.splitlines()}
+            require(actual == expected and (result.returncode == 0 or result.returncode == 1 and not expected),
+                    "softdep alias binary index mismatch: " + request)
         for module in sorted(deps):
             if module_name(module) not in ("mtk_2p5ge", "mtk_phy_lib"):
                 continue

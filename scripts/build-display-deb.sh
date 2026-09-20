@@ -73,7 +73,12 @@ install -m 0644 "$repo_dir/board-support/systemd/e87n-display.service" "$package
 install -m 0644 "$packaging_dir/copyright" "$packaging_dir/README.Debian" "$doc_dir/"
 
 sed "s/@VERSION@/$version/" "$packaging_dir/control" > "$package_root/DEBIAN/control"
-printf 'Installed-Size: %s\n' "$(du -sk "$package_root" | awk '{print $1}')" >> "$package_root/DEBIAN/control"
+# Estimate payload KiB from logical entries, not filesystem allocation. The
+# latter differs between Docker bind mounts and native ext4, changing otherwise
+# identical .deb files built by the independent image/display jobs.
+installed_kib=$(find "$package_root/etc" "$package_root/usr" -printf '%y %s\n' |
+  awk '$1 == "f" { n += int(($2 + 1023) / 1024); next } { n += 1 } END { print n }')
+printf 'Installed-Size: %s\n' "$installed_kib" >> "$package_root/DEBIAN/control"
 install -m 0644 "$packaging_dir/conffiles" "$package_root/DEBIAN/conffiles"
 for script in postinst prerm postrm; do
 	install -m 0755 "$packaging_dir/$script" "$package_root/DEBIAN/$script"

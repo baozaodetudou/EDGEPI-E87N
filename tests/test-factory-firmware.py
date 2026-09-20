@@ -34,10 +34,10 @@ verifier = load_script("verify-factory-firmware")
 UUID = "ee0d711d-5cce-4fa5-9425-50d0bcb26096"
 
 
-def module_elf(name, dependencies="", release=fw.RELEASE):
+def module_elf(name, dependencies="", release=fw.RELEASE, extra=""):
     """A genuine ELF64 section table/.modinfo, not a magic-only module placeholder."""
     names = b"\0.shstrtab\0.modinfo\0"
-    info = (f"name={name}\0vermagic={release} SMP mod_unload aarch64\0depends={dependencies}\0").encode()
+    info = (f"name={name}\0vermagic={release} SMP mod_unload aarch64\0depends={dependencies}\0" + extra).encode()
     header = struct.pack("<16sHHIQQQIHHHHHH", b"\x7fELF\x02\x01\x01" + bytes(9),
                          1, 183, 1, 0, 0, 64, 0, 64, 0, 0, 64, 3, 1)
     def section(name_offset, kind, start, size):
@@ -147,6 +147,66 @@ class EvidenceTests(unittest.TestCase):
         (self.base / self.lib).write_bytes(module_elf("mtk_phy_lib"))
         (self.base / "modules.dep").write_text(f"{self.phy}:\n{self.lib}:\n")
         with self.assertRaisesRegex(ValueError, "metadata dependency"):
+            fw.collect_evidence(self.root)
+
+    def test_actual_softdep_declarations_do_not_become_hard_dependencies(self):
+        # These lines are from candidate2. cifs lacks markers, aead2/nls are
+        # unresolved optional names, and crc32c names a builtin via an alias.
+        (self.base / "modules.softdep").write_text(
+            "softdep cifs aead2\n"
+            "softdep ksmbd pre: aead2 post: nls\n"
+            "softdep btrfs pre: blake2b-256\n"
+            "softdep btrfs pre: crc32c\n")
+        (self.base / "modules.alias").write_text("alias blake2b-256 mtk_phy_lib\n")
+        (self.base / "modules.builtin.modinfo").write_bytes(b"firmware_loader.alias=crc32c\0")
+        evidence, deps = fw.collect_evidence(self.root)
+        records = evidence["components"]["modules"]["softdeps"]
+        self.assertEqual(records[0]["ignored"], ["aead2"])
+        self.assertEqual(records[0]["pre"], [])
+        self.assertTrue(records[1]["pre"][0]["optional_missing"])
+        self.assertTrue(records[1]["post"][0]["optional_missing"])
+        self.assertEqual(records[2]["pre"][0]["modules"], ["mtk_phy_lib"])
+        self.assertEqual(records[3]["pre"][0]["builtins"], ["firmware_loader"])
+        self.assertEqual(deps[self.phy], {self.lib})
+        self.assertEqual(deps[self.lib], set())
+
+    def test_softdep_alias_priority_matches_kmod(self):
+        (self.base / "modules.softdep").write_text("softdep mtk_2p5ge pre: aes\n")
+        (self.base / "modules.alias").write_text("alias aes mtk_phy_lib\n")
+        (self.base / "modules.builtin.modinfo").write_bytes(b"firmware_loader.alias=aes\0")
+        evidence, _ = fw.collect_evidence(self.root)
+        request = evidence["components"]["modules"]["softdeps"][0]["pre"][0]
+        self.assertEqual(request["modules"], ["mtk_phy_lib"])
+        self.assertEqual(request["builtins"], [])
+
+    def test_softdep_first_matching_record_and_optional_cycles(self):
+        (self.base / "modules.softdep").write_text(
+            "softdep mtk_2p5ge pre: mtk_phy_lib\n"
+            "softdep mtk_2p5ge post: aead2\n"
+            "softdep mtk_phy_lib post: mtk_2p5ge\n")
+        evidence, deps = fw.collect_evidence(self.root)
+        records = evidence["components"]["modules"]["softdeps"]
+        self.assertEqual(records[0]["effective_for"], ["mtk_2p5ge"])
+        self.assertEqual(records[1]["effective_for"], [])
+        self.assertEqual(deps[self.lib], set())  # a soft cycle is not a hard cycle
+        prefix = "init\nscripts/local\nscripts/functions\n"
+        fw.audit_initrd_listing(prefix + "lib/modules/" + fw.RELEASE + "/" + self.lib, deps)
+
+    def test_optional_softdep_does_not_hide_a_missing_hard_dependency(self):
+        (self.base / "modules.softdep").write_text("softdep mtk_2p5ge pre: mtk_phy_lib\n")
+        (self.base / self.lib).unlink()
+        with self.assertRaisesRegex(ValueError, "missing module dependency"):
+            fw.collect_evidence(self.root)
+
+    def test_alias_with_missing_target_is_not_an_unresolved_optional_name(self):
+        (self.base / "modules.softdep").write_text("softdep mtk_2p5ge pre: crc32c\n")
+        (self.base / "modules.alias").write_text("alias crc32c missing_module\n")
+        with self.assertRaisesRegex(ValueError, "alias points at missing module"):
+            fw.collect_evidence(self.root)
+
+    def test_invalid_softdep_directive_still_fails(self):
+        (self.base / "modules.softdep").write_text("install mtk_2p5ge /bin/true\n")
+        with self.assertRaisesRegex(ValueError, "invalid modules.softdep"):
             fw.collect_evidence(self.root)
 
     def test_phy_hash_is_compared_to_reviewed_source_not_rootfs_claim(self):
@@ -269,6 +329,31 @@ class EvidenceTests(unittest.TestCase):
         with mock.patch.object(fw, "run", return_value=mock.Mock(stdout="")):
             with self.assertRaisesRegex(ValueError, "index/dependency"):
                 fw.verify_module_indexes(self.root, deps)
+
+    @unittest.skipUnless(shutil.which("depmod") and shutil.which("modprobe"), "requires Linux host kmod")
+    def test_real_kmod_alias_optional_softdeps_and_stale_alias_index(self):
+        (self.base / self.phy).write_bytes(module_elf("mtk_2p5ge", extra="softdep=pre: blake2b-256 aead2 crc32c\0"))
+        (self.base / self.lib).write_bytes(module_elf("mtk_phy_lib", extra="alias=blake2b-256\0"))
+        (self.base / "modules.builtin.modinfo").write_bytes(b"firmware_loader.alias=crc32c\0")
+        (self.root / "lib").unlink()
+        (self.root / "lib").symlink_to("usr/lib")
+        result = subprocess.run(["depmod", "--basedir", str(self.root), "-a", fw.RELEASE],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        evidence, deps = fw.collect_evidence(self.root)
+        self.assertEqual(deps[self.phy], set())
+        requests = evidence["components"]["modules"]["softdeps"][0]["pre"]
+        self.assertEqual(requests[0]["modules"], ["mtk_phy_lib"])
+        self.assertTrue(requests[1]["optional_missing"])
+        self.assertEqual(requests[2]["builtins"], ["firmware_loader"])
+        fw.verify_module_indexes(self.root, deps)
+        # Optional does not mean accepting an alias map/index inconsistency.
+        # Change the text alias target while retaining the previously generated
+        # binary index, then require the independent host-kmod gate to catch it.
+        path = self.base / "modules.alias"
+        path.write_text(path.read_text().replace("blake2b-256 mtk_phy_lib", "blake2b-256 mtk_2p5ge"))
+        with self.assertRaisesRegex(ValueError, "softdep alias binary index mismatch"):
+            fw.verify_module_indexes(self.root, deps)
 
     @unittest.skipUnless(shutil.which("depmod") and shutil.which("modprobe"), "requires Linux host kmod")
     def test_real_host_kmod_resolves_fixture_without_loading_it(self):

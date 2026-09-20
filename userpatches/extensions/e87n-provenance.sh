@@ -30,6 +30,7 @@ function pre_package_kernel_image__e87n_receipt() {
 import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -49,6 +50,17 @@ config_path = Path(tree) / ".config"
 patch_dir = Path(framework) / "userpatches/kernel/edgepi-e87n-6.18"
 patches = [{"path": str(p.relative_to(Path(framework) / "userpatches")),
             "sha256": digest(p)} for p in sorted(patch_dir.glob("*.patch"))]
+# Armbian applies patches without necessarily creating Git commits. HEAD's tree
+# therefore describes the base, not the compiled patched working tree.
+patched_paths = set()
+for patch in sorted(patch_dir.glob("*.patch")):
+    patched_paths.update(re.findall(r"^\+\+\+ b/(\S+)", patch.read_text(), re.M))
+patched_sources = {}
+for name in sorted(patched_paths):
+    actual = (Path(tree) / name).resolve(strict=True)
+    assert actual.is_relative_to(Path(tree).resolve()), "patch path escapes source tree"
+    patched_sources[name] = digest(actual)
+delta = subprocess.check_output(["git", "-C", tree, "diff", "--binary", base, "--"])
 receipt = {
     "schema": 1, "kernel_release": release,
     "kernel_source": config["kernel_source"], "kernel_commit": base,
@@ -58,8 +70,10 @@ receipt = {
     "recipe_sha256": source["recipe_sha256"],
     "patches": patches, "kernel_config_sha256": digest(config_path),
     "kernel_sha256": digest(image),
-    "patched_kernel_commit": git(tree, "rev-parse", "HEAD"),
-    "patched_kernel_tree": git(tree, "rev-parse", "HEAD^{tree}"),
+    "kernel_git_head": git(tree, "rev-parse", "HEAD"),
+    "kernel_base_tree": git(tree, "rev-parse", base + "^{tree}"),
+    "tracked_source_delta_sha256": hashlib.sha256(delta).hexdigest(),
+    "patched_source_files": patched_sources,
 }
 destination = Path(output)
 destination.parent.mkdir(parents=True, exist_ok=True)
