@@ -89,6 +89,9 @@ class RamdiagHelpersTest(unittest.TestCase):
         self.assertIn("check=False", source)
         self.assertIn("not a dynamic executable", source)
         self.assertIn('"usr/sbin/ip", "usr/bin/ip"', source)
+        self.assertIn("def char_device", source)
+        for node in ("dev/null", "dev/zero", "dev/random", "dev/urandom", "dev/console"):
+            self.assertIn(f'("{node}"', source)
 
     def test_variant_matrix_is_exactly_three_experiments(self):
         self.assertEqual(

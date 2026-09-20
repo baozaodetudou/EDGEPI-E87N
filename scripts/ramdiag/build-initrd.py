@@ -115,6 +115,21 @@ class InitrdTree:
         target.mkdir(parents=True, exist_ok=True)
         target.chmod(mode)
 
+    def char_device(self, relative: str, mode: int, major: int, minor: int) -> None:
+        """Create a minimal initrd device node needed by chroot-time tools.
+
+        Runtime boot mounts devtmpfs over ``/dev``.  These nodes are still
+        required while assembling and auditing the initrd: OpenSSH and a few
+        libc paths open ``/dev/null`` even for a configuration-only check.
+        Keeping the standard nodes in the cpio also makes the initrd usable
+        for the short interval before devtmpfs is mounted.
+        """
+        target = self.destination / relative.lstrip("/")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists() or target.is_symlink():
+            target.unlink()
+        os.mknod(target, stat.S_IFCHR | mode, os.makedev(major, minor))
+
 
 def parse_ldd(output: str) -> list[str]:
     paths: list[str] = []
@@ -275,6 +290,16 @@ def build(source_root: Path, boot: Path, output: Path) -> dict[str, object]:
                                 ("var/empty", 0o755), ("run/ssh", 0o700), ("run/sshd", 0o755),
                                 ("run/ramdiag", 0o755)):
             tree.mkdir(directory, mode)
+        # Linux standard device numbers.  These are hidden by devtmpfs at
+        # runtime but must exist for the chrooted sshd/configuration checks.
+        for name, mode, major, minor in (
+            ("dev/null", 0o666, 1, 3),
+            ("dev/zero", 0o666, 1, 5),
+            ("dev/random", 0o666, 1, 8),
+            ("dev/urandom", 0o666, 1, 9),
+            ("dev/console", 0o600, 5, 1),
+        ):
+            tree.char_device(name, mode, major, minor)
         write_system_files(tree)
         tree.write("init", (ASSETS / "init-network-first").read_bytes(), 0o755)
         tree.write("usr/lib/ramdiag/services", (ASSETS / "services").read_bytes(), 0o755)
