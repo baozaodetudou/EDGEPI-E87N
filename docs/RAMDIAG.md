@@ -236,7 +236,7 @@ resize2fs /dev/mmcblk0p5
 ```text
 Starting kernel ...
 Linux version 6.18.51...
-eth0/PHY link up
+eth0 or eth1 / PHY link up (the linked E87N MAC is selected at runtime)
 RAM diagnostic init entered
 eMMC disabled/absent
 RAMDIAG READY

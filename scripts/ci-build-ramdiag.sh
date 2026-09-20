@@ -93,6 +93,8 @@ E87N RAM-only diagnostics (not installation firmware)
 First test E87N-ramdiag-40000000-initrd.itb. It disables eMMC in its DTB,
 boots a custom initrd entirely from RAM, configures eth0 as 192.168.1.1,
 emits one-way UDP status to 192.168.1.2:6666, and starts root/doumao SSH.
-Do not upload these FIT files to any permanent firmware/upgrade field.
+The initrd probes eth0 and eth1, selects the linked E87N MAC device (mac@0 or
+mac@1), and assigns 192.168.1.1 to that interface. Do not upload these FIT
+files to any permanent firmware/upgrade field.
 EOF
 printf 'PASS: RAM-only diagnostic FIT matrix built in %s\n' "$output"

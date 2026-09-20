@@ -100,23 +100,35 @@ hostname e87n-ramdiag
 modprobe realtek || echo 'RAMDIAG WARN: realtek PHY module unavailable'
 modprobe mtk-2p5ge || echo 'RAMDIAG WARN: mtk-2p5ge PHY module unavailable'
 assert_no_mmc
+network_iface=
+network_node=
 attempt=0
-until [ -d /sys/class/net/eth0 ]; do
+while [ -z "$network_iface" ]; do
+    for iface in eth0 eth1; do
+        [ -d "/sys/class/net/$iface" ] || continue
+        ip link set "$iface" up 2>/dev/null || continue
+        carrier=$(cat "/sys/class/net/$iface/carrier" 2>/dev/null || echo 0)
+        [ "$carrier" = 1 ] || continue
+        node=$(readlink -f "/sys/class/net/$iface/of_node" 2>/dev/null) || continue
+        case "$node" in
+            */ethernet@15100000/mac@0|*/ethernet@15100000/mac@1)
+                network_iface=$iface
+                network_node=$node
+                break
+                ;;
+        esac
+    done
+    [ -n "$network_iface" ] && break
     attempt=$((attempt + 1))
-    [ "$attempt" -lt 30 ] || fail 'eth0 did not appear'
+    [ "$attempt" -lt 30 ] || fail 'no linked E87N Ethernet interface (eth0/eth1)'
     sleep 1
 done
-node=$(readlink -f /sys/class/net/eth0/of_node) || fail 'eth0 OF node unavailable'
-case "$node" in
-    */ethernet@15100000/mac@0) ;;
-    *) fail "unexpected eth0 OF node: $node" ;;
-esac
 printf '0\n' >/proc/sys/net/ipv4/ip_forward || fail 'cannot disable forwarding'
 ip link set lo up || fail loopback
-ip address add 192.168.1.1/24 dev eth0 || fail address
-ip link set eth0 up || fail link
+ip address add 192.168.1.1/24 dev "$network_iface" || fail address
+ip link set "$network_iface" up || fail link
 assert_no_mmc
-echo 'RAMDIAG READY: eth0=192.168.1.1 eMMC=disabled'
+echo "RAMDIAG READY: ${network_iface}=192.168.1.1 node=${network_node} eMMC=disabled"
 
 beacon_loop() {
     while :; do

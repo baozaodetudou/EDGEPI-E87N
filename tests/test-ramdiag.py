@@ -170,6 +170,14 @@ class RamdiagHelpersTest(unittest.TestCase):
         self.assertIn("service_pid=$!", init)
         self.assertNotIn("exec /bin/sh /usr/lib/ramdiag/services", init)
 
+    def test_init_selects_the_linked_e87n_ethernet_port(self):
+        init = (ROOT / "scripts/ramdiag/assets/init-network-first").read_text()
+        self.assertIn("for iface in eth0 eth1", init)
+        self.assertIn("/sys/class/net/$iface/carrier", init)
+        self.assertIn("mac@0|*/ethernet@15100000/mac@1", init)
+        self.assertIn('dev "$network_iface"', init)
+        self.assertIn("no linked E87N Ethernet interface (eth0/eth1)", init)
+
     def test_watchdog_helper_uses_disable_ioctl(self):
         helper = (ROOT / "scripts/ramdiag/assets/stop-watchdog.py").read_text()
         self.assertIn("WDIOC_SETOPTIONS", helper)
