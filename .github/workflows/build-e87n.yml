@@ -40,7 +40,9 @@ jobs:
             printf 'Only manual main-branch builds may publish.\n' >&2
             exit 1
           fi
-          release_tag="e87n-trixie-6.18.51-${GITHUB_RUN_ID}"
+          # Include the attempt so a GitHub Actions re-run never collides with
+          # a draft/tag left behind by an earlier attempt of the same run.
+          release_tag="e87n-trixie-6.18.51-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           python3 scripts/ci-publish-release.py preflight \
             --repository "$GITHUB_REPOSITORY" --source-commit "$GITHUB_SHA" --tag "$release_tag"
           printf 'release_tag=%s\n' "$release_tag" >> "$GITHUB_OUTPUT"

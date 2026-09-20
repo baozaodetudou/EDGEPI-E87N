@@ -87,7 +87,7 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertIn('"$GITHUB_REF" == refs/heads/main', preflight["run"])
         self.assertIn("ci-publish-release.py preflight", preflight["run"])
         self.assertEqual(preflight["env"], {"GH_TOKEN": "${{ github.token }}"})
-        self.assertIn('release_tag="e87n-trixie-6.18.51-${GITHUB_RUN_ID}"', preflight["run"])
+        self.assertIn('release_tag="e87n-trixie-6.18.51-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"', preflight["run"])
 
     def test_zero_input_tag_generation_and_preflight_failure(self):
         step = next(s for s in self.workflow["jobs"]["validate"]["steps"] if s.get("id") == "release_tag")
@@ -102,7 +102,8 @@ export -f python3
 ''')
             env = {**os.environ, "BASH_ENV": str(mocks), "GITHUB_EVENT_NAME": "workflow_dispatch",
                    "GITHUB_REF": "refs/heads/main", "GITHUB_SHA": "a" * 40,
-                   "GITHUB_REPOSITORY": "fixture/repo", "GIT_TERMINAL_PROMPT": "0",
+                   "GITHUB_REPOSITORY": "fixture/repo", "GITHUB_RUN_ATTEMPT": "1",
+                   "GIT_TERMINAL_PROMPT": "0",
                    "INPUT_RELEASE_TAG": "must-not-affect-tag", "E87N_PREFLIGHT_EXIT": "0"}
             # No real Python/GitHub command runs; check shell expansion and output propagation.
             for run_id in ("34737922588", "34737922589"):
@@ -111,7 +112,7 @@ export -f python3
                 result = subprocess.run(["bash", "-euo", "pipefail", "-c", step["run"]], env=env,
                                         text=True, capture_output=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                tag = "e87n-trixie-6.18.51-" + run_id
+                tag = "e87n-trixie-6.18.51-" + run_id + "-1"
                 self.assertEqual(output.read_text(), "release_tag=" + tag + "\n")
                 self.assertEqual(arguments.read_text().splitlines(), ["scripts/ci-publish-release.py", "preflight",
                     "--repository", "fixture/repo", "--source-commit", "a" * 40, "--tag", tag])
