@@ -37,7 +37,7 @@ RESERVATIONS = {"wmcpu-reserved@50000000": (0x50000000, 0x100000),
 def bootargs(root_uuid):
     return ("console=ttyS0,115200n8 earlycon=uart8250,mmio32,0x11000000 "
             f"root=UUID={root_uuid} rootwait rootfstype=ext4 rw "
-            "fsck.repair=yes net.ifnames=0 consoleblank=0")
+            "fsck.repair=yes net.ifnames=0 consoleblank=0 panic=0")
 
 
 def require(value, message):

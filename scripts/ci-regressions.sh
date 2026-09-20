@@ -40,6 +40,7 @@ run_fixture verify-system sudo -n python3 -B tests/test-verify-system.py
 run_fixture display-package sudo -n python3 -B tests/test-display-package.py
 run_fixture factory-firmware sudo -n python3 -B tests/test-factory-firmware.py
 run_fixture factory-rootfs sudo -n python3 -B tests/test-factory-rootfs.py
+run_fixture ramdiag python3 -B tests/test-ramdiag.py
 run_fixture board-hook bash tests/test-board-config.sh --hook-only
 for suite in launcher lima-launcher verify-artifacts verify-initramfs verify-image \
 	verify-lts-platform collect-board-evidence; do

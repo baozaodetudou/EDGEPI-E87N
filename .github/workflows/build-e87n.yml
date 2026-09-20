@@ -46,13 +46,17 @@ jobs:
           printf 'release_tag=%s\n' "$release_tag" >> "$GITHUB_OUTPUT"
       - name: Install validation tools
         run: |
-          sudo -n apt-get update
-          sudo -n apt-get install -y --no-install-recommends \
-            gcc shellcheck python3-yaml python3-pil fonts-dejavu-core device-tree-compiler \
-            u-boot-tools e2fsprogs util-linux python3 initramfs-tools-core fdisk \
-            patch zstd xz-utils dpkg-dev init-system-helpers python3-minimal libcrypt1
-          GOBIN="$RUNNER_TEMP/e87n-tools" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
-          echo "$RUNNER_TEMP/e87n-tools" >> "$GITHUB_PATH"
+          mkdir -p output/ci/logs
+          set -o pipefail
+          {
+            sudo -n apt-get update
+            sudo -n apt-get install -y --no-install-recommends \
+              gcc shellcheck python3-yaml python3-pil fonts-dejavu-core device-tree-compiler \
+              u-boot-tools e2fsprogs util-linux python3 initramfs-tools-core fdisk \
+              patch zstd xz-utils dpkg-dev init-system-helpers python3-minimal libcrypt1 cpio
+            GOBIN="$RUNNER_TEMP/e87n-tools" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+            echo "$RUNNER_TEMP/e87n-tools" >> "$GITHUB_PATH"
+          } 2>&1 | tee output/ci/logs/validation-tools.log
       - name: Validate workflow and CI helpers without building
         run: |
           mkdir -p output/ci/logs
@@ -60,12 +64,19 @@ jobs:
       - name: Run userspace, auditor and isolated package regressions
         timeout-minutes: 10
         run: bash scripts/ci-regressions.sh
+      - name: Capture validation failure evidence
+        if: ${{ always() }}
+        env:
+          BUILD_OUTCOME: ${{ job.status }}
+        run: bash scripts/ci-capture-failure-evidence.sh validate "$BUILD_OUTCOME"
       - name: Upload validation log
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: e87n-validation-${{ github.run_id }}-${{ github.run_attempt }}
-          path: output/ci/logs/
+          path: |
+            output/ci/logs/
+            output/ci/failure-evidence/
           if-no-files-found: warn
           retention-days: 14
 
@@ -129,6 +140,11 @@ jobs:
         id: build
         timeout-minutes: 10
         run: bash scripts/ci-build.sh display
+      - name: Capture display failure evidence
+        if: ${{ always() }}
+        env:
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+        run: bash scripts/ci-capture-failure-evidence.sh display "$BUILD_OUTCOME"
       - name: Collect package, checksums and logs
         if: ${{ always() }}
         env:
@@ -148,7 +164,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: e87n-display-logs-${{ github.run_id }}-${{ github.run_attempt }}
-          path: output/ci/logs/
+          path: |
+            output/ci/logs/
+            output/ci/failure-evidence/
           if-no-files-found: warn
           retention-days: 14
 
@@ -176,6 +194,11 @@ jobs:
         # Reserve time for hashing and uploads below, including build failures.
         timeout-minutes: 285
         run: bash scripts/ci-build.sh image
+      - name: Capture image failure evidence
+        if: ${{ always() }}
+        env:
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+        run: bash scripts/ci-capture-failure-evidence.sh image "$BUILD_OUTCOME"
       - name: Collect firmware tar, packages, checksums and build evidence
         if: ${{ always() }}
         timeout-minutes: 15
@@ -204,6 +227,7 @@ jobs:
           name: e87n-image-logs-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             output/ci/logs/
+            output/ci/failure-evidence/
             source/armbian-build/output/logs/
           if-no-files-found: warn
           retention-days: 14

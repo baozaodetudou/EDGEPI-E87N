@@ -71,7 +71,7 @@ def verify(path, headless=False):
             run(sys.executable, SCRIPTS / "verify-display-fan.py", "--rootfs", root,
                 "--config", boot / ("config-" + RELEASE), "--dtb", dtb)
         run("bash", SCRIPTS / "verify-lts-platform.sh", "--config", boot / ("config-" + RELEASE), "--dtb", dtb)
-    print("PASS: E87N firmware TAR, FIT hashes/load bounds, 1 GiB DTB, ext4 UUID, original-partition contract,")
+    print("PASS: E87N firmware TAR, FIT hashes/load bounds, 1 GiB DTB, ext4 UUID, panic=0 bring-up mode,")
     print("      %s verified. Hardware boot and recovery test still pending." %
           ("headless system and thermal/fan configuration" if headless else "minimal system/display/fan files"))
 

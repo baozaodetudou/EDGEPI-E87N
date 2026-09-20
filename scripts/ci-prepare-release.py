@@ -20,6 +20,16 @@ REPO = Path(__file__).resolve().parents[1]
 TARGET = {"debian": "13", "release": "trixie", "kernel": "6.18.51", "extra_storage": "no"}
 CHUNK = 1024 * 1024
 MAX_ENTRIES = 10000
+RAMDIAG_FILES = frozenset({
+    "E87N-ramdiag-40000000-initrd.itb",
+    "E87N-ramdiag-40000000-initrd.itb.json",
+    "E87N-ramdiag-40000000-no-initrd.itb",
+    "E87N-ramdiag-40000000-no-initrd.itb.json",
+    "E87N-ramdiag-40080000-initrd.itb",
+    "E87N-ramdiag-40080000-initrd.itb.json",
+    "MANIFEST.json",
+    "README.txt",
+})
 
 
 def require(condition, message):
@@ -94,7 +104,8 @@ def unique_object(pairs):
 def namespaces(kind):
     result = {"logs/ci": (".log", ".exit-code", ".txt")}
     if kind == "image":
-        result.update({"images": (".tar",), "packages/armbian": (".deb",),
+        result.update({"images": (".tar",), "diagnostics": (".itb", ".json", ".txt"),
+                       "packages/armbian": (".deb",),
                        "logs/armbian": (".log", ".txt", ".html", ".json", ".gz", ".xz", ".zst")})
     else:
         result["packages/display"] = (".deb",)
@@ -160,6 +171,10 @@ def validate(root, kind, args, version):
     packages = sorted(n for n in files if n.startswith("packages/"))
     require(packages and all((root / n).stat().st_size for n in images + packages), "missing or empty payload")
     if kind == "image":
+        diagnostics = {name.removeprefix("diagnostics/") for name in files
+                       if name.startswith("diagnostics/")}
+        require(diagnostics == RAMDIAG_FILES,
+                "incomplete RAM diagnostic matrix")
         require(len(images) == 1, "expected exactly one factory firmware .tar (collision or missing payload)")
         audit_name = "logs/ci/factory-firmware-audit-1.log"
         require(audit_name in files, "missing required factory firmware audit log")

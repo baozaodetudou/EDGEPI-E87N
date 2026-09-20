@@ -16,6 +16,16 @@ import sys
 
 REPO = Path(__file__).resolve().parents[1]
 DEST = REPO / "output/ci/artifacts"
+RAMDIAG_FILES = frozenset({
+    "E87N-ramdiag-40000000-initrd.itb",
+    "E87N-ramdiag-40000000-initrd.itb.json",
+    "E87N-ramdiag-40000000-no-initrd.itb",
+    "E87N-ramdiag-40000000-no-initrd.itb.json",
+    "E87N-ramdiag-40080000-initrd.itb",
+    "E87N-ramdiag-40080000-initrd.itb.json",
+    "MANIFEST.json",
+    "README.txt",
+})
 
 
 def contained_path(path):
@@ -70,6 +80,31 @@ def collect_tree(source, directory, suffixes, errors):
     return count
 
 
+def check_ramdiag_shape(source, errors):
+    """Require the complete top-level diagnostic matrix on successful builds."""
+    try:
+        contained_path(source)
+        if not source.is_dir():
+            errors.append("RAM diagnostic output is not a directory")
+            return
+        actual = set()
+        for entry in source.iterdir():
+            if entry.name.startswith("."):
+                continue
+            if entry.is_symlink() or not entry.is_file():
+                errors.append("RAM diagnostic output contains a non-regular entry: " + entry.name)
+                continue
+            actual.add(entry.name)
+        if actual != RAMDIAG_FILES:
+            missing = sorted(RAMDIAG_FILES - actual)
+            unexpected = sorted(actual - RAMDIAG_FILES)
+            errors.append(
+                "incomplete RAM diagnostic matrix; missing=%s unexpected=%s" %
+                (missing, unexpected))
+    except (OSError, ValueError) as error:
+        errors.append(str(error))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--kind", choices=("image", "display"), required=True)
@@ -83,20 +118,29 @@ def main():
     if args.kind == "image":
         output = REPO / "source/armbian-build/output"
         counts["images"] = collect_tree(REPO / "output/ci/firmware", "images", (".tar",), errors)
+        ramdiag = REPO / "output/ci/ramdiag"
+        counts["diagnostics"] = collect_tree(ramdiag, "diagnostics", (".itb", ".json", ".txt"), errors)
+        if args.status == "success":
+            check_ramdiag_shape(ramdiag, errors)
         counts["packages"] = collect_tree(output / "debs", "packages/armbian", (".deb",), errors)
         counts["framework_logs"] = collect_tree(output / "logs", "logs/armbian", (".log", ".txt", ".html", ".json", ".gz", ".xz", ".zst"), errors)
     else:
         counts["packages"] = collect_tree(REPO / "output/ci/display-debs", "packages/display", (".deb",), errors)
     counts["ci_logs"] = collect_tree(REPO / "output/ci/logs", "logs/ci", (".log", ".exit-code", ".txt"), errors)
+    counts["failure_evidence"] = collect_tree(
+        REPO / "output/ci/failure-evidence", "logs/failure", (".log", ".exit-code", ".txt", ".json", ".tail"), errors)
 
     factory_audit_passed = False
     if args.status == "success":
-        for required in (("images", "packages") if args.kind == "image" else ("packages",)):
-            if not counts[required]:
-                errors.append("successful build is missing " + required)
+        required_names = ("images", "packages", "diagnostics") if args.kind == "image" else ("packages",)
+        for name in required_names:
+            if not counts[name]:
+                errors.append("successful build is missing " + name)
         if args.kind == "image":
             if counts["images"] != 1:
                 errors.append("successful build requires exactly one factory firmware .tar")
+            if counts["diagnostics"] != len(RAMDIAG_FILES):
+                errors.append("successful build requires the complete RAM diagnostic matrix")
             try:
                 with contained_path(DEST / "logs/ci/factory-firmware-audit-1.log").open("rb") as audit:
                     factory_audit_passed = any(line.strip() == b"PASS" or

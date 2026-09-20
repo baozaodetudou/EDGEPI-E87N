@@ -54,14 +54,14 @@ function custom_kernel_config__edgepi_e87n_first_boot() {
 	local -a remaining_builtin=()
 	for option in "${opts_y[@]}"; do
 		case "${option#CONFIG_}" in
-			CPU_FREQ|CPU_THERMAL|FRAMEBUFFER_CONSOLE) ;;
+			CPU_FREQ|CPU_THERMAL|FRAMEBUFFER_CONSOLE|PANIC_ON_OOPS|WATCHDOG_PRETIMEOUT_GOV_PANIC|WATCHDOG_PRETIMEOUT_DEFAULT_GOV_PANIC) ;;
 			*) remaining_builtin+=("${option}") ;;
 		esac
 	done
 	opts_y=("${remaining_builtin[@]}")
 	for option in "${opts_m[@]}"; do
 		case "${option#CONFIG_}" in
-			EXT4_FS|THERMAL|THERMAL_OF|MTK_THERMAL|MTK_LVTS_THERMAL|HWMON|PWM|PWM_MEDIATEK|SENSORS_PWM_FAN|NVMEM|NVMEM_MTK_EFUSE|CPU_FREQ|CPU_THERMAL|SPI|SPI_MASTER|SPI_MT65XX|STAGING|FB|FB_DEVICE|BACKLIGHT_CLASS_DEVICE|BACKLIGHT_PWM|FRAMEBUFFER_CONSOLE) ;;
+			EXT4_FS|THERMAL|THERMAL_OF|MTK_THERMAL|MTK_LVTS_THERMAL|HWMON|PWM|PWM_MEDIATEK|SENSORS_PWM_FAN|NVMEM|NVMEM_MTK_EFUSE|CPU_FREQ|CPU_THERMAL|SPI|SPI_MASTER|SPI_MT65XX|STAGING|FB|FB_DEVICE|BACKLIGHT_CLASS_DEVICE|BACKLIGHT_PWM|FRAMEBUFFER_CONSOLE|PANIC_ON_OOPS|WATCHDOG_PRETIMEOUT_GOV_PANIC|WATCHDOG_PRETIMEOUT_DEFAULT_GOV_PANIC) ;;
 			*) remaining_modules+=("${option}") ;;
 		esac
 	done
@@ -83,6 +83,12 @@ function custom_kernel_config__edgepi_e87n_first_boot() {
 	)
 	# No validated MT7987 voltage/OPP data: retain the firmware CPU rate.
 	opts_n+=(CPU_FREQ CPU_THERMAL FRAMEBUFFER_CONSOLE)
+	# Do not hide a first-boot driver fault behind an automatic reset.  The
+	# factory watchdog may be left enabled, but its pretimeout governor must not
+	# turn a warning into a panic while the board is being brought up.
+	opts_n+=(PANIC_ON_OOPS WATCHDOG_PRETIMEOUT_GOV_PANIC WATCHDOG_PRETIMEOUT_DEFAULT_GOV_PANIC)
+	opts_y+=(WATCHDOG_PRETIMEOUT_GOV_NOOP WATCHDOG_PRETIMEOUT_DEFAULT_GOV_NOOP)
+	opts_val["PANIC_TIMEOUT"]="0"
 	# The serial console remains available; fbcon must not overwrite the dashboard.
 	# udev and modules-load load the board-specific SPI panel after rootfs is ready.
 	opts_m+=(FB_TFT FB_TFT_NV3007)

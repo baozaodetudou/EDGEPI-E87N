@@ -46,7 +46,8 @@ fi
 # Reject stale products before invoking the existing launcher. Hosted jobs use
 # fresh checkouts; retaining these directories makes a failed manual retry clear.
 [[ ! -e source/armbian-build/output && ! -L source/armbian-build/output &&
-   ! -e output/ci/firmware && ! -L output/ci/firmware ]] || {
+   ! -e output/ci/firmware && ! -L output/ci/firmware &&
+   ! -e output/ci/ramdiag && ! -L output/ci/ramdiag ]] || {
 	printf 'FAIL: existing Armbian or firmware output; use a fresh job, do not reuse candidates\n' >&2
 	exit 1
 }
@@ -79,6 +80,12 @@ xz -dc -- "$candidate" > "$audit_dir/candidate.img"
 sudo -n bash scripts/verify-image.sh --release trixie --require-usb-root \
 	--headless --require-system "$audit_dir/candidate.img" \
 	2>&1 | tee output/ci/logs/image-audit-1.log
+
+# Build a disposable RAM-only network/SSH diagnostic matrix from the same
+# image. This proves the FIT hand-off and early userspace without touching the
+# production firmware TAR or any board storage.
+sudo -n bash scripts/ci-build-ramdiag.sh \
+	--image "$audit_dir/candidate.img" --output-dir "$repo_dir/output/ci/ramdiag"
 
 image_basename=${candidate##*/}
 firmware_output="$repo_dir/output/ci/firmware/${image_basename%.img.xz}-uboot-firmware.tar"

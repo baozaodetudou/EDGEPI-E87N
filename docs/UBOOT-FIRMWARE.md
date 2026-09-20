@@ -78,6 +78,8 @@ R4 独立最终审计已检查以下约束并 EXIT 0：拒绝 FIT `loadables`、
 
 匹配的厂商参考源码中，plain firmware 类型 `fw` 解析 TAR 后，**先向 p5 `rootfs` 写入 `root`，再向 p4 `kernel` 写入 FIT `kernel`**。厂商路径还会在 root payload 末尾之后擦除 **512 KiB**；因此验收必须计入尾部擦除范围，不能只比较 root 文件大小与分区容量。这个过程不是原子更新，中途掉电仍可能留下不匹配的 kernel/root。
 
+当前实验版 FIT 的生产 bootargs 明确包含 `panic=0`。这不是把系统问题隐藏掉：它的作用是在首轮硬件验收时让内核 panic 停在现场，避免没有串口证据时自动循环重启。若后续确认硬件稳定，再单独评估是否恢复自动重启策略。
+
 该路径仅涉及 p5 和 p4，不写 GPT、p1 环境、p2 factory、p3 FIP 或 boot0/boot1；不能替换为 SIMG、GPT、FIP 或 bootloader 更新入口。这是匹配参考源码的行为范围，尚未通过本机实际刷写验证。Web 字段属于原厂 U-Boot 恢复页，不是正在运行的 OpenWrt LuCI。
 
 原盘大小为 **15269888 个 512 字节扇区**，已读到的布局如下：

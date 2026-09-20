@@ -1,0 +1,67 @@
+#!/bin/sh
+# PID 1 for the E87N RAM-only network diagnostic.  The FIT DTB disables the
+# eMMC controller, and this init never mounts or writes a block device.
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=C PYTHONDONTWRITEBYTECODE=1
+umask 077
+fail() { echo "RAMDIAG FAIL: $*" >&2; while :; do sleep 60; done; }
+[ "$$" = 1 ] || exit 1
+
+mount -t proc -o nosuid,nodev,noexec proc /proc || fail proc
+mount -t sysfs -o ro,nosuid,nodev,noexec sysfs /sys || fail sysfs
+mount -t devtmpfs -o nosuid,noexec,mode=0755 devtmpfs /dev || fail devtmpfs
+mount -t tmpfs -o nosuid,nodev,noexec,mode=0755,size=64m tmpfs /run || fail run
+mount -t tmpfs -o nosuid,nodev,noexec,mode=1777,size=32m tmpfs /tmp || fail tmp
+mkdir -p /run/ramdiag /run/ssh /run/sshd || fail directories
+chmod 0755 /run/sshd
+exec </dev/console >/dev/console 2>&1
+
+echo 'RAMDIAG STAGE init entered; pseudo-filesystems ready'
+[ ! -e /sys/class/block/mmcblk0 ] || fail 'unexpected eMMC block device'
+[ "$(tr -d '\000' </sys/firmware/devicetree/base/soc/mmc@11230000/status)" = disabled ] ||
+    fail 'eMMC DT is not disabled'
+hostname e87n-ramdiag
+
+# The MTK watchdog may be handed over already armed by firmware.  A RAM-only
+# test must not reboot merely because the diagnostic intentionally has no
+# production watchdog service.  The helper is best-effort and records its
+# result in RAM; failure is visible but does not hide the boot evidence.
+/usr/bin/python3 -I /usr/lib/ramdiag/stop-watchdog.py \
+    >/run/ramdiag/watchdog.log 2>&1 ||
+    echo 'RAMDIAG WARN: could not disable watchdog' >&2
+
+modprobe realtek || echo 'RAMDIAG WARN: realtek PHY module unavailable'
+modprobe mtk-2p5ge || echo 'RAMDIAG WARN: mtk-2p5ge PHY module unavailable'
+attempt=0
+until [ -d /sys/class/net/eth0 ]; do
+    attempt=$((attempt + 1))
+    [ "$attempt" -lt 30 ] || fail 'eth0 did not appear'
+    sleep 1
+done
+node=$(readlink -f /sys/class/net/eth0/of_node) || fail 'eth0 OF node unavailable'
+case "$node" in
+    */ethernet@15100000/mac@0) ;;
+    *) fail "unexpected eth0 OF node: $node" ;;
+esac
+printf '0\n' >/proc/sys/net/ipv4/ip_forward || fail 'cannot disable forwarding'
+ip link set lo up || fail loopback
+ip address add 192.168.1.1/24 dev eth0 || fail address
+ip link set eth0 up || fail link
+echo 'RAMDIAG READY: eth0=192.168.1.1 eMMC=disabled'
+
+/usr/bin/python3 -I /usr/lib/ramdiag/beacon.py >/run/ramdiag/beacon.log 2>&1 &
+
+# Never exec the service shell from PID 1.  An sshd implementation may
+# re-exec itself and an old diagnostic did exactly that; when it later exited,
+# Linux treated the exit as "Attempted to kill init" and panicked.  Keeping the
+# supervisor as PID 1 makes service failures observable and recoverable.
+echo 'RAMDIAG SUPERVISOR: PID 1 retained; starting service shell'
+/bin/sh /usr/lib/ramdiag/services </dev/console >/dev/console 2>&1 &
+service_pid=$!
+while :; do
+    if ! kill -0 "$service_pid" 2>/dev/null; then
+        echo 'RAMDIAG WARN: service shell exited; restarting it' >&2
+        /bin/sh /usr/lib/ramdiag/services </dev/console >/dev/console 2>&1 &
+        service_pid=$!
+    fi
+    sleep 5
+done

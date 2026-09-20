@@ -66,6 +66,11 @@ class WorkflowPolicy(unittest.TestCase):
         steps = jobs["image"]["steps"]
         build = next(step for step in steps if step.get("id") == "build")
         self.assertLess(int(build["timeout-minutes"]), int(jobs["image"]["timeout-minutes"]) - 45)
+        ramdiag = (REPO / "scripts/ci-build.sh").read_text()
+        self.assertIn("scripts/ci-build-ramdiag.sh", ramdiag)
+        ramdiag_builder = (REPO / "scripts/ci-build-ramdiag.sh").read_text()
+        self.assertIn('ramdiag_source="$work/ramdiag"', ramdiag_builder)
+        self.assertIn("ln -s init-network-first", ramdiag_builder)
 
     def test_release_is_manual_main_only_after_all_success(self):
         job = self.workflow["jobs"]["release"]
@@ -146,13 +151,35 @@ export -f python3
             collect = next(s for s in steps if "ci-collect-artifacts.py" in s.get("run", ""))
             self.assertEqual(collect["if"], "${{ always() }}")
             self.assertIn("steps.build.outcome", collect["env"]["BUILD_OUTCOME"])
+            evidence = next(s for s in steps if "ci-capture-failure-evidence.sh" in s.get("run", ""))
+            self.assertEqual(evidence["if"], "${{ always() }}")
+            self.assertIn("steps.build.outcome", evidence["env"]["BUILD_OUTCOME"])
+            log_upload = [s for s in steps if s.get("uses", "").startswith("actions/upload-artifact@")
+                          and "failure-evidence" in s["with"].get("path", "")]
+            self.assertEqual(len(log_upload), 1)
+
+    def test_validation_failure_evidence(self):
+        steps = self.workflow["jobs"]["validate"]["steps"]
+        evidence = next(s for s in steps if "ci-capture-failure-evidence.sh" in s.get("run", ""))
+        self.assertEqual(evidence["if"], "${{ always() }}")
+        self.assertIn("job.status", evidence["env"]["BUILD_OUTCOME"])
+        self.assertIn("output/ci/failure-evidence/", next(
+            s for s in steps if s.get("uses", "").startswith("actions/upload-artifact@")
+        )["with"]["path"])
+        capture = (REPO / "scripts/ci-capture-failure-evidence.sh").read_text()
+        self.assertIn("validate|image|display", capture)
+
+    def test_failure_evidence_is_collected(self):
+        collector = (REPO / "scripts/ci-collect-artifacts.py").read_text()
+        self.assertIn('"failure_evidence"', collector)
+        self.assertIn('"logs/failure"', collector)
 
     def test_factory_firmware_dependencies(self):
         install = next(s["run"] for s in self.workflow["jobs"]["validate"]["steps"]
                        if s.get("name") == "Install validation tools")
         runner = (REPO / "scripts/ci-prepare-runner.sh").read_text()
         for package in ("u-boot-tools", "e2fsprogs", "util-linux", "device-tree-compiler", "python3",
-                        "initramfs-tools-core", "fdisk", "libcrypt1"):
+                        "initramfs-tools-core", "fdisk", "libcrypt1", "cpio"):
             with self.subTest(package=package):
                 self.assertIn(package, install.split())
                 self.assertIn(package, runner.split())
@@ -169,6 +196,8 @@ export -f python3
             self.assertIn(name, validate)
         for suite in ("factory-firmware", "factory-rootfs"):
             self.assertIn(f'run_fixture {suite} sudo -n python3 -B tests/test-{suite}.py', regressions)
+        self.assertIn('run_fixture ramdiag python3 -B tests/test-ramdiag.py', regressions)
+        self.assertIn('scripts/ramdiag/*.py', validate)
 
     def test_firmware_candidate_upload_does_not_compress_again(self):
         upload = next(s for s in self.workflow["jobs"]["image"]["steps"]
@@ -183,8 +212,10 @@ class Fixtures(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         (self.root / "scripts").mkdir()
-        for name in ("ci-build.sh", "ci-collect-artifacts.py", "ci-prepare-runner.sh", "ci-validate.sh"):
+        for name in ("ci-build.sh", "ci-build-ramdiag.sh", "ci-collect-artifacts.py",
+                     "ci-prepare-runner.sh", "ci-validate.sh"):
             shutil.copyfile(REPO / "scripts" / name, self.root / "scripts" / name)
+        shutil.copytree(REPO / "scripts/ramdiag", self.root / "scripts/ramdiag")
         self.env = {**os.environ, "GITHUB_SHA": "fixture-commit", "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "2"}
         self.env["RUNNER_TEMP"] = str(self.root)
         for key in list(self.env):
@@ -212,6 +243,7 @@ class Fixtures(unittest.TestCase):
         source = 'raise AssertionError("factory code must only be compiled here")\n'
         for name in names:
             self.put(name, source)
+        self.put("tests/test-ramdiag.py", (REPO / "tests/test-ramdiag.py").read_text())
         for name in ("test-ci-workflow.py", "test-ci-prepare-release.py", "test-ci-publish-release.py"):
             self.put("tests/" + name, "pass\n")
         mocks = self.put("validation-mocks.sh", '''actionlint() { return 0; }
@@ -251,6 +283,19 @@ sudo() {
         printf '%s\\n' "$@" > audit-args
         printf 'fixture audit result\\n'
         return "${E87N_MOCK_AUDIT_EXIT:-0}"
+    fi
+    if [[ $1 == -n && $2 == bash && $3 == scripts/ci-build-ramdiag.sh ]]; then
+        printf 'ramdiag-build\\n' >> build-events
+        mkdir -p "$7"
+        printf 'fixture diagnostic\\n' > "$7/E87N-ramdiag-40000000-initrd.itb"
+        printf '{}\\n' > "$7/E87N-ramdiag-40000000-initrd.itb.json"
+        printf 'fixture diagnostic\\n' > "$7/E87N-ramdiag-40080000-initrd.itb"
+        printf '{}\\n' > "$7/E87N-ramdiag-40080000-initrd.itb.json"
+        printf 'fixture diagnostic\\n' > "$7/E87N-ramdiag-40000000-no-initrd.itb"
+        printf '{}\\n' > "$7/E87N-ramdiag-40000000-no-initrd.itb.json"
+        printf 'fixture manifest\\n' > "$7/MANIFEST.json"
+        printf 'fixture readme\\n' > "$7/README.txt"
+        return "${E87N_MOCK_RAMDIAG_EXIT:-0}"
     fi
     [[ $1 == -n && $2 == python3 ]] || return 99
     case $3 in
@@ -303,7 +348,7 @@ export -f uname sudo xz dpkg-deb
         self.assertEqual(firmware.read_text(), "fixture firmware")
         self.assertEqual((self.root / "source/armbian-build/output/images/test.img.xz").read_text(), "fixture image")
         self.assertEqual((self.root / "build-events").read_text().splitlines(),
-                         ["image-audit", "firmware-build", "firmware-audit"])
+                         ["image-audit", "ramdiag-build", "firmware-build", "firmware-audit"])
         self.assertIn("PASS", (self.root / "output/ci/logs/factory-firmware-audit-1.log").read_text())
         self.put("source/armbian-build/output/debs/kernel.deb")
         result = self.collect("image", "success")
@@ -312,6 +357,7 @@ export -f uname sudo xz dpkg-deb
         self.assertEqual(metadata["factory_format"], "e87n-uboot-firmware-tar-v1")
         self.assertEqual(metadata["factory_static_audit"], "passed")
         self.assertEqual(metadata["files_collected"]["images"], 1)
+        self.assertEqual(metadata["files_collected"]["diagnostics"], 8)
         self.assertEqual([p.name for p in (self.root / "output/ci/artifacts/images").iterdir()], [firmware.name])
 
     def test_audit_failure_marks_build_and_collection_failed(self):
@@ -417,6 +463,22 @@ export -f uname sudo xz dpkg-deb
         self.assertNotEqual(self.run_script("ci-build.sh", "image").returncode, 0)
         self.assertEqual(sentinel.read_text(), "keep me")
         self.assertFalse((self.root / "image-args").exists())
+
+    def test_stale_ramdiag_output_is_preserved_and_rejected(self):
+        self.prepare_mocks()
+        sentinel = self.put("output/ci/ramdiag/old.itb", "keep me")
+        self.assertNotEqual(self.run_script("ci-build.sh", "image").returncode, 0)
+        self.assertEqual(sentinel.read_text(), "keep me")
+        self.assertFalse((self.root / "image-args").exists())
+
+    def test_successful_collection_requires_exact_ramdiag_matrix(self):
+        self.prepare_mocks()
+        self.assertEqual(self.run_script("ci-build.sh", "image").returncode, 0)
+        (self.root / "output/ci/ramdiag/README.txt").unlink()
+        self.put("source/armbian-build/output/debs/kernel.deb")
+        result = self.collect("image", "success")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("incomplete RAM diagnostic matrix", result.stdout)
 
     def test_failed_image_collection_and_checksums(self):
         image = self.put("output/ci/firmware/candidate-uboot-firmware.tar", "partial firmware")

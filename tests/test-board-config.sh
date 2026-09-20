@@ -74,7 +74,8 @@ module_conflicts=(
 	EXT4_FS NVMEM NVMEM_MTK_EFUSE HWMON THERMAL THERMAL_OF
 	MTK_THERMAL MTK_LVTS_THERMAL PWM PWM_MEDIATEK SENSORS_PWM_FAN
 )
-disabled_options=(CPU_FREQ CPU_THERMAL FRAMEBUFFER_CONSOLE)
+disabled_options=(CPU_FREQ CPU_THERMAL FRAMEBUFFER_CONSOLE PANIC_ON_OOPS
+	WATCHDOG_PRETIMEOUT_GOV_PANIC WATCHDOG_PRETIMEOUT_DEFAULT_GOV_PANIC)
 # Independent expectations, not obtained from the board's option lists.
 storage_builtins=(
 	MODULES BLOCK MD NET INET IPV6 XFRM CRYPTO DM_UEVENT
@@ -283,6 +284,11 @@ for mode in default no yes; do
 				NF_TABLES=m NFT_CT=m NFT_NAT=m WIREGUARD=m; do
 				[[ $'\n'"$current_config"$'\n' == *$'\n'"CONFIG_$setting"$'\n'* ]] ||
 					exit_with_error 'Essential/base capability changed' "$setting" "$mode" "$scenario"
+			done
+			for setting in WATCHDOG_PRETIMEOUT_GOV_NOOP=y WATCHDOG_PRETIMEOUT_DEFAULT_GOV_NOOP=y \
+				PANIC_TIMEOUT=0; do
+				[[ $'\n'"$current_config"$'\n' == *$'\n'"CONFIG_$setting"$'\n'* ]] ||
+					exit_with_error 'Bring-up observability setting changed' "$setting" "$mode" "$scenario"
 			done
 			printf 'PASS: first-boot hook %s / %s, pass %s\n' "$mode" "$scenario" "$pass"
 		done

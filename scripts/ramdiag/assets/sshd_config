@@ -1,0 +1,15 @@
+Port 22
+ListenAddress 192.168.1.1
+Protocol 2
+HostKey /run/ssh/ssh_host_ed25519_key
+PidFile /run/sshd.pid
+PermitRootLogin yes
+PasswordAuthentication yes
+KbdInteractiveAuthentication no
+PubkeyAuthentication no
+UsePAM no
+UseDNS no
+StrictModes no
+PermitEmptyPasswords no
+AllowUsers root
+LogLevel VERBOSE

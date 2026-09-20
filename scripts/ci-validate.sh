@@ -12,7 +12,8 @@ shellcheck scripts/ci-*.sh
 python3 -B - scripts/ci-*.py scripts/build-factory-firmware.py \
 	scripts/verify-factory-firmware.py scripts/factory_firmware.py \
 	scripts/prepare-factory-rootfs.py board-support/factory-boot/factory_boot.py \
-	tests/test-ci-*.py tests/test-factory-firmware.py tests/test-factory-rootfs.py <<'PY'
+	scripts/ramdiag/*.py tests/test-ci-*.py tests/test-ramdiag.py \
+	tests/test-factory-firmware.py tests/test-factory-rootfs.py <<'PY'
 from pathlib import Path
 import sys
 

@@ -40,6 +40,17 @@ class ReleasePreparation(unittest.TestCase):
                 self.put("image-job/source/armbian-build/output/logs/build.log.xz", b"fake compressed log")
                 self.put("image-job/output/ci/logs/image-audit-1.log", "fake static audit passed\n")
                 self.put("image-job/output/ci/logs/factory-firmware-audit-1.log", "PASS: static factory firmware audit\n")
+                for name in (
+                    "E87N-ramdiag-40000000-initrd.itb",
+                    "E87N-ramdiag-40080000-initrd.itb",
+                    "E87N-ramdiag-40000000-no-initrd.itb",
+                    "E87N-ramdiag-40000000-initrd.itb.json",
+                    "E87N-ramdiag-40080000-initrd.itb.json",
+                    "E87N-ramdiag-40000000-no-initrd.itb.json",
+                    "MANIFEST.json",
+                    "README.txt",
+                ):
+                    self.put(f"image-job/output/ci/ramdiag/{name}", "fixture diagnostic\n")
                 self.put("image-job/source/armbian-build/output/images/candidate.img.xz", b"internal raw GPT build product")
             else:
                 self.put(f"display-job/output/ci/display-debs/{DEB}", b"fake independent package, not a deb")
@@ -153,6 +164,12 @@ class ReleasePreparation(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         with tarfile.open(self.output / "kernel-packages.tar.xz") as bundle:
             self.assertIn("packages/armbian/kernel_1.0~rc1.deb", bundle.getnames())
+
+    def test_incomplete_ramdiag_matrix_is_rejected(self):
+        readme = self.root / "image/diagnostics/README.txt"
+        readme.unlink()
+        self.manifest("image")
+        self.rejected("incomplete RAM diagnostic matrix")
 
     def test_failed_or_absent_success(self):
         for kind in ("image", "display"):
