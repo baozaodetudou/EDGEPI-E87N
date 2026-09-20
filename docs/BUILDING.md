@@ -1,5 +1,11 @@
 # 构建 E87N Armbian
 
+> 2026-09-20 已开始切换到维护中的 Frank-W MT7987 内核。当前版本、来源和包名以
+> `userpatches/config/e87n-build.json` 为唯一配置；容器/模拟测试见
+> [CONTAINER-TESTING.md](CONTAINER-TESTING.md)，完成条件见
+> [REFACTOR-ACCEPTANCE.md](REFACTOR-ACCEPTANCE.md)。下面的 6.18.51、旧提交与 R4
+> 打包记录是历史流程，不能作为本轮 6.18.52 构建完成或测试成功的依据。
+
 当前配方采用 [DEFAULTS.md](DEFAULTS.md) 定义的 headless 最小系统：`root` / `doumao`、SSH 22 密码登录、networkd/netplan DHCP、`Asia/Shanghai`、`zh_CN.UTF-8` 和正常 APT。显示包单独构建发布，暂不在基础镜像中自动加载。没有首次创建用户向导或强制公钥门槛，额外存储模块默认 `E87N_EXTRA_STORAGE=no`。
 
 当前交付为[原厂 U-Boot 未压缩 USTAR 固件](UBOOT-FIRMWARE.md)，Armbian `.img` / `.img.xz` 只作中间产物或历史证据，不可刷写。R4 本地已生成并独立审计 EXIT 0；R4 重新打包历史 Actions 34737922588 的原始 RAW，修正 DTB 的 1 GiB/保留区及 bootargs（含 902 等效修正），没有完整重编 Armbian 或内核。V3 因内核地址修正已废弃，主机导出及 SHA-256 比对已完成。没有 E87N 重启、刷写、完整恢复备份、已实测控制通道或板上 RAM 测试记录。

@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/baozaodetudou/EDGEPI-E87N/testing/artifact-result.schema.json",
+  "title": "E87N container QEMU validation result",
+  "type": "object",
+  "required": ["schema_version", "status", "artifacts", "guest", "hardware_exemptions", "binding"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "status": {"enum": ["PASS", "FAIL"]},
+    "artifacts": {
+      "type": "object",
+      "required": ["firmware_tar", "firmware_tar_sha256", "fit_sha256", "root_sha256", "display_deb_sha256"],
+      "properties": {
+        "firmware_tar": {"type": "string", "minLength": 1},
+        "firmware_tar_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "fit_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "root_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "display_deb_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "guest": {
+      "type": "object",
+      "required": ["kernel_release", "debian_version", "systemd_pid1", "dhcp", "dns", "timezone", "locale", "minimal", "persistence", "first_login", "ssh", "apt", "warm_reboot", "cold_reboot", "host_keys", "display_package"],
+      "properties": {
+        "kernel_release": {"type": "string"},
+        "debian_version": {"type": "string"},
+        "systemd_pid1": {"const": true},
+        "dhcp": {"const": true},
+        "dns": {"const": true},
+        "timezone": {"const": true},
+        "locale": {"const": true},
+        "minimal": {"const": true},
+        "persistence": {"const": true},
+        "first_login": {"const": true},
+        "ssh": {"const": true},
+        "apt": {"const": true},
+        "warm_reboot": {"const": true},
+        "cold_reboot": {"const": true},
+        "host_keys": {"const": true},
+        "display_package": {"const": true}
+      },
+      "additionalProperties": false
+    },
+    "hardware_exemptions": {
+      "type": "array",
+      "minItems": 2,
+      "items": {"type": "object", "required": ["unit", "reason"], "properties": {"unit": {"type": "string"}, "reason": {"type": "string"}}, "additionalProperties": false}
+    },
+    "binding": {
+      "type": "object",
+      "required": ["source_commit", "run_id", "run_attempt"],
+      "properties": {
+        "source_commit": {"type": ["string", "null"]},
+        "run_id": {"type": ["string", "null"]},
+        "run_attempt": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

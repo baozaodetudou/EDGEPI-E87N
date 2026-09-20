@@ -7,7 +7,7 @@ export GIT_TERMINAL_PROMPT=0
 # No checkout/patch/build is performed here. Existing caches are never replaced.
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 framework_dir="$repo_dir/source/armbian-build"
-framework_pin=7c1bb29eb0e7bd75b0703d86fe654b2680e646da
+framework_pin=$(python3 "$repo_dir/scripts/build_config.py" armbian_commit)
 [[ $# -le 1 ]] || { printf 'Usage: %s [current]\n' "$0" >&2; exit 2; }
 BRANCH=${1:-current}
 [[ "$BRANCH" == current ]] || { printf 'E87N supports the current LTS track only\n' >&2; exit 2; }

@@ -13,10 +13,21 @@ fail() { log_line "RAMDIAG FAIL: $*"; while :; do sleep 60; done; }
 mounted_type() {
     target=$1
     filesystem=$2
-    while read -r _ _ mountpoint type _; do
-        [ "$mountpoint" = "$target" ] && [ "$type" = "$filesystem" ] && return 0
-    done </proc/mounts
+    mount_table=${3:-/proc/mounts}
+    # /proc/mounts fields are: source mountpoint filesystem options dump pass.
+    # The final read variable consumes the remaining fields, so the second and
+    # third variables stay aligned with mountpoint and filesystem type.
+    while read -r _ mountpoint mount_type _; do
+        [ "$mountpoint" = "$target" ] &&
+            [ "$mount_type" = "$filesystem" ] && return 0
+    done <"$mount_table"
     return 1
+}
+
+read_carrier() {
+    carrier_value=0
+    IFS= read -r carrier_value <"$1" 2>/dev/null || :
+    printf '%s\n' "$carrier_value"
 }
 
 mount_or_existing() {
@@ -107,7 +118,7 @@ while [ -z "$network_iface" ]; do
     for iface in eth0 eth1; do
         [ -d "/sys/class/net/$iface" ] || continue
         ip link set "$iface" up 2>/dev/null || continue
-        carrier=$(cat "/sys/class/net/$iface/carrier" 2>/dev/null || echo 0)
+        carrier=$(read_carrier "/sys/class/net/$iface/carrier")
         [ "$carrier" = 1 ] || continue
         node=$(readlink -f "/sys/class/net/$iface/of_node" 2>/dev/null) || continue
         case "$node" in

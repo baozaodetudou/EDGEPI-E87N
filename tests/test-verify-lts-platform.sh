@@ -16,8 +16,10 @@ for name in ("dtc", "fdtget", "fdtput"):
     if not shutil.which(name):
         sys.exit("FAIL: host %s is required for synthetic fixture tests" % name)
 
-ETH = "/soc/ethernet@15100000"
+ETH = "/soc_netsys/ethernet@15100000"
 SGMII = "/soc_clksys/syscon@10060000"
+PCS = SGMII + "/pcs"
+GIC = "/soc/interrupt-controller@c000000"
 TOP = "/soc_clksys/topckgen@1001b000"
 INFRA = "/soc_clksys/infracfg@10001000"
 WDT = "/soc/watchdog@1001c000"
@@ -27,11 +29,12 @@ EFUSE = "/soc/efuse@11d30000"
 ZONE = "/thermal-zones/cpu-thermal"
 FAN = "/pwm-fan"
 # Expectations are independent: do not import/execute the validator's Python.
-BUILTIN = """ARM64 ARCH_MEDIATEK OF PINCTRL_MT7987 COMMON_CLK_MT7987
+BUILTIN = """ARM64 ARCH_MEDIATEK OF PINCTRL_MT7987 COMMON_CLK_MT7987 COMMON_CLK_MT7987_ETHSYS
+VIRTIO VIRTIO_BLK VIRTIO_NET VIRTIO_MMIO SERIAL_AMBA_PL011 SERIAL_AMBA_PL011_CONSOLE
 THERMAL THERMAL_OF MTK_THERMAL MTK_LVTS_THERMAL THERMAL_GOV_STEP_WISE
 THERMAL_DEFAULT_GOV_STEP_WISE PWM PWM_MEDIATEK HWMON SENSORS_PWM_FAN
 NVMEM NVMEM_MTK_EFUSE WATCHDOG_HANDLE_BOOT_ENABLED""".split()
-CONFIG = "# Linux/arm64 6.18.51 Kernel Configuration\n" + "".join(
+CONFIG = "# Linux/arm64 6.18.52 Kernel Configuration\n" + "".join(
     "CONFIG_%s=y\n" % name for name in BUILTIN) + (
     "# CONFIG_WATCHDOG_NOWAYOUT is not set\nCONFIG_WATCHDOG_OPEN_TIMEOUT=0\n" +
     "# CONFIG_CPU_FREQ is not set\n# CONFIG_CPU_THERMAL is not set\n")
@@ -49,6 +52,7 @@ DTS = r'''
 /dts-v1/;
 / {
     compatible = "edgepi,e87n", "mediatek,mt7987a", "mediatek,mt7987";
+    interrupt-parent = <&gic>;
     cpus { cpu@0 { device_type = "cpu"; }; cpu@1 { device_type = "cpu"; }; };
     soc_clksys {
         top: topckgen@1001b000 {
@@ -62,14 +66,22 @@ DTS = r'''
         sgmii: syscon@10060000 {
             compatible = "mediatek,mt7987-sgmiisys0", "syscon";
             #clock-cells = <1>; phandle = <3>;
-            clock-names = "sgmii_sel", "sgmii_tx", "sgmii_rx";
-            clocks = <&top 55>, <&sgmii 0>, <&sgmii 1>;
             resets = <&wdt 1>; mediatek,phya_trx_ck;
+            pcs: pcs {
+                compatible = "mediatek,mt7987-sgmii";
+                #pcs-cells = <0>; phandle = <12>;
+                clock-names = "sgmii_sel", "sgmii_tx", "sgmii_rx";
+                clocks = <&top 55>, <&sgmii 0>, <&sgmii 1>;
+            };
         };
     };
     soc {
+        gic: interrupt-controller@c000000 {
+            compatible = "arm,gic-v3"; #interrupt-cells = <3>;
+            interrupt-controller; phandle = <13>;
+        };
         wdt: watchdog@1001c000 {
-            compatible = "mediatek,mt7987-wdt";
+            compatible = "mediatek,mt7988-wdt";
             #reset-cells = <1>; phandle = <4>;
         };
         pwm: pwm@10048000 {
@@ -80,16 +92,18 @@ DTS = r'''
             compatible = "mediatek,mt7987-lvts-ap";
             #thermal-sensor-cells = <1>; phandle = <6>; status = "okay";
             clocks = <&infra 25>; resets = <&infra 1>;
+            interrupts = <0 138 4>;
             nvmem-cells = <&calib>; nvmem-cell-names = "lvts-calib-data-1";
         };
         efuse@11d30000 {
             compatible = "mediatek,efuse";
             calib: calib@918 { reg = <0x918 0x10>; phandle = <7>; };
         };
+    };
+    soc_netsys {
         ethernet@15100000 {
             compatible = "mediatek,mt7987-eth"; status = "okay";
-            mediatek,sgmiisys = <&sgmii>;
-            mac@0 { reg = <0>; phy-mode = "2500base-x"; };
+            mac@0 { reg = <0>; phy-mode = "2500base-x"; pcs-handle = <&pcs>; };
             mac@1 { reg = <1>; phy-mode = "internal"; };
         };
     };
@@ -177,34 +191,37 @@ with tempfile.TemporaryDirectory(prefix="e87n-lts-platform-tests.") as scratch:
     def delete(node, prop):
         return ("delete", node, prop, ())
 
-    check("valid 6.18.51 DTB/config")
+    check("valid 6.18.52 DTB/config")
     if len(sys.argv) == 3:
         check("supplied real config with SYNTHETIC DTB (not real platform validation)",
               config=Path(sys.argv[2]).read_text())
     elif len(sys.argv) != 2:
         sys.exit("usage: test-verify-lts-platform.sh [FINAL_CONFIG]")
     check("hidden CPU_THERMAL omitted", config=CONFIG.replace("# CONFIG_CPU_THERMAL is not set\n", ""))
-    check("valid localversion header", config=CONFIG.replace("6.18.51", "6.18.51-current-filogic"))
+    check("valid localversion header", config=CONFIG.replace("6.18.52", "6.18.52-current-edgepi-e87n"))
     check("valid mixed-case symbol", config=CONFIG + "CONFIG_MT76x02_LIB=m\n# CONFIG_MT76x0U is not set\n")
     check("invalid mixed-case value", config=CONFIG + "CONFIG_MT76x02_LIB=banana\n", error="malformed config assignment")
     check("valid typed Kconfig values", config=CONFIG + 'CONFIG_TEST_HEX=0x100\nCONFIG_TEST_INT=-1\nCONFIG_TEST_STRING="hello world"\n')
-    check("clock order may follow clock-names", [strings(SGMII, "clock-names", "sgmii_rx", "sgmii_sel", "sgmii_tx"),
-                                              cells(SGMII, "clocks", 3, 1, 1, 55, 3, 0)])
+    check("clock order may follow clock-names", [strings(PCS, "clock-names", "sgmii_rx", "sgmii_sel", "sgmii_tx"),
+                                              cells(PCS, "clocks", 3, 1, 1, 55, 3, 0)])
     check("nonzero alternative polling", [cells(ZONE, "polling-delay", 2000)])
     check("wrong board", [strings("/", "compatible", "another,board")], error="wrong compatible")
-    check("legacy PCS handle anywhere", [cells(ETH + "/mac@0", "pcs-handle", 3)], error="legacy pcs-handle")
+    check("legacy PCS list rejected", [cells(ETH, "mediatek,sgmiisys", 3)], error="legacy Ethernet PCS")
     check("legacy CPU OPP", [cells("/cpus/cpu@0", "operating-points", 1000000, 900000)], error="OPP property")
     check("CPU OPPv2", [cells("/cpus/cpu@0", "operating-points-v2", 9)], error="OPP property")
     check("orphan OPP table", [("create", "/opp-table", "", ()),
                               strings("/opp-table", "compatible", "operating-points-v2")], error="OPP table")
-    check("missing PCS list", [delete(ETH, "mediatek,sgmiisys")], error="missing")
-    check("wrong PCS target", [cells(ETH, "mediatek,sgmiisys", 1)], error="MAC0 slot")
-    check("dangling PCS target", [cells(ETH, "mediatek,sgmiisys", 999)], error="unresolved phandle")
-    check("extra PCS slot", [cells(ETH, "mediatek,sgmiisys", 3, 3)], error="MAC0 slot")
-    check("missing named clock", [strings(SGMII, "clock-names", "sgmii_sel", "sgmii_tx")], error="three named clocks")
-    check("duplicate clock name", [strings(SGMII, "clock-names", "sgmii_sel", "sgmii_tx", "sgmii_tx")], error="three named clocks")
-    check("wrong clock ID", [cells(SGMII, "clocks", 1, 54, 3, 0, 3, 1)], error="clock names/providers/IDs")
-    check("truncated clock cells", [cells(SGMII, "clocks", 1, 55, 3, 0, 3)], error="truncated/invalid")
+    check("missing PCS handle", [delete(ETH + "/mac@0", "pcs-handle")], error="missing")
+    check("wrong PCS target", [cells(ETH + "/mac@0", "pcs-handle", 1)], error="missing")
+    check("dangling PCS target", [cells(ETH + "/mac@0", "pcs-handle", 999)], error="unresolved phandle")
+    check("extra PCS slot", [cells(ETH + "/mac@0", "pcs-handle", 12, 12)], error="sgmiipcs0 provider")
+    check("wrong PCS cell count", [cells(PCS, "#pcs-cells", 1)], error="#pcs-cells")
+    check("disabled PCS", [strings(PCS, "status", "disabled")], error="disabled/unavailable")
+    check("disabled netsys", [strings("/soc_netsys", "status", "disabled")], error="disabled/unavailable")
+    check("missing named clock", [strings(PCS, "clock-names", "sgmii_sel", "sgmii_tx")], error="three named clocks")
+    check("duplicate clock name", [strings(PCS, "clock-names", "sgmii_sel", "sgmii_tx", "sgmii_tx")], error="three named clocks")
+    check("wrong clock ID", [cells(PCS, "clocks", 1, 54, 3, 0, 3, 1)], error="clock names/providers/IDs")
+    check("truncated clock cells", [cells(PCS, "clocks", 1, 55, 3, 0, 3)], error="truncated/invalid")
     check("missing clock provider cells", [delete(TOP, "#clock-cells")], error="missing")
     check("disabled clock ancestor", [strings("/soc_clksys", "status", "disabled")], error="disabled/unavailable")
     check("missing PCS reset", [delete(SGMII, "resets")], error="missing")
@@ -227,9 +244,12 @@ with tempfile.TemporaryDirectory(prefix="e87n-lts-platform-tests.") as scratch:
     check("zero passive polling", [cells(ZONE, "polling-delay-passive", 0)], error="polling-delay-passive must be nonzero")
     check("missing polling", [delete(ZONE, "polling-delay")], error="missing")
     check("passive polling slower than normal", [cells(ZONE, "polling-delay-passive", 2000)], error="must not exceed")
-    check("LVTS interrupts", [cells(LVTS, "interrupts", 0, 42, 4)], error="must not declare IRQ")
-    check("LVTS extended interrupts", [cells(LVTS, "interrupts-extended", 4, 42)], error="must not declare IRQ")
-    check("empty LVTS IRQ property", [cells(LVTS, "interrupts")], error="must not declare IRQ")
+    check("LVTS interrupts", [cells(LVTS, "interrupts", 0, 42, 4)], error="SPI 138 level-high IRQ")
+    check("LVTS extended interrupts", [cells(LVTS, "interrupts-extended", 4, 42)], error="SPI 138 level-high IRQ")
+    check("empty LVTS IRQ property", [cells(LVTS, "interrupts")], error="SPI 138 level-high IRQ")
+    check("missing LVTS IRQ", [delete(LVTS, "interrupts")], error="missing")
+    check("wrong LVTS interrupt provider", [cells(LVTS, "interrupt-parent", 4)], error="SoC GIC")
+    check("wrong GIC cells", [cells(GIC, "#interrupt-cells", 2)], error="three interrupt cells")
     check("disabled LVTS", [strings(LVTS, "status", "disabled")], error="disabled/unavailable")
     check("wrong LVTS sensor", [cells(ZONE, "thermal-sensors", 6, 1)], error="LVTS sensor 0")
     check("missing calibration reference", [delete(LVTS, "nvmem-cells")], error="missing")
@@ -253,7 +273,7 @@ with tempfile.TemporaryDirectory(prefix="e87n-lts-platform-tests.") as scratch:
     check("non-cell PWM value", [("bx", FAN, "pwms", ("01",))], error="non-cell property")
     check("unterminated compatible", [("bx", "/", "compatible", ("65", "64"))], error="unterminated string")
     check("corrupt DTB", data=b"not a DTB", error="fdtget failed")
-    check("wrong kernel series", config=CONFIG.replace("6.18.51", "6.12.109"), error="6.18.x")
+    check("wrong kernel series", config=CONFIG.replace("6.18.52", "6.12.109"), error="6.18.x")
     check("wrong architecture", config=CONFIG.replace("Linux/arm64", "Linux/x86"), error="Linux/arm64")
     check("header missing", config=CONFIG.split("\n", 1)[1], error="Configuration header")
     check("CPU_FREQ enabled", config=CONFIG.replace("# CONFIG_CPU_FREQ is not set", "CONFIG_CPU_FREQ=y"), error="CPU_FREQ")

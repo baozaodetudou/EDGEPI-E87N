@@ -7,6 +7,8 @@ mkdir -p "$test_dir/source/armbian-build/.git" "$test_dir/source/armbian-build/u
 cp "$repo_dir/build.sh" "$repo_dir/build-armbian.sh" "$test_dir/"
 mkdir -p "$test_dir/scripts" "$test_dir/patches"
 cp "$repo_dir/scripts/prepare-framework.sh" "$test_dir/scripts/"
+cp "$repo_dir/scripts/build_config.py" "$test_dir/scripts/"
+cp "$repo_dir/scripts/write-build-provenance.py" "$test_dir/scripts/"
 cp "$repo_dir/scripts/build-display-deb.sh" "$test_dir/scripts/"
 cp -a "$repo_dir/packaging" "$test_dir/packaging"
 cp -a "$repo_dir/patches/armbian-build" "$test_dir/patches/"
@@ -42,6 +44,8 @@ docker() {
 }
 export -f uname docker git
 export test_dir
+export E87N_SOURCE_COMMIT=1111111111111111111111111111111111111111
+export E87N_SOURCE_DIRTY=true
 
 bash "$test_dir/build.sh" kernel TEST_MARKER=passed
 grep -qx kernel "$test_dir/docker-args"

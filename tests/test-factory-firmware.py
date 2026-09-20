@@ -6,11 +6,14 @@ import importlib.util
 import io
 import json
 import lzma
+import gzip
 from pathlib import Path
 import struct
 import sys
 import tarfile
 import tempfile
+import shutil
+import subprocess
 import unittest
 from unittest import mock
 
@@ -29,6 +32,285 @@ builder = load_script("build-factory-firmware")
 verifier = load_script("verify-factory-firmware")
 
 UUID = "ee0d711d-5cce-4fa5-9425-50d0bcb26096"
+
+
+def module_elf(name, dependencies="", release=fw.RELEASE):
+    """A genuine ELF64 section table/.modinfo, not a magic-only module placeholder."""
+    names = b"\0.shstrtab\0.modinfo\0"
+    info = (f"name={name}\0vermagic={release} SMP mod_unload aarch64\0depends={dependencies}\0").encode()
+    header = struct.pack("<16sHHIQQQIHHHHHH", b"\x7fELF\x02\x01\x01" + bytes(9),
+                         1, 183, 1, 0, 0, 64, 0, 64, 0, 0, 64, 3, 1)
+    def section(name_offset, kind, start, size):
+        return struct.pack("<IIQQQQIIQQ", name_offset, kind, 0, 0, start, size, 0, 0, 1, 0)
+    return header + bytes(64) + section(1, 3, 256, len(names)) + section(11, 1, 256 + len(names), len(info)) + names + info
+
+
+def cpio_fixture(files):
+    result = bytearray()
+    for number, (name, data) in enumerate([*files, ("TRAILER!!!", b"")], 1):
+        fields = [number, 0o100644, 0, 0, 1, 0, len(data), 0, 0, 0, 0, len(name.encode()) + 1, 0]
+        result += b"070701" + "".join(f"{value:08x}" for value in fields).encode() + name.encode() + b"\0"
+        result += bytes((-len(result)) % 4)
+        result += data
+        result += bytes((-len(result)) % 4)
+    return bytes(result)
+
+
+class EvidenceTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="e87n-evidence-")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+        self.base = self.root / "usr/lib/modules" / fw.RELEASE
+        self.phy = "kernel/drivers/net/phy/mediatek/mtk-2p5ge.ko"
+        self.lib = "kernel/drivers/net/phy/mediatek/mtk-phy-lib.ko"
+        self.write("usr/lib/modules/" + fw.RELEASE + "/" + self.phy, module_elf("mtk_2p5ge", "mtk_phy_lib"))
+        self.write("usr/lib/modules/" + fw.RELEASE + "/" + self.lib, module_elf("mtk_phy_lib"))
+        (self.root / "lib").symlink_to("/usr/lib")
+        for name, data in {"modules.dep": f"{self.phy}: {self.lib}\n{self.lib}:\n",
+                           "modules.builtin": "kernel/drivers/base/firmware_loader.ko\n",
+                           "modules.alias": "alias mdio:fixture mtk_2p5ge\n",
+                           "modules.dep.bin": "index fixture", "modules.alias.bin": "index fixture"}.items():
+            self.write("usr/lib/modules/" + fw.RELEASE + "/" + name, data.encode())
+        config = "# Linux/arm64 " + fw.BUILD["kernel_version"] + " Kernel Configuration\n"
+        config += "".join("CONFIG_" + name + "=y\n" for name in
+                          "ARM64 MODULES MMC MMC_BLOCK MMC_MTK EFI_PARTITION EXT4_FS BLK_DEV_INITRD DEVTMPFS FW_LOADER RD_GZIP RD_XZ RD_ZSTD".split())
+        config += "CONFIG_MEDIATEK_2P5GE_PHY=m\nCONFIG_MTK_NET_PHYLIB=m\n"
+        kernel = bytes(56) + b"ARM\x64" + b"\0Linux version " + fw.RELEASE.encode() + b" (builder)\0"
+        self.write("boot/config-" + fw.RELEASE, config.encode())
+        self.write("boot/vmlinuz-" + fw.RELEASE, kernel)
+        self.write("boot/initrd.img-" + fw.RELEASE, b"initrd bytes bound separately")
+        self.write("boot/dtb-" + fw.RELEASE + "/mediatek/mt7987a-edgepi-e87n.dtb", b"dtb bytes bound separately")
+        self.write("etc/debian_version", (fw.BUILD["debian_point"] + "\n").encode())
+        self.write("etc/os-release", b'ID=debian\nVERSION_ID="13"\nVERSION_CODENAME=trixie\n')
+        self.write("var/lib/dpkg/status", "\n\n".join(
+            f"Package: linux-{kind}-current-{fw.BUILD['linux_family']}\nArchitecture: arm64\nStatus: hold ok installed\nVersion: 26.11\n"
+            for kind in ("image", "dtb")).encode())
+        source_path = "userpatches/kernel/edgepi-e87n-6.18/900-test.patch"
+        sources = {source_path: fw.digest(b"actual patch input")}
+        self.provenance = {"schema": 1, "build": fw.BUILD, "source_files": sources,
+                           "recipe_sha256": fw.digest(fw.canonical(sources)), "hardware_validation": "pending",
+                           "source_commit": "a" * 40, "source_dirty": True}
+        self.recipe = {"schema": 1, **{k: fw.BUILD[k] for k in
+                       ("kernel_release", "kernel_source", "kernel_commit", "armbian_commit")},
+                       "source_commit": "a" * 40, "source_dirty": True,
+                       "recipe_sha256": self.provenance["recipe_sha256"],
+                       "patches": [{"path": source_path.removeprefix("userpatches/"), "sha256": sources[source_path]}],
+                       "kernel_config_sha256": fw.digest(config.encode()), "kernel_sha256": fw.digest(kernel),
+                       "patched_kernel_commit": "b" * 40, "patched_kernel_tree": "c" * 40}
+        self.receipts()
+        for path in ("mediatek/mt7987/i2p5ge-phy-pmb.bin", "mediatek/mt7987/i2p5ge-phy-DSPBitTb.bin"):
+            self.write("usr/lib/firmware/" + path, (fw.REPO / "firmware" / path).read_bytes())
+        self.write("usr/share/doc/e87n-phy-firmware/LICENCE.mediatek", (fw.REPO / "firmware/LICENCE.mediatek").read_bytes())
+
+    def write(self, name, data):
+        path = self.root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        return path
+
+    def receipts(self):
+        self.write(fw.PROVENANCE, json.dumps(self.provenance).encode())
+        self.write(fw.BUILD_RECIPE, json.dumps(self.recipe).encode())
+
+    def test_headless_evidence_needs_neither_extlinux_nor_display(self):
+        evidence, deps = fw.collect_evidence(self.root)
+        self.assertEqual(evidence["debian_version"], fw.BUILD["debian_point"])
+        self.assertEqual(evidence["components"]["modules"]["count"], 2)
+        self.assertEqual(deps[self.phy], {self.lib})
+        self.assertTrue(evidence["source"]["source_dirty"])
+        self.assertEqual(len(evidence["packages"]), 2)
+        self.assertFalse((self.root / "boot/extlinux").exists())
+
+    def test_gzip_and_xz_real_module_metadata(self):
+        for suffix, compress in ((".gz", gzip.compress), (".xz", lzma.compress)):
+            with self.subTest(suffix=suffix):
+                path = self.root / ("module.ko" + suffix)
+                path.write_bytes(compress(module_elf("fixture")))
+                self.assertEqual(fw.module_info(path)["name"], "fixture")
+
+    def test_foreign_abi_cannot_hide_under_expected_module_filename(self):
+        (self.base / self.phy).write_bytes(module_elf("mtk_2p5ge", "mtk_phy_lib", "6.18.51-wrong"))
+        with self.assertRaisesRegex(ValueError, "vermagic"):
+            fw.collect_evidence(self.root)
+
+    def test_foreign_kernel_cannot_hide_under_expected_boot_filename(self):
+        path = self.root / "boot" / ("vmlinuz-" + fw.RELEASE)
+        path.write_bytes(path.read_bytes().replace(fw.RELEASE.encode(), b"6.18.51-wrong"))
+        with self.assertRaisesRegex(ValueError, "actual Image"):
+            fw.collect_evidence(self.root)
+
+    def test_missing_dependency_and_forged_dependency_map_fail(self):
+        (self.base / self.lib).unlink()
+        with self.assertRaisesRegex(ValueError, "dependency"):
+            fw.collect_evidence(self.root)
+        (self.base / self.lib).write_bytes(module_elf("mtk_phy_lib"))
+        (self.base / "modules.dep").write_text(f"{self.phy}:\n{self.lib}:\n")
+        with self.assertRaisesRegex(ValueError, "metadata dependency"):
+            fw.collect_evidence(self.root)
+
+    def test_phy_hash_is_compared_to_reviewed_source_not_rootfs_claim(self):
+        path = self.root / "usr/lib/firmware/mediatek/mt7987/i2p5ge-phy-pmb.bin"
+        path.write_bytes(bytes(path.stat().st_size))
+        with self.assertRaisesRegex(ValueError, "PHY firmware hash"):
+            fw.collect_evidence(self.root)
+
+    def test_receipt_cannot_relabel_actual_config(self):
+        path = self.root / "boot" / ("config-" + fw.RELEASE)
+        path.write_bytes(path.read_bytes() + b"CONFIG_DUMMY=m\n")
+        with self.assertRaisesRegex(ValueError, "Image/config"):
+            fw.collect_evidence(self.root)
+
+    def test_missing_receipt_is_not_filled_from_working_tree(self):
+        (self.root / fw.BUILD_RECIPE).unlink()
+        with self.assertRaises((OSError, ValueError)):
+            fw.collect_evidence(self.root)
+
+    def test_patch_digest_and_recipe_mapping_are_bound(self):
+        self.recipe["patches"][0]["sha256"] = "0" * 64
+        self.receipts()
+        with self.assertRaisesRegex(ValueError, "patch not bound"):
+            fw.collect_evidence(self.root)
+
+    def test_dirty_identity_cannot_claim_clean_build(self):
+        self.recipe["source_dirty"] = False
+        self.receipts()
+        with self.assertRaisesRegex(ValueError, "dirty state"):
+            fw.collect_evidence(self.root)
+
+    def test_actual_package_versions_and_nonphy_firmware_change_evidence(self):
+        before, _ = fw.collect_evidence(self.root)
+        path = self.root / "var/lib/dpkg/status"
+        path.write_text(path.read_text() + "\nPackage: openssh-server\nVersion: 1:10.0-1\nArchitecture: arm64\nStatus: install ok installed\n")
+        self.write("usr/lib/firmware/extra.bin", b"new actual firmware")
+        after, _ = fw.collect_evidence(self.root)
+        self.assertNotEqual(before["dpkg_status_sha256"], after["dpkg_status_sha256"])
+        self.assertNotEqual(before["components"]["firmware"]["tree"], after["components"]["firmware"]["tree"])
+        self.assertEqual(after["packages"][-1]["version"], "1:10.0-1")
+
+    def test_initrd_requires_matching_module_release_and_dependencies(self):
+        _, deps = fw.collect_evidence(self.root)
+        prefix = "init\nscripts/local\nscripts/functions\n"
+        fw.audit_initrd_listing(prefix, deps)  # all root-storage drivers are built-in
+        complete = prefix + "\n".join("usr/lib/modules/" + fw.RELEASE + "/" + p for p in deps)
+        fw.audit_initrd_listing(complete, deps)
+        with self.assertRaisesRegex(ValueError, "missing module dependency"):
+            fw.audit_initrd_listing(prefix + "lib/modules/" + fw.RELEASE + "/" + self.phy, deps)
+        with self.assertRaisesRegex(ValueError, "foreign/unknown"):
+            fw.audit_initrd_listing(complete.replace(fw.RELEASE, "6.18.51-wrong"), deps)
+
+    def test_initrd_module_bytes_not_just_names_are_verified(self):
+        _, deps = fw.collect_evidence(self.root)
+        files = [("usr/lib/modules/" + fw.RELEASE + "/" + path, (self.base / path).read_bytes()) for path in deps]
+        initrd = self.root / "fixture-initrd"
+        prefix = cpio_fixture([("early", b"microcode fixture")]) + bytes(512)
+        initrd.write_bytes(prefix + gzip.compress(cpio_fixture(files)))
+        fw.audit_initrd_modules(self.root, initrd, deps)
+        # Same module name and release, different bytes: hash binding must fail.
+        files[0] = (files[0][0], files[0][1] + b"changed signed section")
+        initrd.write_bytes(gzip.compress(cpio_fixture(files)))
+        with self.assertRaisesRegex(ValueError, "module bytes differ"):
+            fw.audit_initrd_modules(self.root, initrd, deps)
+
+    def test_initrd_allows_changed_module_compression(self):
+        _, deps = fw.collect_evidence(self.root)
+        files = [("lib/modules/" + fw.RELEASE + "/" + p + ".xz", lzma.compress((self.base / p).read_bytes())) for p in deps]
+        initrd = self.root / "fixture-initrd"
+        initrd.write_bytes(lzma.compress(cpio_fixture(files)))
+        fw.audit_initrd_modules(self.root, initrd, deps)
+
+    @unittest.skipUnless(shutil.which("zstd"), "requires host zstd")
+    def test_zstd_initrd_and_compressed_modules(self):
+        _, deps = fw.collect_evidence(self.root)
+        files = []
+        for path in deps:
+            blob = subprocess.run(["zstd", "-q", "-c"], input=(self.base / path).read_bytes(),
+                                  capture_output=True, check=True).stdout
+            files.append(("usr/lib/modules/" + fw.RELEASE + "/" + path + ".zst", blob))
+        data = subprocess.run(["zstd", "-q", "-c"], input=cpio_fixture(files), capture_output=True, check=True).stdout
+        initrd = self.write("fixture-initrd", data)
+        fw.audit_initrd_modules(self.root, initrd, deps)
+
+    def test_initrd_paths_cannot_escape_and_missing_closure_fails(self):
+        _, deps = fw.collect_evidence(self.root)
+        initrd = self.write("fixture-initrd", cpio_fixture([("../../outside", b"payload")]))
+        with self.assertRaisesRegex(ValueError, "unsafe"):
+            fw.audit_initrd_modules(self.root, initrd, deps)
+        initrd.write_bytes(cpio_fixture([("lib/modules/" + fw.RELEASE + "/" + self.phy, (self.base / self.phy).read_bytes())]))
+        with self.assertRaisesRegex(ValueError, "dependency missing"):
+            fw.audit_initrd_modules(self.root, initrd, deps)
+
+    def test_initrd_compression_must_be_supported_by_actual_kernel(self):
+        config = self.root / "boot" / ("config-" + fw.RELEASE)
+        config.write_text(config.read_text().replace("CONFIG_RD_GZIP=y", "# CONFIG_RD_GZIP is not set"))
+        initrd = self.write("fixture-initrd", gzip.compress(cpio_fixture([("init", b"#!/bin/sh\n")])))
+        with self.assertRaisesRegex(ValueError, "cannot decompress gzip"):
+            fw.audit_initrd_modules(self.root, initrd, {})
+
+    def test_initrd_cannot_override_reviewed_phy_firmware(self):
+        path = "usr/lib/firmware/mediatek/mt7987/i2p5ge-phy-pmb.bin"
+        payload = (self.root / path).read_bytes()
+        initrd = self.write("fixture-initrd", gzip.compress(cpio_fixture([(path, payload)])))
+        fw.audit_initrd_modules(self.root, initrd, {})
+        initrd.write_bytes(gzip.compress(cpio_fixture([(path, bytes(len(payload)))])))
+        with self.assertRaisesRegex(ValueError, "PHY firmware differs"):
+            fw.audit_initrd_modules(self.root, initrd, {})
+
+    def test_stale_binary_indexes_fail_readonly_lookup(self):
+        _, deps = fw.collect_evidence(self.root)
+        def lookup(*args, **kwargs):
+            name = args[-1]
+            paths = [self.lib] if name == "mtk_phy_lib" else [self.lib, self.phy]
+            self.assertIn("--show-depends", args)
+            stage = args[args.index("--dirname") + 1]
+            return mock.Mock(stdout="".join(f"insmod {stage}/lib/modules/{fw.RELEASE}/{p}\n" for p in paths))
+        with mock.patch.object(fw, "run", side_effect=lookup):
+            fw.verify_module_indexes(self.root, deps)
+        with mock.patch.object(fw, "run", return_value=mock.Mock(stdout="")):
+            with self.assertRaisesRegex(ValueError, "index/dependency"):
+                fw.verify_module_indexes(self.root, deps)
+
+    @unittest.skipUnless(shutil.which("depmod") and shutil.which("modprobe"), "requires Linux host kmod")
+    def test_real_host_kmod_resolves_fixture_without_loading_it(self):
+        # depmod derives hard dependencies from ELF symbols. This minimal ELF
+        # deliberately needs none; dependency-closure corruption is tested above.
+        (self.base / self.phy).write_bytes(module_elf("mtk_2p5ge"))
+        (self.base / self.lib).unlink()
+        # depmod is allowed to write only this disposable fixture. Generate its
+        # indexes with a relative usr-merge link, then exercise an absolute link
+        # on the read-only audit path, which must never resolve in the host.
+        (self.root / "lib").unlink()
+        (self.root / "lib").symlink_to("usr/lib")
+        result = subprocess.run(["depmod", "--basedir", str(self.root), "-a", fw.RELEASE],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        (self.root / "lib").unlink()
+        (self.root / "lib").symlink_to("/usr/lib")
+        fw.verify_module_indexes(self.root, {self.phy: set()})
+
+    def test_cyclic_dependencies_fail(self):
+        with self.assertRaisesRegex(ValueError, "cyclic"):
+            fw.module_closure({self.phy: {self.lib}, self.lib: {self.phy}}, self.phy)
+
+    def test_duplicate_receipt_fields_fail(self):
+        path = self.root / fw.BUILD_RECIPE
+        value = path.read_text()
+        path.write_text(value[:-1] + ', "source_dirty": false}')
+        with self.assertRaisesRegex(ValueError, "duplicate JSON"):
+            fw.collect_evidence(self.root)
+
+    def test_point_release_is_observed_not_copied_from_recipe(self):
+        self.write("etc/debian_version", b"13.6\n")
+        with self.assertRaisesRegex(ValueError, "actual Debian"):
+            fw.collect_evidence(self.root)
+
+    def test_target_absolute_symlinks_do_not_read_host_files(self):
+        self.write("etc/private", b"image-local")
+        (self.root / "alias").symlink_to("/etc/private")
+        self.assertEqual(fw.rooted(self.root, "alias").read_bytes(), b"image-local")
+        (self.root / "escape").symlink_to("../../etc/passwd")
+        with self.assertRaisesRegex(ValueError, "escapes"):
+            fw.rooted(self.root, "escape")
 
 
 def dtb(properties):
@@ -182,9 +464,12 @@ class TarTests(unittest.TestCase):
         payloads = {"kernel": fixture(), "root": bytes(self.root if root is None else root)}
         control = {"format": fw.FORMAT, "layout": fw.LAYOUT, "kernel_release": fw.RELEASE,
                    "root_uuid": UUID, "hardware_validation": "pending",
+                   "debian_version": fw.BUILD["debian_point"],
+                   "evidence": {"schema": 1, "debian_version": fw.BUILD["debian_point"]},
                    "payloads": {n: {"bytes": len(v), "sha256": hashlib.sha256(v).hexdigest()} for n, v in payloads.items()}}
         if change:
             change(control)
+        control.setdefault("build_id", fw.build_id(control))
         payloads["CONTROL"] = json.dumps(control).encode()
         target = self.work / "firmware.tar"
         with tarfile.open(target, "w:", format=tarfile.USTAR_FORMAT) as archive:
@@ -223,6 +508,22 @@ class TarTests(unittest.TestCase):
     def test_wrong_protected_layout(self):
         with self.assertRaisesRegex(ValueError, "contract"):
             self.inspect(self.archive(change=lambda c: c.update(layout={})))
+
+    def test_build_id_rejects_unbound_manifest(self):
+        with self.assertRaisesRegex(ValueError, "build ID"):
+            self.inspect(self.archive(change=lambda c: c.update(build_id="0" * 64)))
+
+    def test_build_id_binds_root_uuid_profile_and_evidence(self):
+        before = {"root_uuid": UUID, "headless": True, "evidence": {"modules": "a"}, "payloads": {"root": "x"}}
+        identity = fw.build_id(before)
+        for field, value in (("root_uuid", "wrong"), ("headless", False), ("evidence", {"modules": "b"}),
+                             ("payloads", {"root": "y"})):
+            with self.subTest(field=field):
+                self.assertNotEqual(identity, fw.build_id({**before, field: value}))
+
+    def test_old_manifest_without_evidence_rejected(self):
+        with self.assertRaisesRegex(ValueError, "evidence"):
+            self.inspect(self.archive(change=lambda c: c.pop("evidence")))
 
     def test_headless_profile_recorded_in_manifest(self):
         _, control, _ = self.inspect(self.archive(change=lambda c: c.update(headless=True)))
@@ -301,9 +602,11 @@ class ProfilePipelineTests(unittest.TestCase):
                         mock.patch.object(builder, "command", side_effect=[json.dumps(table), UUID]), \
                         mock.patch.object(builder, "mounted", side_effect=mount), \
                         mock.patch.object(builder, "make_fit", side_effect=fit), \
+                        mock.patch.object(builder, "collect_evidence", return_value=({"debian_version": fw.BUILD["debian_point"]}, {})) as evidence, \
                         mock.patch.object(builder, "compact_rootfs"), \
                         mock.patch.object(builder, "run") as run:
                     builder.build(image, output, headless)
+                evidence.assert_called_once()
                 commands = [list(map(str, call.args)) for call in run.call_args_list]
                 system = next(cmd for cmd in commands if str(SCRIPTS / "verify-system.py") in cmd)
                 final = next(cmd for cmd in commands if str(SCRIPTS / "verify-factory-firmware.py") in cmd)
@@ -314,6 +617,7 @@ class ProfilePipelineTests(unittest.TestCase):
                 with tarfile.open(output) as archive:
                     control = json.load(archive.extractfile(fw.PREFIX + "CONTROL"))
                 self.assertIs(control["headless"], headless)
+                self.assertEqual(control["build_id"], fw.build_id(control))
 
     def test_final_verifier_propagates_profile_and_keeps_platform_checks(self):
         for headless in (False, True):
@@ -341,10 +645,10 @@ class ProfilePipelineTests(unittest.TestCase):
                 firmware = work / "firmware.tar"
                 firmware.write_bytes(b"fixture")
                 payloads = {"fdt": b"fixture dtb", "kernel": lzma.compress(b"fixture kernel"), "ramdisk": b"fixture initrd"}
-                control = {"root_uuid": UUID, "headless": headless}
+                control = {"root_uuid": UUID, "headless": headless, "evidence": {"schema": 1}, "build_id": "fixture"}
 
                 def run_command(*cmd, **_kwargs):
-                    out = UUID if cmd[0] == "blkid" else "scripts/local\nscripts/functions\netc/modprobe.d/e87n-headless.conf\n"
+                    out = UUID if cmd[0] == "blkid" else "init\nscripts/local\nscripts/functions\netc/modprobe.d/e87n-headless.conf\n"
                     return mock.Mock(stdout=out)
 
                 with mock.patch.object(verifier.sys, "platform", "linux"), \
@@ -353,8 +657,14 @@ class ProfilePipelineTests(unittest.TestCase):
                         mock.patch.object(verifier, "inspect_tar", return_value=({"root": work / "root.img"}, control, payloads)), \
                         mock.patch.object(verifier, "check_vendor_parser"), \
                         mock.patch.object(verifier, "mounted", return_value=contextlib.nullcontext(root)), \
+                        mock.patch.object(verifier, "collect_evidence", return_value=({"schema": 1}, {})) as evidence, \
+                        mock.patch.object(verifier, "verify_module_indexes") as indexes, \
+                        mock.patch.object(verifier, "audit_initrd_modules") as initrd_modules, \
                         mock.patch.object(verifier, "run", side_effect=run_command) as run:
                     verifier.verify(firmware, headless)
+                    evidence.assert_called_once_with(root)
+                    indexes.assert_called_once_with(root, {})
+                    initrd_modules.assert_called_once_with(root, boot / ("initrd.img-" + fw.RELEASE), {})
                     commands = [list(map(str, call.args)) for call in run.call_args_list]
                     system = next(cmd for cmd in commands if str(SCRIPTS / "verify-system.py") in cmd)
                     self.assertEqual("--headless" in system, headless)
@@ -362,6 +672,9 @@ class ProfilePipelineTests(unittest.TestCase):
                     self.assertTrue(any(str(SCRIPTS / "verify-lts-platform.sh") in cmd for cmd in commands))
                     with self.assertRaisesRegex(ValueError, "profile mismatch"):
                         verifier.verify(firmware, not headless)
+                    with mock.patch.object(verifier, "collect_evidence", return_value=({"schema": 1, "tampered": True}, {})):
+                        with self.assertRaisesRegex(ValueError, "evidence differs"):
+                            verifier.verify(firmware, headless)
 
 
 if __name__ == "__main__":

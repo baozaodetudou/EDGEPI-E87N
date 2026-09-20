@@ -15,7 +15,8 @@ import sys
 import tempfile
 
 sys.dont_write_bytecode = True
-from factory_firmware import RELEASE, check_vendor_parser, inspect_tar, mounted, regular, require, run
+from factory_firmware import (RELEASE, audit_initrd_listing, audit_initrd_modules, collect_evidence, verify_module_indexes,
+                              check_vendor_parser, inspect_tar, mounted, regular, require, run)
 
 SCRIPTS = Path(__file__).resolve().parent
 
@@ -56,12 +57,15 @@ def verify(path, headless=False):
                 "FIT vs installed kernel differs")
         require((boot / ("initrd.img-" + RELEASE)).read_bytes() == payloads["ramdisk"],
                 "FIT vs installed initrd differs")
+        evidence, dependencies = collect_evidence(root)
+        require(evidence == control["evidence"], "final rootfs evidence differs from CONTROL")
+        verify_module_indexes(root, dependencies)
         listing = run("lsinitramfs", boot / ("initrd.img-" + RELEASE),
                       capture_output=True, text=True).stdout
         require(not re.search(r"(^|/)(growroot|growpart|resize2fs)(\s|$)", listing, re.M),
                 "initramfs contains uncontrolled expansion helper")
-        require("scripts/local" in listing and "scripts/functions" in listing,
-                "initramfs missing normal local root resolver")
+        audit_initrd_listing(listing, dependencies)
+        audit_initrd_modules(root, boot / ("initrd.img-" + RELEASE), dependencies)
         if headless:
             require("etc/modprobe.d/e87n-headless.conf" in listing.splitlines(),
                     "headless initramfs lacks the NV3007 automatic-probe blacklist")
@@ -72,6 +76,7 @@ def verify(path, headless=False):
                 "--config", boot / ("config-" + RELEASE), "--dtb", dtb)
         run("bash", SCRIPTS / "verify-lts-platform.sh", "--config", boot / ("config-" + RELEASE), "--dtb", dtb)
     print("PASS: E87N firmware TAR, FIT hashes/load bounds, 1 GiB DTB, ext4 UUID, panic=0 bring-up mode,")
+    print("      observed Debian/packages, compiled recipe, module ABI/dependencies/indexes and PHY firmware bound to build ID:", control["build_id"])
     print("      %s verified. Hardware boot and recovery test still pending." %
           ("headless system and thermal/fan configuration" if headless else "minimal system/display/fan files"))
 

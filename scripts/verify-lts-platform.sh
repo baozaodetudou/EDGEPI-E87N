@@ -15,10 +15,12 @@ import stat
 import subprocess
 import sys
 
-# Contract from userpatches/kernel/edgepi-e87n-6.18/0000-*.patch and 361/750.
+# Contract from pinned Frank-W 6.18.52 MT7987 providers plus E87N board patches.
 # This is intentionally a board/profile validator, not a general DT schema.
-ETH = "/soc/ethernet@15100000"
+ETH = "/soc_netsys/ethernet@15100000"
 SGMII = "/soc_clksys/syscon@10060000"
+PCS = SGMII + "/pcs"
+GIC = "/soc/interrupt-controller@c000000"
 TOP = "/soc_clksys/topckgen@1001b000"
 INFRA = "/soc_clksys/infracfg@10001000"
 WDT = "/soc/watchdog@1001c000"
@@ -28,12 +30,13 @@ LVTS = "/soc/lvts@1100a000"
 EFUSE = "/soc/efuse@11d30000"
 CALIB = EFUSE + "/calib@918"
 ZONE = "/thermal-zones/cpu-thermal"
-REQUIRED_Y = """ARM64 ARCH_MEDIATEK OF PINCTRL_MT7987 COMMON_CLK_MT7987
+REQUIRED_Y = """ARM64 ARCH_MEDIATEK OF PINCTRL_MT7987 COMMON_CLK_MT7987 COMMON_CLK_MT7987_ETHSYS
+VIRTIO VIRTIO_BLK VIRTIO_NET VIRTIO_MMIO SERIAL_AMBA_PL011 SERIAL_AMBA_PL011_CONSOLE
 THERMAL THERMAL_OF MTK_THERMAL MTK_LVTS_THERMAL THERMAL_GOV_STEP_WISE
 THERMAL_DEFAULT_GOV_STEP_WISE PWM PWM_MEDIATEK HWMON SENSORS_PWM_FAN
 NVMEM NVMEM_MTK_EFUSE WATCHDOG_HANDLE_BOOT_ENABLED""".split()
 # Opt-in contract for rebuilt images; legacy releases remain auditable without
-# this flag. Names/select dependencies checked against the 6.18.51 headers'
+# this flag. Names/select dependencies checked against the 6.18.52 headers'
 # drivers/md/Kconfig, drivers/md/persistent-data/Kconfig and net/xfrm/Kconfig.
 STORAGE_Y = "MODULES BLOCK MD NET INET IPV6 XFRM CRYPTO DM_UEVENT".split()
 STORAGE_M = """BLK_DEV_DM DM_CRYPT DM_SNAPSHOT DM_THIN_PROVISIONING
@@ -208,7 +211,6 @@ def check_dtb(dt):
     dt.compatible("/", "mediatek,mt7987")
     # The current E87N profile has no validated OPPs (including orphan tables).
     for node, props in dt.props.items():
-        require("pcs-handle" not in props, "legacy pcs-handle at " + node)
         require(not props.intersection(("operating-points", "operating-points-v2", "opp-hz")),
                 "unvalidated OPP property at " + node)
         if dt.has(node, "compatible"):
@@ -219,23 +221,26 @@ def check_dtb(dt):
     cpus = [node for node in dt.children["/cpus"]
             if dt.has(node, "device_type") and dt.strings(node, "device_type") == ["cpu"]]
     require(bool(cpus), "no CPU nodes found")
-    ok("no legacy pcs-handle or unvalidated CPU/OPP tables")
+    ok("no unvalidated CPU/OPP tables")
 
     dt.compatible(ETH, "mediatek,mt7987-eth")
     dt.compatible(SGMII, "mediatek,mt7987-sgmiisys0")
     dt.compatible(SGMII, "syscon")
     dt.compatible(TOP, "mediatek,mt7987-topckgen")
-    dt.compatible(WDT, "mediatek,mt7987-wdt")
-    require(dt.refs(ETH, "mediatek,sgmiisys") == [(SGMII, [])],
-            "Ethernet must reference sgmiisys0 in MAC0 slot only")
-    names = dt.strings(SGMII, "clock-names")
-    refs = dt.refs(SGMII, "clocks", "#clock-cells")
+    dt.compatible(WDT, "mediatek,mt7988-wdt")
+    require(not dt.has(ETH, "mediatek,sgmiisys"), "legacy Ethernet PCS provider list")
+    dt.compatible(PCS, "mediatek,mt7987-sgmii")
+    require(dt.scalar(PCS, "#pcs-cells") == 0, "PCS provider #pcs-cells must be zero")
+    require(dt.refs(ETH + "/mac@0", "pcs-handle", "#pcs-cells") == [(PCS, [])],
+            "MAC0 must reference the maintained sgmiipcs0 provider")
+    names = dt.strings(PCS, "clock-names")
+    refs = dt.refs(PCS, "clocks", "#clock-cells")
     require(len(names) == 3 and len(refs) == 3 and len(set(names)) == 3,
             "sgmiisys0 needs exactly three named clocks")
     require(dict(zip(names, refs)) == {"sgmii_sel": (TOP, [55]),
                                      "sgmii_tx": (SGMII, [0]),
                                      "sgmii_rx": (SGMII, [1])},
-            "sgmiisys0 clock names/providers/IDs do not match 361/750")
+            "sgmiisys0 clock names/providers/IDs do not match maintained MT7987 bindings")
     require(dt.scalar(SGMII, "#clock-cells") == 1 and dt.scalar(WDT, "#reset-cells") == 1,
             "SGMII clock/reset provider cell counts must be one")
     require(dt.refs(SGMII, "resets", "#reset-cells") == [(WDT, [1])],
@@ -246,7 +251,7 @@ def check_dtb(dt):
         dt.enabled(node)
         require(dt.scalar(node, "reg") == mac and dt.strings(node, "phy-mode") == [mode],
                 "wrong MAC%d interface contract" % mac)
-    ok("Ethernet sgmiisys0 library PCS: 3 named clocks, reset and PHYA TRX flag")
+    ok("Ethernet sgmiipcs0 provider: 3 named clocks, reset and PHYA TRX flag")
 
     dt.compatible(FAN, "pwm-fan")
     dt.compatible(PWM, "mediatek,mt7987-pwm")
@@ -260,8 +265,18 @@ def check_dtb(dt):
 
     dt.compatible(LVTS, "mediatek,mt7987-lvts-ap")
     dt.enabled(ZONE)
-    require(not dt.props[LVTS].intersection(("interrupts", "interrupts-extended", "interrupt-names")),
-            "polled LVTS must not declare IRQ properties")
+    # Maintained mt7987.dtsi declares SPI 138, level high. The older E87N
+    # vendor DTS omitted IRQs; this checks the source contract, not board proof.
+    require(not dt.has(LVTS, "interrupts-extended") and
+            dt.cells(LVTS, "interrupts") == [0, 138, 4],
+            "LVTS must use maintained SPI 138 level-high IRQ")
+    parent = LVTS
+    while not dt.has(parent, "interrupt-parent") and parent != "/":
+        parent = parent.rsplit("/", 1)[0] or "/"
+    require(dt.refs(parent, "interrupt-parent") == [(GIC, [])],
+            "LVTS interrupt parent must be the SoC GIC")
+    dt.compatible(GIC, "arm,gic-v3")
+    require(dt.scalar(GIC, "#interrupt-cells") == 3, "GIC needs three interrupt cells")
     require(dt.scalar(LVTS, "#thermal-sensor-cells") == 1 and
             dt.refs(ZONE, "thermal-sensors", "#thermal-sensor-cells") == [(LVTS, [0])],
             "cpu-thermal must use LVTS sensor 0")
@@ -271,14 +286,14 @@ def check_dtb(dt):
             "polling-delay-passive must not exceed polling-delay")
     dt.compatible(INFRA, "mediatek,mt7987-infracfg")
     require(dt.refs(LVTS, "clocks", "#clock-cells") == [(INFRA, [25])],
-            "LVTS thermal clock does not match 361")
+            "LVTS thermal clock does not match maintained MT7987 bindings")
     require(dt.refs(LVTS, "resets", "#reset-cells") == [(INFRA, [1])],
             "LVTS reset does not match 361")
     dt.compatible(EFUSE, "mediatek,efuse")
     require(dt.refs(LVTS, "nvmem-cells") == [(CALIB, [])] and
             dt.strings(LVTS, "nvmem-cell-names") == ["lvts-calib-data-1"] and
             dt.cells(CALIB, "reg") == [0x918, 0x10], "LVTS efuse calibration contract mismatch")
-    ok("LVTS enabled, polled without IRQs; sensor/clock/reset/efuse references valid")
+    ok("LVTS enabled with maintained IRQ and periodic polling; sensor/clock/reset/efuse valid")
 
     trip_root, map_root = ZONE + "/trips", ZONE + "/cooling-maps"
     dt.enabled(trip_root)

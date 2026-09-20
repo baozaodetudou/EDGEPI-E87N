@@ -1,6 +1,7 @@
 Subject: [PATCH] cpufreq: block unsafe generic MT7987 DVFS
 
-Base: Linux 6.18.51 (f6388029ea9e2c9e807d73827658738ea131faee).
+Revalidated base: Frank-W Linux 6.18.52
+(a638fabe36f293e58ab6be002af04b866959c546).
 
 Replace the E87N 6.12 fixed-voltage/MT7987 patches 843/844 with an
 explicitly disabled CPUFreq path pending validated board supply and OPP
@@ -10,8 +11,8 @@ satisfies the mandatory proc regulator lookup nor proves voltage safety.
 The old platform data also leaves min_volt_shift zero, which the 6.18.51
 driver uses unconditionally as the voltage-tracking divisor.
 
-Linux 6.18.51 mediatek-cpufreq has no MT7987 match; deliberately do not
-add one. Block cpufreq-dt's OPP-v2 auto-registration too, so keeping an
+The board config disables CPU_FREQ regardless of maintained driver matches.
+Block cpufreq-dt's OPP-v2 auto-registration too, so keeping an
 old OPP table cannot silently select a generic clock-only transition
 without the MediaTek intermediate-clock sequencing.
 

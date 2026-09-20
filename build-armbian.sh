@@ -4,7 +4,7 @@ export GIT_TERMINAL_PROMPT=0
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ARMBIAN_DIR="$ROOT_DIR/source/armbian-build"
-ARMBIAN_REF=${ARMBIAN_REF:-7c1bb29eb0e7bd75b0703d86fe654b2680e646da}
+ARMBIAN_REF=${ARMBIAN_REF:-$(python3 "$ROOT_DIR/scripts/build_config.py" armbian_commit)}
 
 # Check before replacing the overlay: a detached build may outlive its launcher.
 # These E87N containers share the same named cache/temp volumes.
@@ -44,6 +44,9 @@ cp -a "$ROOT_DIR/userpatches" "$ARMBIAN_DIR/userpatches"
 mkdir -p "$ARMBIAN_DIR/userpatches/overlay"
 cp -a "$ROOT_DIR/firmware" "$ARMBIAN_DIR/userpatches/overlay/e87n-firmware"
 cp -a "$ROOT_DIR/board-support" "$ARMBIAN_DIR/userpatches/overlay/e87n-board-support"
+python3 "$ROOT_DIR/scripts/write-build-provenance.py" \
+	--output "$ARMBIAN_DIR/userpatches/overlay/e87n-board-support/build-provenance.json" \
+	--overlay "$ARMBIAN_DIR/userpatches"
 mkdir -p "$ARMBIAN_DIR/userpatches/overlay/e87n-board-support/docs"
 for manual in DEFAULTS DIAGNOSTICS SYSTEM-READINESS NETWORKING DISPLAY-PACKAGE; do
 	cp "$ROOT_DIR/docs/$manual.md" "$ARMBIAN_DIR/userpatches/overlay/e87n-board-support/docs/"
@@ -70,6 +73,7 @@ ARGS=(
 	USE_TMPFS=no
 	KERNEL_GIT=shallow
 	EXTRAWIFI=no
+	ENABLE_EXTENSIONS=e87n-provenance
 	CPUTHREADS=4
 )
 ARGS+=("$@")

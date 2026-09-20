@@ -21,6 +21,7 @@ import tempfile
 sys.dont_write_bytecode = True
 from factory_firmware import (FORMAT, KERNEL_LIMIT, LAYOUT, LOADS, MIB, RELEASE,
                               RESERVATIONS, UPLOAD_LIMIT, PREFIX, bootargs, check_fit,
+                              build_id, collect_evidence, CONTROL_LIMIT,
                               ext4_size, mounted, regular, require, run, sha)
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -182,6 +183,7 @@ def build(image, output, headless=False):
             run(sys.executable, SCRIPTS / "prepare-factory-rootfs.py", "--root", root_dir,
                 "--boot", boot_dir, "--uuid", root_uuid)
             fit = make_fit(root_dir / "boot", work, root_uuid)
+            evidence, _ = collect_evidence(root_dir)
             profile_args = ["--headless"] if headless else []
             run(sys.executable, SCRIPTS / "verify-system.py", "--rootfs", root_dir,
                 "--bootfs", root_dir / "boot", *profile_args)
@@ -195,12 +197,15 @@ def build(image, output, headless=False):
     run("e2fsck", "-fn", root_image)
     compact_rootfs(root_image, work, root_uuid)
     manifest = {"format": FORMAT, "kernel_release": RELEASE, "debian": "13", "headless": headless,
+                "debian_version": evidence["debian_version"], "evidence": evidence,
                 "layout": LAYOUT, "root_uuid": root_uuid, "source_image_sha256": before,
                 "hardware_validation": "pending", "upload_limit_policy_bytes": UPLOAD_LIMIT,
                 "payloads": {p.name: {"bytes": p.stat().st_size, "sha256": sha(p)}
                              for p in (fit, root_image)}}
+    manifest["build_id"] = build_id(manifest)
     control = work / "CONTROL"
     control.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    require(control.stat().st_size <= CONTROL_LIMIT, "firmware evidence exceeds CONTROL limit")
     candidate = work / "firmware.tar"
     with tarfile.open(candidate, "w:", format=tarfile.USTAR_FORMAT) as archive:
         for path in (fit, root_image, control):

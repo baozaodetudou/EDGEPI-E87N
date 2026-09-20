@@ -27,7 +27,10 @@ import shutil
 import stat
 import subprocess
 
-RELEASE = "6.18.51-current-filogic"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from build_config import KERNEL_RELEASE, KERNEL_VERSION
+
+RELEASE = KERNEL_RELEASE
 REQUIRED_Y = """SPI SPI_MASTER SPI_MT65XX STAGING FB FB_DEVICE
 BACKLIGHT_CLASS_DEVICE BACKLIGHT_PWM THERMAL MTK_LVTS_THERMAL PWM
 PWM_MEDIATEK HWMON SENSORS_PWM_FAN""".split()
@@ -92,9 +95,9 @@ def check_config(data):
     text = data.decode("utf-8")
     headers = re.findall(r"^# Linux/.* Kernel Configuration$", text, re.M)
     require(len(headers) == 1 and headers[0] in (
-        "# Linux/arm64 6.18.51 Kernel Configuration",
+        f"# Linux/arm64 {KERNEL_VERSION} Kernel Configuration",
         "# Linux/arm64 " + RELEASE + " Kernel Configuration"),
-        "config needs one Linux/arm64 6.18.51 Kernel Configuration header")
+        f"config needs one Linux/arm64 {KERNEL_VERSION} Kernel Configuration header")
     options = {}
     value = r'(?:[ymn]|-?[0-9]+|0[xX][0-9a-fA-F]+|"(?:[^"\\\r\n]|\\[^\r\n])*")'
     for line in text.splitlines():
@@ -380,7 +383,7 @@ def check_rootfs(root):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--rootfs", required=True, type=Path, help="already accessible target root directory")
-    parser.add_argument("--config", required=True, type=Path, help="final Linux/arm64 6.18.51 kernel config")
+    parser.add_argument("--config", required=True, type=Path, help="final Linux/arm64 6.18.52 kernel config")
     parser.add_argument("--dtb", required=True, type=Path, help="final compiled E87N DTB (not DTS source)")
     args = parser.parse_args(argv)
     try:

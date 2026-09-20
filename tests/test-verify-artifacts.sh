@@ -17,7 +17,7 @@ import tempfile
 
 REPO = Path(sys.argv[1])
 SCRIPT = REPO / "scripts/verify-artifacts.sh"
-RELEASE = "6.12.108-current-filogic"
+RELEASE = "6.12.108-current-edgepi-e87n"
 UUID = "12345678-1234-4abc-8def-123456789abc"
 DTB = "mt7987a-edgepi-e87n.dtb"
 TRIXIE_OS_RELEASE = 'ID=debian\nVERSION_ID="13"\nVERSION_CODENAME=trixie\n'
@@ -30,7 +30,7 @@ SERIAL_EARLYCON DEVTMPFS DEVTMPFS_MOUNT BLK_DEV_INITRD RD_GZIP RD_ZSTD
 EXT4_FS EXT4_FS_POSIX_ACL EXT4_FS_SECURITY FW_LOADER MODULES""".split()
 CONFIG = "# SYNTHETIC TEST CONFIG, NOT A BUILD RESULT\n" + "".join(
     "CONFIG_" + name + "=y\n" for name in REQUIRED) + "CONFIG_MEDIATEK_2P5G_PHY=m\n"
-RELEASE_618 = "6.18.51-current-filogic"
+RELEASE_618 = "6.18.52-current-edgepi-e87n"
 PHY_DIR_612 = "kernel/drivers/net/phy"
 PHY_DIR_618 = "kernel/drivers/net/phy/mediatek"
 CONFIG_618 = CONFIG.replace("CONFIG_MEDIATEK_2P5G_PHY=m", "CONFIG_MEDIATEK_2P5GE_PHY=m") + "CONFIG_MTK_NET_PHYLIB=m\n"
@@ -145,9 +145,9 @@ def make_packages(path, version="1.0-fixture", arch="arm64", compression="gz", c
     }
     if helper:
         files["lib/modules/" + release + "/" + phy_dir + "/mtk-phy-lib.ko"] = ELF
-    make_deb(path / "linux-image-current-filogic_fixture_arm64.deb", "linux-image-current-filogic", files,
+    make_deb(path / "linux-image-current-edgepi-e87n_fixture_arm64.deb", "linux-image-current-edgepi-e87n", files,
              arch=arch, compression=compression)
-    make_deb(path / "linux-dtb-current-filogic_fixture_arm64.deb", "linux-dtb-current-filogic", {
+    make_deb(path / "linux-dtb-current-edgepi-e87n_fixture_arm64.deb", "linux-dtb-current-edgepi-e87n", {
         "boot/dtb-" + release + "/mediatek/" + DTB: make_dtb(),
     }, version=version, compression=compression)
 
@@ -321,8 +321,8 @@ with tempfile.TemporaryDirectory(prefix="e87n-verify-fixtures-") as temporary:
         ("618 disabled helper", RELEASE_618, CONFIG_618.replace("CONFIG_MTK_NET_PHYLIB=m", "CONFIG_MTK_NET_PHYLIB=n"),
          PHY_DIR_618, True, False, "CONFIG_MTK_NET_PHYLIB must be m or y"),
         ("618 missing helper module", RELEASE_618, CONFIG_618, PHY_DIR_618, False, False, "mtk-phy-lib"),
-        ("unsupported future kernel", "7.2.5-current-filogic", CONFIG_618, PHY_DIR_618, True, False, "unsupported kernel series"),
-        ("unsupported adjacent kernel", "6.19.1-current-filogic", CONFIG_618, PHY_DIR_618, True, False, "unsupported kernel series"),
+        ("unsupported future kernel", "7.2.5-current-edgepi-e87n", CONFIG_618, PHY_DIR_618, True, False, "unsupported kernel series"),
+        ("unsupported adjacent kernel", "6.19.1-current-edgepi-e87n", CONFIG_618, PHY_DIR_618, True, False, "unsupported kernel series"),
     ]
     for index, (name, release, config, phy_dir, helper, expected, diagnostic) in enumerate(layouts):
         candidate = work / ("layout-%02d" % index)
@@ -381,10 +381,10 @@ with tempfile.TemporaryDirectory(prefix="e87n-verify-fixtures-") as temporary:
     make_packages(packages, config=CONFIG.replace("CONFIG_MEDIATEK_2P5G_PHY=m", "CONFIG_MEDIATEK_2P5G_PHY=y"))
     run_case("packaged PHY must remain modular", deb_args, False, "CONFIG_MEDIATEK_2P5G_PHY=y", work)
     make_packages(packages)
-    image_deb = packages / "linux-image-current-filogic_fixture_arm64.deb"
-    shutil.copyfile(image_deb, packages / "linux-image-current-filogic_duplicate_arm64.deb")
+    image_deb = packages / "linux-image-current-edgepi-e87n_fixture_arm64.deb"
+    shutil.copyfile(image_deb, packages / "linux-image-current-edgepi-e87n_duplicate_arm64.deb")
     run_case("ambiguous package sets", deb_args, False, "multiple kernel package sets", work)
-    (packages / "linux-image-current-filogic_duplicate_arm64.deb").unlink()
+    (packages / "linux-image-current-edgepi-e87n_duplicate_arm64.deb").unlink()
     put(image_deb, image_deb.read_bytes()[:80])
     run_case("truncated deb", deb_args, False, "invalid deb ar member", work)
     run_case("missing real-artifact input", ["--extracted-rootfs", work / "nonexistent"], False, "No such file", work)

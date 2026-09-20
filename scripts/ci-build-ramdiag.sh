@@ -55,7 +55,7 @@ boot_mounted=yes
 mount -t ext4 -o ro,noload,loop,offset=$((272 * 1024 * 1024)) -- "$image" "$root"
 root_mounted=yes
 
-release=6.18.51-current-filogic
+release=$(python3 "$repo_dir/scripts/build_config.py" kernel_release)
 kernel="$work/Image"
 dtb="$work/board.dtb"
 boot_initrd="$work/production-initrd"
@@ -69,23 +69,9 @@ cp -L -- "$boot/initrd.img-$release" "$boot_initrd"
 
 input="$work/input"
 mkdir "$input"
-# The checked-in RAMDIAG helper currently names the PID-1 asset
-# `init-network-first` but its asset contract still checks for `init`.  Stage
-# an isolated copy and add the compatibility name there; never mutate the
-# checkout or the source RAMDIAG tree in a CI job.
-ramdiag_source="$work/ramdiag"
-cp -a -- "$repo_dir/scripts/ramdiag" "$ramdiag_source"
-# fit_common imports the bounded DTB parser from factory_firmware.py.  The
-# RAMDIAG tree is staged outside the checkout, so stage that single dependency
-# beside it instead of relying on the caller's PYTHONPATH.
-cp -a -- "$repo_dir/scripts/factory_firmware.py" "$work/factory_firmware.py"
-if [[ ! -e "$ramdiag_source/assets/init" ]]; then
-  [[ -f "$ramdiag_source/assets/init-network-first" ]] || {
-    printf 'FAIL: RAMDIAG source is missing both assets/init and assets/init-network-first\n' >&2
-    exit 1
-  }
-  ln -s init-network-first "$ramdiag_source/assets/init"
-fi
+# Execute the complete source tree so shared build_config/factory dependencies
+# resolve normally; only generated payloads belong in the scratch directory.
+ramdiag_source="$repo_dir/scripts/ramdiag"
 python3 "$ramdiag_source/build-initrd.py" \
 	--root "$root" --boot "$boot" --output-dir "$input"
 python3 "$ramdiag_source/build-fits.py" \

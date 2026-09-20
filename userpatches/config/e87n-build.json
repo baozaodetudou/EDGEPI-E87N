@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "board": "edgepi-e87n",
+  "architecture": "arm64",
+  "release": "trixie",
+  "debian_version": "13",
+  "debian_point": "13.7",
+  "kernel_version": "6.18.52",
+  "kernel_series": "6.18",
+  "kernel_source": "https://github.com/frank-w/BPI-Router-Linux.git",
+  "kernel_commit": "a638fabe36f293e58ab6be002af04b866959c546",
+  "linux_family": "edgepi-e87n",
+  "kernel_release": "6.18.52-current-edgepi-e87n",
+  "armbian_commit": "7c1bb29eb0e7bd75b0703d86fe654b2680e646da",
+  "extra_storage": "no"
+}

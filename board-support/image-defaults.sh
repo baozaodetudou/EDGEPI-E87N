@@ -3,6 +3,8 @@
 set -Eeuo pipefail
 [[ "${1:-}" == --target-chroot && -d /tmp/overlay/e87n-board-support ]] || exit 2
 cd /tmp/overlay/e87n-board-support
+install -d /usr/share/e87n
+install -m 0644 build-provenance.json /usr/share/e87n/build-provenance.json
 
 install -d /etc/ssh/sshd_config.d /etc/systemd/system/sshd-keygen.service.d \
   /etc/systemd/system/ssh.service.d /etc/systemd/system/sshd@.service.d

@@ -18,6 +18,7 @@ import sys
 import tempfile
 
 sys.dont_write_bytecode = True
+from build_config import BUILD
 ASSETS = Path(__file__).resolve().parents[1] / "board-support/factory-boot"
 FILES = {
     "usr/lib/e87n/factory-boot.py": ("factory_boot.py", 0o644),
@@ -93,13 +94,20 @@ def holds(root):
     data = regular(target(root, "var/lib/dpkg/status")).decode()
     statuses = {}
     for paragraph in data.split("\n\n"):
-        fields = dict(re.findall(r"^(Package|Status): (.+)$", paragraph, re.M))
+        fields = dict(re.findall(r"^(Package|Status|Architecture|Version): (.+)$", paragraph, re.M))
         if "Package" in fields:
             require(fields["Package"] not in statuses, "duplicate dpkg package record")
-            statuses[fields["Package"]] = fields.get("Status")
-    for package in ("linux-image-current-filogic", "linux-dtb-current-filogic"):
-        require(statuses.get(package) == "hold ok installed", f"missing existing package hold: {package}")
-    require(not statuses.get("cloud-initramfs-growroot", "").endswith("ok installed"),
+            statuses[fields["Package"]] = fields
+    versions = set()
+    for kind in ("image", "dtb"):
+        package = "linux-" + kind + "-current-" + BUILD["linux_family"]
+        record = statuses.get(package, {})
+        require(record.get("Status") == "hold ok installed", f"missing existing package hold: {package}")
+        require(record.get("Architecture") == "arm64" and record.get("Version"),
+                "kernel/DTB package architecture/version missing: " + package)
+        versions.add(record["Version"])
+    require(len(versions) == 1, "kernel/DTB package versions differ")
+    require(not statuses.get("cloud-initramfs-growroot", {}).get("Status", "").endswith("ok installed"),
             "remove cloud-initramfs-growroot and regenerate initrd before adaptation")
     for name in FORBIDDEN:
         require(not os.path.lexists(target(root, name)), f"unexpected partition growth hook: {name}")

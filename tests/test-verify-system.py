@@ -26,7 +26,7 @@ class SystemAudit(unittest.TestCase):
         self.addCleanup(mock.patch.stopall)
         mock.patch.object(module.shutil, "which", return_value="/fixture/fdtget").start()
         def fdtget(argv, **kwargs):
-            return subprocess.CompletedProcess(argv, 0, "/soc/ethernet@15100000/mac@" + argv[-1][-1] + "\n", "")
+            return subprocess.CompletedProcess(argv, 0, "/soc_netsys/ethernet@15100000/mac@" + argv[-1][-1] + "\n", "")
         mock.patch.object(module.subprocess, "run", side_effect=fdtget).start()
         for source, dest in module.PAIRS.items():
             self.put(dest, (REPO / "board-support" / source).read_bytes())
@@ -66,7 +66,7 @@ class SystemAudit(unittest.TestCase):
         version = (REPO / "packaging/e87n-display/VERSION").read_text().strip()
         paragraphs = [entry + ("\nVersion: " + version if entry.startswith("Package: e87n-display\n") else "")
                       for entry in paragraphs]
-        paragraphs += [f"Package: {name}\nStatus: hold ok installed" for name in ("linux-image-current-filogic", "linux-dtb-current-filogic")]
+        paragraphs += [f"Package: {name}\nStatus: hold ok installed" for name in ("linux-image-current-edgepi-e87n", "linux-dtb-current-edgepi-e87n")]
         self.put("/var/lib/dpkg/status", "\n\n".join(paragraphs).encode())
         self.put("/var/lib/dpkg/info/e87n-display.list", ("\n".join(module.PAIRS.values()) +
                  "\n/etc/e87n/display.json\n/etc/modules-load.d/e87n-display.conf\n").encode())

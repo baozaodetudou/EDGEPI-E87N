@@ -3,6 +3,9 @@
 set -Eeuo pipefail
 export LC_ALL=C
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+kernel_release=$(python3 "$script_dir/build_config.py" kernel_release)
+# shellcheck source=scripts/loop-partition-nodes.sh
+source "$script_dir/loop-partition-nodes.sh"
 usage() {
 	printf '%s\n' \
 		'Usage: sudo bash scripts/verify-image.sh [--release bookworm|trixie] [--require-usb-root] [--headless] [--require-display-fan] [--require-system] [--] existing.img' \
@@ -175,6 +178,7 @@ allocated=$(losetup --find --show --read-only --partscan "$image_fd")
 loopdev=$allocated
 printf 'Owned read-only loop: %s\n' "$loopdev"
 for device in "$loopdev" "${loopdev}p1" "${loopdev}p2"; do
+	e87n_loop_partition_node "$device"
 	# Kernel partition registration can precede udev's device nodes (observed
 	# on the ARM64 VM). Retry only lookup errors; never accept a writable loop.
 	readonly_state=''
@@ -207,16 +211,16 @@ bash "$script_dir/verify-artifacts.sh" --extracted-rootfs "$audit_dir/root" --bo
 
 if [[ "$require_display_fan" == yes ]]; then
 	python3 "$script_dir/verify-display-fan.py" --rootfs "$audit_dir/root" \
-		--config "$audit_dir/boot/config-6.18.51-current-filogic" \
-		--dtb "$audit_dir/boot/dtb-6.18.51-current-filogic/mediatek/mt7987a-edgepi-e87n.dtb"
+		--config "$audit_dir/boot/config-$kernel_release" \
+		--dtb "$audit_dir/boot/dtb-$kernel_release/mediatek/mt7987a-edgepi-e87n.dtb"
 fi
 if [[ "$require_system" == yes ]]; then
 	verify_args=(--rootfs "$audit_dir/root" --bootfs "$audit_dir/boot")
 	[[ "$headless" == yes ]] && verify_args+=(--headless)
 	python3 "$script_dir/verify-system.py" "${verify_args[@]}"
 	bash "$script_dir/verify-lts-platform.sh" \
-		--config "$audit_dir/boot/config-6.18.51-current-filogic" \
-		--dtb "$audit_dir/boot/dtb-6.18.51-current-filogic/mediatek/mt7987a-edgepi-e87n.dtb"
+		--config "$audit_dir/boot/config-$kernel_release" \
+		--dtb "$audit_dir/boot/dtb-$kernel_release/mediatek/mt7987a-edgepi-e87n.dtb"
 fi
 
 # Inspect every extlinux-selected initrd, resolving symlinks within the bootfs.

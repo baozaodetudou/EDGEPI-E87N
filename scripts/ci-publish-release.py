@@ -2,6 +2,7 @@
 """Publish verified CI assets through a draft; failures never trigger cleanup."""
 import argparse
 import hashlib
+from importlib import import_module
 import json
 import os
 from pathlib import Path
@@ -10,11 +11,16 @@ import stat
 import subprocess
 import sys
 
+from build_config import BUILD, TARGET
+from factory_firmware import FORMAT
+
+simulation = import_module("ci-simulation")
+
 SAFE = r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}"
 SHA = r"[0-9a-fA-F]{40}"
 FIXED = {"image-build-metadata.json", "display-build-metadata.json",
-         "kernel-packages.tar.xz", "build-evidence.tar.xz", "RELEASE-NOTES.md", "SHA256SUMS"}
-TARGET = {"debian": "13", "release": "trixie", "kernel": "6.18.51", "extra_storage": "no"}
+         "kernel-packages.tar.xz", "build-evidence.tar.xz", "RELEASE-NOTES.md", "SHA256SUMS",
+         "simulation-result.json"}
 
 
 def require(condition, message):
@@ -116,6 +122,7 @@ def validate_assets(directory, source_commit):
         manifest[match[2]] = match[1].lower()
     require(set(manifest) == set(files) - {"SHA256SUMS"}, "Checksum manifest coverage mismatch")
     require(all(files[name][2] == sha for name, sha in manifest.items()), "Asset checksum mismatch")
+    metadata_by_kind = {}
     for kind in ("image", "display"):
         metadata = json.loads(files[f"{kind}-build-metadata.json"][0].read_text(encoding="utf-8"))
         require(isinstance(metadata, dict) and metadata.get("kind") == kind and
@@ -124,10 +131,24 @@ def validate_assets(directory, source_commit):
                 all(metadata["target"].get(k) == v for k, v in TARGET.items()) and
                 metadata.get("collection_errors") == [], "Build metadata is not a successful current-source target")
         require(kind != "image" or metadata.get("image_static_audit") == "passed", "Image audit has not passed")
-        require(kind != "image" or metadata.get("factory_format") == "e87n-uboot-firmware-tar-v1",
+        require(all(metadata.get(key) == BUILD[key] for key in
+                    ("armbian_commit", "kernel_commit", "kernel_source", "kernel_release")),
+                "Build source configuration mismatch")
+        require(kind != "image" or metadata.get("factory_format") == FORMAT,
                 "Factory firmware format mismatch")
         require(kind != "image" or metadata.get("factory_static_audit") == "passed",
                 "Factory firmware audit has not passed")
+        require(kind != "image" or metadata.get("simulation_validation") == "passed",
+                "Same-build simulation has not passed")
+        metadata_by_kind[kind] = metadata
+    image_metadata = metadata_by_kind["image"]
+    require(all(metadata_by_kind["display"].get(key) == image_metadata.get(key)
+                for key in ("run_id", "run_attempt")), "Build run identity mismatch")
+    simulation.verify_report(
+        simulation.load_report(files["simulation-result.json"][0]),
+        firmware_sha256=files[next(iter(images))][2], display_sha256=files[next(iter(debs))][2],
+        source_commit=source_commit, run_id=image_metadata.get("run_id"),
+        run_attempt=image_metadata.get("run_attempt"))
     return files
 
 

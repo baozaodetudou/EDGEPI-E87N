@@ -15,6 +15,7 @@ from unittest import mock
 
 sys.dont_write_bytecode = True
 REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO / "scripts"))
 
 
 def load(name, path):
@@ -159,8 +160,8 @@ class OfflineTests(unittest.TestCase):
         self.fstab = f"# keep\nUUID={UUID} / ext4 defaults,commit=120 0 1\nUUID=old /boot ext4 defaults 0 2\ntmpfs /tmp tmpfs defaults 0 0\n"
         (self.root / "etc/fstab").write_text(self.fstab)
         (self.root / "var/lib/dpkg/status").write_text("\n\n".join(
-            f"Package: {name}\nStatus: hold ok installed\nVersion: 26.11\n"
-            for name in ("linux-image-current-filogic", "linux-dtb-current-filogic")))
+            f"Package: {name}\nStatus: hold ok installed\nVersion: 26.11\nArchitecture: arm64\n"
+            for name in ("linux-image-current-edgepi-e87n", "linux-dtb-current-edgepi-e87n")))
         (self.root / "var/lib/apt/lists/index").write_bytes(b"apt-cache")
         (self.root / "var/lib/apt/lists/partial/temp").write_bytes(b"partial")
         (self.root / "usr/lib/modules/keep/module").write_bytes(b"essential")
@@ -240,6 +241,16 @@ class OfflineTests(unittest.TestCase):
         os.mkfifo(self.boot / "fifo")
         with self.assertRaises(ValueError):
             prep.adapt(self.root, self.boot, UUID)
+
+    def test_mismatched_held_kernel_packages_fail_before_copy(self):
+        path = self.root / "var/lib/dpkg/status"
+        original = path.read_text()
+        for changed in (original.replace("Version: 26.11", "Version: 26.12", 1),
+                        original.replace("Architecture: arm64", "Architecture: amd64", 1)):
+            path.write_text(changed)
+            with self.assertRaisesRegex(ValueError, "versions differ|architecture/version"):
+                prep.adapt(self.root, self.boot, UUID)
+            self.assertFalse((self.root / "boot").exists())
 
     def test_verify_detects_tamper_without_repair(self):
         prep.adapt(self.root, self.boot, UUID)

@@ -12,7 +12,7 @@ import tempfile
 
 repo = Path(sys.argv[1])
 script = repo / "scripts/verify-initramfs.py"
-release = "6.12.108-current-filogic"
+release = "6.12.108-current-edgepi-e87n"
 # Independent fixture expectations, not imported from the verifier.
 drivers = {
     "USB_COMMON": "drivers/usb/common/usb-common",

@@ -1,5 +1,9 @@
 # U-Boot 固件获取、发布状态与校验
 
+> 当前正在完整重构并编译 Debian 13.7 / 6.18.52，必须通过同产物 Docker/QEMU 门禁后
+> 才产生新版交付。下列 6.18.51 / R4 哈希仅为历史记录，不能当作新版验收结果。
+> 新构建以仓库 README、版本清单和对应发布报告为准。
+
 本仓库公开的是构建源码、板级补丁、Debian 小屏程序、测试与文档。
 **R4 本地已生成，对同一 TAR 的独立最终审计 EXIT 0，准确文件信息见下文。** R4 重新打包历史 Actions 34737922588 的原始 RAW，修正 DTB 的 1 GiB/保留区及 bootargs（含 902 等效修正），没有完整重编 Armbian 或内核。V3 因内核地址修正已废弃，不作为交付、不发布其哈希。主机导出及 SHA-256 比对已完成，未来新源码工作流未 dispatch，远端 Release 发布未确认。
 唯一的[手动发布流程](GITHUB-ACTIONS.md)无需填写参数，每次重新构建本次运行选定的 main 提交，自动生成 tag 并发布到 [Releases](https://github.com/baozaodetudou/EDGEPI-E87N/releases)。只有手动 Run workflow 才执行；push、tag push 和定时任务均不触发。

@@ -30,7 +30,7 @@ SPEC.loader.exec_module(audit)  # the HOST verifier, never a target module
 # Keep the contract independent from implementation constants.
 BUILTINS = """SPI SPI_MASTER SPI_MT65XX STAGING FB FB_DEVICE BACKLIGHT_CLASS_DEVICE
 BACKLIGHT_PWM THERMAL MTK_LVTS_THERMAL PWM PWM_MEDIATEK HWMON SENSORS_PWM_FAN""".split()
-CONFIG = ("# Linux/arm64 6.18.51 Kernel Configuration\n" +
+CONFIG = ("# Linux/arm64 6.18.52 Kernel Configuration\n" +
           "".join("CONFIG_%s=y\n" % name for name in BUILTINS) +
           "CONFIG_FB_TFT=m\nCONFIG_FB_TFT_NV3007=m\n" +
           "# CONFIG_FRAMEBUFFER_CONSOLE is not set\n# CONFIG_CPU_FREQ is not set\n")
@@ -46,7 +46,7 @@ Restart=on-failure
 WantedBy=multi-user.target
 """
 PACKAGE = "usr/lib/python3/dist-packages/e87n/"
-MODULES = "lib/modules/6.18.51-current-filogic/kernel/drivers/staging/fbtft/"
+MODULES = "lib/modules/6.18.52-current-edgepi-e87n/kernel/drivers/staging/fbtft/"
 UNIT = "usr/lib/systemd/system/e87n-display.service"
 ENABLE = "etc/systemd/system/multi-user.target.wants/e87n-display.service"
 PANEL = "/soc/spi@11009800/display@0"
@@ -161,8 +161,8 @@ def snapshot(root):
 
 class ConfigTests(unittest.TestCase):
     def test_valid_config_and_typed_values(self):
-        for version in ("6.18.51", "6.18.51-current-filogic"):
-            audit.check_config((CONFIG.replace("6.18.51", version) +
+        for version in ("6.18.52", "6.18.52-current-edgepi-e87n"):
+            audit.check_config((CONFIG.replace("6.18.52", version) +
                                 'CONFIG_NUMBER=-2\nCONFIG_HEX=0xAB\nCONFIG_MT76x02_LIB=m\n'
                                 'CONFIG_TEXT="literal $(this_is_not_executed)"\n').encode())
 
@@ -177,9 +177,9 @@ class ConfigTests(unittest.TestCase):
                         audit.check_config(CONFIG.replace(line, replacement).encode())
 
     def test_wrong_version_architecture_and_duplicate_header(self):
-        for text in (CONFIG.replace("6.18.51", "6.18.50"), CONFIG.replace("6.18.51", "6.18.510"),
-                     CONFIG.replace("arm64", "x86_64"), CONFIG.replace("6.18.51", "6.18.51-evil"),
-                     CONFIG + "# Linux/arm64 6.18.51 Kernel Configuration\n"):
+        for text in (CONFIG.replace("6.18.52", "6.18.50"), CONFIG.replace("6.18.52", "6.18.520"),
+                     CONFIG.replace("arm64", "x86_64"), CONFIG.replace("6.18.52", "6.18.52-evil"),
+                     CONFIG + "# Linux/arm64 6.18.52 Kernel Configuration\n"):
             with self.subTest(text=text.splitlines()[0]):
                 with self.assertRaisesRegex(audit.Invalid, "header"):
                     audit.check_config(text.encode())
@@ -430,7 +430,7 @@ class RootfsTests(unittest.TestCase):
         path.write_bytes(b"")
         self.reject("invalid installed module")
         path.unlink()
-        write(self.root, MODULES.replace("6.18.51", "6.18.50") + "fb_nv3007.ko", data)
+        write(self.root, MODULES.replace("6.18.52", "6.18.50") + "fb_nv3007.ko", data)
         self.reject("exactly one installed fb_nv3007")
         write(self.root, MODULES.replace("staging/fbtft", "video/fbdev") + "fb_nv3007.ko", data)
         self.reject("exactly one installed fb_nv3007")

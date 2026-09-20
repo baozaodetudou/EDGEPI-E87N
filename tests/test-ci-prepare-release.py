@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Release preparation fixtures: fake bytes, no network, sudo or target execution."""
 import hashlib
+import copy
+from importlib import import_module
 import json
 import os
 from pathlib import Path
@@ -12,6 +14,12 @@ import tempfile
 import unittest
 
 REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO / "scripts"))
+from build_config import BUILD, TARGET
+from factory_firmware import FORMAT
+
+fixture_report = import_module("test-ci-simulation").fixture_report
+
 COMMIT = "2a60011f98d33b9cc38c005061ec8935e029874c"
 VERSION = (REPO / "packaging/e87n-display/VERSION").read_text().strip()
 DEB = f"e87n-display_{VERSION}_all.deb"
@@ -24,6 +32,10 @@ class ReleasePreparation(unittest.TestCase):
         self.root = Path(temporary.name).resolve()
         self.output = self.root / "release"
         self.put("scripts/ci-prepare-release.py", (REPO / "scripts/ci-prepare-release.py").read_bytes())
+        for prefix in ("", "image-job/", "display-job/"):
+            for name in ("scripts/build_config.py", "userpatches/config/e87n-build.json",
+                         "scripts/ci-simulation.py", "scripts/factory_firmware.py", "testing/validate.py"):
+                self.put(prefix + name, (REPO / name).read_bytes())
         self.put("packaging/e87n-display/VERSION", VERSION)
         # Use the real collector to establish its exact current layout, with
         # synthetic build products. Neither collector nor preparer runs them.
@@ -33,8 +45,14 @@ class ReleasePreparation(unittest.TestCase):
             self.put(f"{kind}-job/packaging/e87n-display/VERSION", VERSION)
             self.put(f"{kind}-job/output/ci/logs/{kind}.log", "fake build log\n")
             self.put(f"{kind}-job/output/ci/logs/{kind}.exit-code", "0\n")
+            # The always() evidence step runs on successful builds as well.
+            self.put(f"{kind}-job/output/ci/failure-evidence/{kind}/run.txt", "fixture evidence\n")
             if kind == "image":
                 self.put("image-job/output/ci/firmware/candidate-uboot-firmware.tar", b"fake firmware, not tar\x00")
+                display = b"fake independent package, not a deb"
+                self.put(f"image-job/output/ci/simulation-display-debs/{DEB}", display)
+                self.put("image-job/output/ci/simulation/result.json", json.dumps(fixture_report(
+                    b"fake firmware, not tar\x00", display, COMMIT, "34737922588", "1")))
                 self.put("image-job/source/armbian-build/output/debs/kernel.deb", b"fake kernel package")
                 self.put("image-job/source/armbian-build/output/debs/extra/trixie-utils/kernel.deb", b"different nested package")
                 self.put("image-job/source/armbian-build/output/logs/build.log.xz", b"fake compressed log")
@@ -86,7 +104,7 @@ class ReleasePreparation(unittest.TestCase):
     def run_cli(self, **overrides):
         args = {"image-artifact": str(self.root / "image"), "display-artifact": str(self.root / "display"),
                 "output": str(self.output), "source-commit": COMMIT, "run-id": "34737922588",
-                "run-attempt": "1", "tag": "e87n-test-6.18.51", "repository": "baozaodetudou/EDGEPI-E87N"}
+                "run-attempt": "1", "tag": "e87n-test-" + BUILD["kernel_version"], "repository": "baozaodetudou/EDGEPI-E87N"}
         args.update(overrides)
         return subprocess.run([sys.executable, str(self.root / "scripts/ci-prepare-release.py"),
                                *(item for key, value in args.items() for item in ("--" + key, value))],
@@ -104,21 +122,25 @@ class ReleasePreparation(unittest.TestCase):
     def test_valid_exact_assets_hashes_evidence_and_recursive_packages(self):
         # Cross multiple read chunks without allocating or unpacking a real image.
         self.put("image/images/candidate-uboot-firmware.tar", b"fake\x00" * 450000)
+        report_path = self.root / "image/validation/qemu/result.json"
+        report = json.loads(report_path.read_text())
+        report["artifacts"]["firmware_tar_sha256"] = hashlib.sha256(b"fake\x00" * 450000).hexdigest()
+        report_path.write_text(json.dumps(report))
         self.manifest("image")
         result = self.run_cli()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual({p.name for p in self.output.iterdir()}, {
             "candidate-uboot-firmware.tar", DEB, "image-build-metadata.json", "display-build-metadata.json",
-            "kernel-packages.tar.xz", "build-evidence.tar.xz", "SHA256SUMS", "RELEASE-NOTES.md"})
+            "kernel-packages.tar.xz", "build-evidence.tar.xz", "SHA256SUMS", "RELEASE-NOTES.md", "simulation-result.json"})
         for kind, source, target in (("image", "images/candidate-uboot-firmware.tar", "candidate-uboot-firmware.tar"),
                                      ("display", "packages/display/" + DEB, DEB),
                                      ("image", "build-metadata.json", "image-build-metadata.json"),
                                      ("display", "build-metadata.json", "display-build-metadata.json")):
             self.assertEqual((self.root / kind / source).read_bytes(), (self.output / target).read_bytes())
         sums = (self.output / "SHA256SUMS").read_text().splitlines()
-        self.assertEqual(len(sums), 7)
+        self.assertEqual(len(sums), 8)
         metadata = json.loads((self.output / "image-build-metadata.json").read_text())
-        self.assertEqual(metadata["factory_format"], "e87n-uboot-firmware-tar-v1")
+        self.assertEqual(metadata["factory_format"], FORMAT)
         self.assertEqual(metadata["factory_static_audit"], "passed")
         for line in sums:
             checksum, name = line.split("  ", 1)
@@ -130,7 +152,8 @@ class ReleasePreparation(unittest.TestCase):
                     f"{kind}/{p.relative_to(self.root / kind).as_posix()}": p
                     for kind in ("image", "display") for p in (self.root / kind).rglob("*")
                     if p.is_file() and (p.name in ("SHA256SUMS", "build-metadata.json")
-                                       or "logs" in p.relative_to(self.root / kind).parts)})):
+                                       or "logs" in p.relative_to(self.root / kind).parts
+                                       or "validation" in p.relative_to(self.root / kind).parts)})):
             with tarfile.open(self.output / archive) as bundle:
                 self.assertEqual(set(bundle.getnames()), set(expected))
                 for member in bundle:
@@ -138,17 +161,19 @@ class ReleasePreparation(unittest.TestCase):
                     self.assertEqual((member.uid, member.gid, member.mode), (0, 0, 0o644))
                     self.assertEqual(bundle.extractfile(member).read(), expected[member.name].read_bytes())
         notes = (self.output / "RELEASE-NOTES.md").read_text()
-        self.assertIn("/releases/download/e87n-test-6.18.51/candidate-uboot-firmware.tar", notes)
-        self.assertIn("/releases/download/e87n-test-6.18.51/" + DEB, notes)
+        self.assertIn("/releases/download/e87n-test-" + BUILD["kernel_version"] + "/candidate-uboot-firmware.tar", notes)
+        self.assertIn("/releases/download/e87n-test-" + BUILD["kernel_version"] + "/" + DEB, notes)
         self.assertIn("仅有以上两个二进制附件", notes)
         self.assertIn(hashlib.sha256((self.output / "candidate-uboot-firmware.tar").read_bytes()).hexdigest(), notes)
         self.assertIn(hashlib.sha256((self.output / DEB).read_bytes()).hexdigest(), notes)
         self.assertNotIn("sha256sum -c SHA256SUMS", notes)
         self.assertNotIn(".img.xz", notes)
-        for required in ("experimental", "Debian 13", "trixie", "6.18.51", "extra_storage=no", "root / doumao",
-                         "SSH port 22", "LAN", "passwd", "DHCP", "zh_CN.UTF-8", "Asia/Shanghai", "static checks only",
+        for required in ("experimental", "Debian 13", "trixie", BUILD["kernel_version"], "extra_storage=no", "root / doumao",
+                         BUILD["kernel_source"], BUILD["kernel_release"], BUILD["kernel_commit"], BUILD["armbian_commit"],
+                         "same-build Docker/QEMU acceptance",
+                         "SSH port 22", "LAN", "passwd", "DHCP", "zh_CN.UTF-8", "Asia/Shanghai", "static checks",
                          "No board has been validated", "Do not flash", "eMMC", "NOT hardware validated",
-                         "software validated", "uncompressed USTAR", "e87n-uboot-firmware-tar-v1",
+                         "software validated", "uncompressed USTAR", FORMAT,
                          "sysupgrade-edgepi-e87n/kernel", "(FIT)", "sysupgrade-edgepi-e87n/root", "(ext4)",
                          "only in the original U-Boot recovery page's `firmware` field",
                          "Never use the SIMG, GPT or FIP fields", "never use LuCI sysupgrade",
@@ -177,6 +202,35 @@ class ReleasePreparation(unittest.TestCase):
         self.manifest("image")
         self.rejected("empty RAM diagnostic payload")
 
+    def test_missing_or_failed_simulation_evidence_is_rejected(self):
+        path = self.root / "image/validation/qemu/result.json"
+        report = json.loads(path.read_text())
+        path.unlink()
+        self.manifest("image")
+        self.rejected("missing simulation evidence")
+        path.write_text(json.dumps({**report, "status": "FAIL"}))
+        self.manifest("image")
+        self.rejected("gate did not pass")
+
+    def test_simulation_must_bind_source_attempt_and_exact_payloads(self):
+        path = self.root / "image/validation/qemu/result.json"
+        original = json.loads(path.read_text())
+        for section, key, value in (
+                ("binding", "source_commit", "a" * 40), ("binding", "run_id", "1"),
+                ("binding", "run_attempt", "2"), ("artifacts", "firmware_tar_sha256", "a" * 64),
+                ("artifacts", "display_deb_sha256", "a" * 64), ("guest", "display_package", False)):
+            report = copy.deepcopy(original)
+            report[section][key] = value
+            path.write_text(json.dumps(report))
+            self.manifest("image")
+            with self.subTest(section=section, key=key):
+                self.rejected()
+
+    def test_independent_display_job_must_match_tested_deb_exactly(self):
+        self.put("display/packages/display/" + DEB, b"same version but different package bytes")
+        self.manifest("display")
+        self.rejected("display_deb_sha256")
+
     def test_failed_or_absent_success(self):
         for kind in ("image", "display"):
             for outcome in ("failure", "cancelled", "skipped", "", None):
@@ -196,7 +250,7 @@ class ReleasePreparation(unittest.TestCase):
                     self.metadata(kind, key, good)
 
     def test_target_mismatch(self):
-        target = {"debian": "13", "release": "trixie", "kernel": "6.18.51", "extra_storage": "no"}
+        target = TARGET
         for kind in ("image", "display"):
             for key, bad in (("debian", "12"), ("release", "bookworm"), ("kernel", "6.12"), ("extra_storage", "yes")):
                 with self.subTest(kind=kind, key=key):
@@ -206,8 +260,8 @@ class ReleasePreparation(unittest.TestCase):
 
     def test_missing_or_mismatched_framework_and_kernel_pins(self):
         for kind in ("image", "display"):
-            for key, pin in (("armbian_commit", "7c1bb29eb0e7bd75b0703d86fe654b2680e646da"),
-                             ("kernel_commit", "f6388029ea9e2c9e807d73827658738ea131faee")):
+            for key in ("armbian_commit", "kernel_commit", "kernel_source", "kernel_release"):
+                pin = BUILD[key]
                 for value in ("a" * 40, None):
                     with self.subTest(kind=kind, key=key, value=value):
                         self.metadata(kind, key, value, remove=value is None)
@@ -227,7 +281,7 @@ class ReleasePreparation(unittest.TestCase):
 
     def test_factory_format_and_static_audit_are_required(self):
         for key, expected, invalid in (
-                ("factory_format", "e87n-uboot-firmware-tar-v1", ["raw-gpt", "e87n-uboot-firmware-tar-v2", "", None]),
+                ("factory_format", FORMAT, ["raw-gpt", "e87n-uboot-firmware-tar-v1", "", None]),
                 ("factory_static_audit", "passed", ["not proven", "failed", "not applicable", True, None])):
             for value in invalid:
                 with self.subTest(key=key, value=value):

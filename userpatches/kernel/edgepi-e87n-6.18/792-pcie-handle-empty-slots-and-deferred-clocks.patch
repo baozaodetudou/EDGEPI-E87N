@@ -1,6 +1,6 @@
 Subject: [PATCH] PCI: mediatek-gen3: retain E87N empty-slot and defer diagnostics
 
-Rebase the existing opt-in E87N changes onto Linux 6.18.51. Return through
+Revalidated on Frank-W Linux 6.18.52. Return through
 the normal startup failure cleanup; this does not implement hot-plug.
 ---
 diff --git a/drivers/pci/controller/pcie-mediatek-gen3.c b/drivers/pci/controller/pcie-mediatek-gen3.c

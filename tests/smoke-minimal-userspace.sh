@@ -95,6 +95,8 @@ install -d "$scratch/root/run/sshd" "$scratch/root/tmp/overlay/e87n-board-suppor
 printf '#!/bin/sh\nexit 101\n' > "$scratch/root/usr/sbin/policy-rc.d"
 chmod 0755 "$scratch/root/usr/sbin/policy-rc.d"
 cp -a "$repo/board-support/." "$scratch/root/tmp/overlay/e87n-board-support/"
+python3 "$repo/scripts/write-build-provenance.py" \
+  --output "$scratch/root/tmp/overlay/e87n-board-support/build-provenance.json"
 cp "$repo/docs/DEFAULTS.md" "$scratch/root/tmp/overlay/e87n-board-support/docs/"
 cp -a "$repo/packaging" "$repo/board-support" "$scratch/root/tmp/overlay/e87n-package/"
 cp "$repo/scripts/build-display-deb.sh" "$scratch/root/tmp/overlay/e87n-package/scripts/"

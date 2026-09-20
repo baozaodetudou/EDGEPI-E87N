@@ -21,7 +21,10 @@ import sys
 import tempfile
 
 
-RELEASE = "6.18.51-current-filogic"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from build_config import KERNEL_RELEASE
+
+RELEASE = KERNEL_RELEASE
 ASSETS = Path(__file__).resolve().parent / "assets"
 MAX_INITRD = 256 * 1024 * 1024
 
@@ -238,7 +241,7 @@ def build(source_root: Path, boot: Path, output: Path) -> dict[str, object]:
     boot = boot.resolve(strict=True)
     output = output.absolute()
     output.mkdir(parents=True, exist_ok=True)
-    for name in ("init", "services", "beacon.py", "stop-watchdog.py", "sshd_config"):
+    for name in ("init-network-first", "services", "beacon.py", "stop-watchdog.py", "sshd_config"):
         require((ASSETS / name).is_file(), f"missing diagnostic asset: {name}")
 
     with tempfile.TemporaryDirectory(prefix="e87n-ramdiag-initrd-", dir=output) as temporary:

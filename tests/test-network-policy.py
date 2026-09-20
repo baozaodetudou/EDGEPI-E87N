@@ -10,6 +10,7 @@ Does not build the full board DTB or execute systemd's MAC generator.
 
 import configparser
 import fnmatch
+import os
 from pathlib import Path
 import re
 import shutil
@@ -103,7 +104,12 @@ class EthernetAliasTests(unittest.TestCase):
     def setUpClass(cls):
         source_patch = (PATCH_DIR / "0000-add-mt7987-e87n-dts.patch").read_text()
         cls.original = added_source(source_patch, DTS_PATH)
-        cls.soc = added_source(source_patch, "arch/arm64/boot/dts/mediatek/mt7987.dtsi")
+        # Minimal provider fixture for alias resolution, not a copy of the SoC.
+        # The real maintained DTS is verified by the native build/DTB audit.
+        cls.soc = '''
+        gmac0: mac@0 { compatible = "mediatek,eth-mac"; reg = <0>; };
+        gmac1: mac@1 { compatible = "mediatek,eth-mac"; reg = <1>; };
+        '''
         cls.patch_text = ALIAS_PATCH.read_text()
         patch_tool = find_gnu_patch()
         # Real patch application is limited to disposable reconstructed source.
@@ -121,16 +127,11 @@ class EthernetAliasTests(unittest.TestCase):
                 raise AssertionError(f"901 must apply with zero offset/fuzz:\n{output}")
             cls.board = target.read_text()
 
-    def test_midfile_hunk_has_symmetric_three_line_context(self):
-        # GNU patch requires a hunk with more prefix than suffix context to
-        # match EOF. This insertion is mid-file, so keep standard diff -U3.
-        header = re.search(r"^@@ -14,6 \+14,8 @@\n", self.patch_text, re.MULTILINE)
-        self.assertIsNotNone(header)
-        hunk = self.patch_text[header.end():].splitlines()
-        changed = [i for i, line in enumerate(hunk) if line.startswith(("+", "-"))]
-        self.assertEqual(changed, [3, 4])
-        self.assertEqual(hunk[:3], [" ", " \taliases {", " \t\tserial0 = &uart0;"])
-        self.assertEqual(hunk[5:], [" \t};", " ", " \tchosen {"])
+    def test_board_inherits_maintained_soc(self):
+        self.assertIn('#include "mt7987a.dtsi"', self.board)
+        source_patch = (PATCH_DIR / "0000-add-mt7987-e87n-dts.patch").read_text()
+        self.assertNotIn('+++ b/arch/arm64/boot/dts/mediatek/mt7987.dtsi', source_patch)
+        self.assertNotIn('+++ b/arch/arm64/boot/dts/mediatek/mt7987a.dtsi', source_patch)
 
     def test_patch_only_adds_two_aliases_to_original_0000_context(self):
         self.assertEqual(re.findall(r"^\+\+\+ b/(.+)$", self.patch_text, re.MULTILINE),
@@ -141,7 +142,7 @@ class EthernetAliasTests(unittest.TestCase):
             anchor, anchor + "\t\tethernet0 = &gmac0;\n\t\tethernet1 = &gmac1;\n")
         self.assertEqual(self.board, expected)
 
-    def test_aliases_target_distinct_real_gmac_nodes(self):
+    def test_aliases_target_distinct_enabled_gmac_references(self):
         aliases = re.search(r"\baliases\s*\{([^{}]*)\};", self.board)
         self.assertIsNotNone(aliases)
         pairs = re.findall(r"\b(ethernet\d*)\s*=\s*&([\w]+)\s*;", aliases[1])
@@ -166,8 +167,7 @@ class EthernetAliasTests(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("dtc"), "dtc unavailable; static alias checks still run")
     def test_dtc_resolves_aliases_to_different_mac_paths(self):
-        # Reduced fixture, not the complete MT7987 DTB. Use actual alias and
-        # GMAC declarations from the patched board/SoC, not invented labels.
+        # Reduced fixture: actual board aliases plus independent MAC providers.
         aliases = re.search(r"\baliases\s*\{[^{}]*\};", self.board)[0]
         nodes = [re.search(rf"\bgmac{i}:\s*mac@{i}\s*\{{[^{{}}]*\}};", self.soc)[0]
                  for i in (0, 1)]
@@ -177,11 +177,15 @@ class EthernetAliasTests(unittest.TestCase):
     #size-cells = <1>;
     uart0: serial {};
     %s
-    ethernet@15100000 {
+    soc_netsys {
+      #address-cells = <1>;
+      #size-cells = <1>;
+      ethernet@15100000 {
         reg = <0x15100000 0x80000>;
         #address-cells = <1>;
         #size-cells = <0>;
         %s
+      };
     };
 };
 """ % (aliases, "\n".join(nodes))
@@ -190,8 +194,18 @@ class EthernetAliasTests(unittest.TestCase):
         decoded = subprocess.run(["dtc", "-I", "dtb", "-O", "dts", "-"],
                                  input=compiled.stdout, capture_output=True, check=True)
         for i in (0, 1):
-            self.assertIn(f'ethernet{i} = "/ethernet@15100000/mac@{i}";',
+            self.assertIn(f'ethernet{i} = "/soc_netsys/ethernet@15100000/mac@{i}";',
                           decoded.stdout.decode())
+
+    @unittest.skipUnless(os.environ.get("E87N_TEST_DTB"), "native DTB not supplied")
+    def test_native_dtb_aliases(self):
+        for index in (0, 1):
+            result = subprocess.run(
+                ["fdtget", "-t", "s", os.environ["E87N_TEST_DTB"],
+                 "/aliases", f"ethernet{index}"],
+                text=True, capture_output=True, check=True)
+            self.assertEqual(result.stdout.strip(),
+                             f"/soc_netsys/ethernet@15100000/mac@{index}")
 
 
 class NetworkPolicyTests(unittest.TestCase):

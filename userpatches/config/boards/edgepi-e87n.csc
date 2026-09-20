@@ -31,7 +31,7 @@ function add_host_dependencies__edgepi_e87n_image_validation() {
 function post_family_config__edgepi_e87n_existing_uboot() {
 	# Disable bootloader artifacts only. Writing the whole image to eMMC
 	# still replaces its GPT and user-area contents; see docs/first-boot.md.
-	# The isolated edgepi-e87n family keeps LINUXFAMILY=filogic for packaging.
+	# Packages use the isolated edgepi-e87n family.
 	declare -g ATF_COMPILE="no"
 	declare -g BOOTCONFIG="none"
 	declare -g UBOOT_TARGET_MAP=";;"
@@ -66,8 +66,22 @@ function custom_kernel_config__edgepi_e87n_first_boot() {
 		esac
 	done
 	opts_m=("${remaining_modules[@]}")
+	# These providers and QEMU boot devices must survive inherited module/off
+	# requests: the exact production kernel is also booted on QEMU virt.
+	local -a remaining_off=() remaining_qemu_modules=()
+	local boot_providers=' COMMON_CLK_MT7987_ETHSYS VIRTIO VIRTIO_MMIO VIRTIO_BLK VIRTIO_NET SERIAL_AMBA_PL011 SERIAL_AMBA_PL011_CONSOLE '
+	for option in "${opts_m[@]}"; do
+		[[ "$boot_providers" == *" ${option#CONFIG_} "* ]] || remaining_qemu_modules+=("$option")
+	done
+	for option in "${opts_n[@]}"; do
+		[[ "$boot_providers" == *" ${option#CONFIG_} "* ]] || remaining_off+=("$option")
+	done
+	opts_m=("${remaining_qemu_modules[@]}")
+	opts_n=("${remaining_off[@]}")
 	opts_y+=(
-		ARCH_MEDIATEK OF PINCTRL_MT7987 COMMON_CLK_MT7987
+		ARCH_MEDIATEK OF PINCTRL_MT7987 COMMON_CLK_MT7987 COMMON_CLK_MT7987_ETHSYS
+		VIRTIO VIRTIO_MMIO VIRTIO_BLK VIRTIO_NET
+		SERIAL_AMBA_PL011 SERIAL_AMBA_PL011_CONSOLE
 		REGULATOR_FIXED_VOLTAGE
 		WATCHDOG_HANDLE_BOOT_ENABLED
 		WATCHDOG MEDIATEK_WATCHDOG MFD_SYSCON NVMEM NVMEM_MTK_EFUSE
@@ -95,7 +109,7 @@ function custom_kernel_config__edgepi_e87n_first_boot() {
 	# without this, a healthy kernel can be reset during early boot.
 	opts_val["WATCHDOG_OPEN_TIMEOUT"]="0"
 	# The serial console remains available; fbcon must not overwrite the dashboard.
-	# udev and modules-load load the board-specific SPI panel after rootfs is ready.
+	# The panel DT node is disabled until explicitly enabled after board validation.
 	opts_m+=(FB_TFT FB_TFT_NV3007)
 	# Upstream 6.18 uses the mediatek/ PHY subdirectory and the 2P5GE symbol.
 	# Firmware is installed in rootfs; keep the matching PHY driver modular.

@@ -13,11 +13,39 @@ fi
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 SRC="${1:-$repo_dir/source/armbian-build}"
 USERPATCHES_PATH="$repo_dir/userpatches"
+exit_with_error() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+BUILD_JSON="$USERPATCHES_PATH/config/e87n-build.json"
+[[ -f "$BUILD_JSON" ]] || { printf 'ERROR: missing central build manifest: %s\n' "$BUILD_JSON" >&2; exit 1; }
+
+json_value() {
+	python3 - "$BUILD_JSON" "$1" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    value = json.load(stream)[sys.argv[2]]
+if isinstance(value, bool):
+    print("yes" if value else "no")
+else:
+    print(value)
+PY
+}
+
+build_board=$(json_value board)
+build_family=$(json_value linux_family)
+build_kernel_source=$(json_value kernel_source)
+build_kernel_commit=$(json_value kernel_commit)
+build_kernel_series=$(json_value kernel_series)
+build_kernel_version=$(json_value kernel_version)
+build_kernel_release=$(json_value kernel_release)
+[[ "$build_board" == edgepi-e87n && "$build_family" == edgepi-e87n ]] ||
+	exit_with_error 'Central manifest must describe the isolated E87N family'
+[[ "$build_kernel_release" == "$build_kernel_version-current-$build_family" ]] ||
+	exit_with_error 'Central manifest kernel_release is not version/family derived'
 export BRANCH=current
-export BOARD=edgepi-e87n
+export BOARD="$build_board"
 display_alert() { :; }
 track_general_config_variables() { :; }
-exit_with_error() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 if [[ "$hook_only" == no ]]; then
 	source "$SRC/lib/functions/configuration/main-config.sh"
@@ -27,30 +55,40 @@ unset E87N_EXTRA_STORAGE
 source "$USERPATCHES_PATH/config/boards/edgepi-e87n.csc"
 [[ "$E87N_EXTRA_STORAGE" == no ]] || exit_with_error 'Extra storage must default to no'
 if [[ "$hook_only" == no ]]; then
-	export LINUXFAMILY="$BOARDFAMILY"
+	export LINUXFAMILY="$build_family"
 	# Use the real Armbian family/architecture loader to catch early source errors.
 	source_family_config_and_arch
+	[[ "$LINUXFAMILY" == "$build_family" ]] || exit_with_error 'LINUXFAMILY must stay isolated from filogic'
+	[[ "$KERNELSOURCE" == "$build_kernel_source" ]] || exit_with_error 'Unexpected kernel source'
+	[[ "$KERNELBRANCH" == "commit:$build_kernel_commit" ]] || exit_with_error 'Unexpected kernel commit pin'
 	post_family_config__edgepi_e87n_existing_uboot
 	[[ "$ARCH" == arm64 && "$BOOT_SOC" == mt7987 ]]
 	[[ "$BOOTCONFIG" == none && "$ATF_COMPILE" == no ]]
 	[[ "$BOOT_FDT_FILE" == mediatek/mt7987a-edgepi-e87n.dtb ]]
 	[[ "$BOOTFS_TYPE" == ext4 && "$ROOTFS_TYPE" == ext4 ]]
 	[[ "$KERNELPATCHDIR" == edgepi-e87n-6.18 ]]
-	[[ "$KERNEL_MAJOR_MINOR" == 6.18 ]]
-	[[ "$KERNELBRANCH" == commit:f6388029ea9e2c9e807d73827658738ea131faee ]]
+	[[ "$KERNEL_MAJOR_MINOR" == "$build_kernel_series" ]]
 	[[ "$LINUXCONFIG" == linux-edgepi-e87n-lts ]]
 	[[ -f "$USERPATCHES_PATH/config/kernel/$LINUXCONFIG.config" ]]
 fi
 # Armbian's patching.py uses USERPATCHES_PATH/kernel, not userpatches/patch/kernel.
-# Check the inventory even in native hook-only mode.
-patch_files=("$USERPATCHES_PATH/kernel/edgepi-e87n-6.18/"*.patch)
-expected_prefixes=(0000 360 361 740 750 752 790 791 792 821 830 843 900 901 902)
-[[ ${#patch_files[@]} == "${#expected_prefixes[@]}" ]] || exit_with_error 'Expected exactly 15 Linux 6.18 patches'
-for index in "${!expected_prefixes[@]}"; do
-	patch_name=${patch_files[$index]##*/}
-	[[ -f "${patch_files[$index]}" && "${patch_name%%-*}" == "${expected_prefixes[$index]}" ]] ||
-		exit_with_error 'Missing, duplicate or unexpected patch prefix' "$patch_name"
+# Check the inventory even in native hook-only mode.  MT7987 pinctrl, clock,
+# Ethernet, PHY, PWM and LVTS support is already in Frank-W's 6.18.52 tree;
+# these old ports must not be carried into the isolated E87N patchset again.
+patch_dir="$USERPATCHES_PATH/kernel/edgepi-e87n-6.18"
+shopt -s nullglob
+patch_files=("$patch_dir/"*.patch)
+[[ ${#patch_files[@]} -gt 0 ]] || exit_with_error 'No Linux 6.18 E87N patches found'
+required_prefixes=(0000 790 791 831 832 843 900 901 902)
+for prefix in "${required_prefixes[@]}"; do
+	matches=("$patch_dir/"${prefix}-*.patch)
+	[[ ${#matches[@]} == 1 ]] || exit_with_error 'Expected exactly one E87N patch prefix' "$prefix"
 done
+for prefix in 360 361 740 750 752 821 830; do
+	matches=("$patch_dir/"${prefix}-*.patch)
+	[[ ${#matches[@]} == 0 ]] || exit_with_error 'Upstream MT7987 support must not be duplicated' "${matches[*]}"
+done
+shopt -u nullglob
 [[ "$BOOTFS_TYPE" == ext4 && "$ROOTFS_TYPE" == ext4 && "$BOOTCONFIG" == none ]]
 [[ "$SRC_CMDLINE" != *root=* ]]
 [[ "$SRC_CMDLINE" != *squashfs* ]]
@@ -63,13 +101,15 @@ if declare -F write_uboot_platform >/dev/null; then
 fi
 
 required_builtins=(
+	VIRTIO VIRTIO_MMIO VIRTIO_BLK VIRTIO_NET SERIAL_AMBA_PL011 SERIAL_AMBA_PL011_CONSOLE
 	SPI SPI_MASTER SPI_MT65XX STAGING FB FB_DEVICE BACKLIGHT_CLASS_DEVICE BACKLIGHT_PWM
-	COMMON_CLK_MT7987 PINCTRL_MT7987 MMC_MTK SERIAL_8250_MT6577 EXT4_FS
+	COMMON_CLK_MT7987 COMMON_CLK_MT7987_ETHSYS PINCTRL_MT7987 MMC_MTK SERIAL_8250_MT6577 EXT4_FS
 	MEDIATEK_WATCHDOG MFD_SYSCON NVMEM NVMEM_MTK_EFUSE WATCHDOG_HANDLE_BOOT_ENABLED
 	HWMON THERMAL THERMAL_OF THERMAL_GOV_STEP_WISE THERMAL_DEFAULT_GOV_STEP_WISE
 	MTK_THERMAL MTK_LVTS_THERMAL PWM PWM_MEDIATEK SENSORS_PWM_FAN
 )
 module_conflicts=(
+	COMMON_CLK_MT7987_ETHSYS VIRTIO VIRTIO_MMIO VIRTIO_BLK VIRTIO_NET SERIAL_AMBA_PL011 SERIAL_AMBA_PL011_CONSOLE
 	SPI SPI_MASTER SPI_MT65XX STAGING FB FB_DEVICE BACKLIGHT_CLASS_DEVICE BACKLIGHT_PWM
 	EXT4_FS NVMEM NVMEM_MTK_EFUSE HWMON THERMAL THERMAL_OF
 	MTK_THERMAL MTK_LVTS_THERMAL PWM PWM_MEDIATEK SENSORS_PWM_FAN
@@ -331,5 +371,5 @@ if [[ "$hook_only" == no ]]; then
 else
 	printf 'SCOPE: hook-only; Bash 5 Armbian family loader NOT tested\n'
 fi
-printf 'PASS: 15 patch prefixes including 902; thermal/fan/display and base networking/storage preserved; DM/RAID/XFRM interface opt-in; no early assembly or rootfs change\n'
+printf 'PASS: %s board patches; native MT7987 providers, QEMU boot devices and storage opt-in verified\n' "${#patch_files[@]}"
 printf 'SCOPE: request arrays and seed overlay tested; Kconfig resolution, kernel/image build and hardware NOT tested\n'

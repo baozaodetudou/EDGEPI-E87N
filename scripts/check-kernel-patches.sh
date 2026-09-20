@@ -62,14 +62,14 @@ printf 'PASS: %s patches applied with fuzz=0. This is not a compilation test.\n'
 if [[ ${CHECK_DTB:-no} == yes ]]; then
 	command -v dtc >/dev/null
 	command -v fdtget >/dev/null
-	for header in \
-		interrupt-controller/irq.h interrupt-controller/arm-gic.h phy/phy.h \
-		reset/ti-syscon.h pinctrl/mt65xx.h gpio/gpio.h thermal/thermal.h \
-		leds/common.h input/input.h; do
-		mkdir -p "$audit_dir/tree/include/dt-bindings/$(dirname "$header")"
-		git -C "$kernel_repo" show "$kernel_ref:include/dt-bindings/$header" \
-			> "$audit_dir/tree/include/dt-bindings/$header"
-	done
+	# The board inherits the maintained SoC includes; obtain bindings from the
+	# same pinned commit rather than relying on removed SoC creation patches.
+	while IFS= read -r baseline_path; do
+		mkdir -p "$audit_dir/tree/$(dirname "$baseline_path")"
+		git -C "$kernel_repo" show "$kernel_ref:$baseline_path" > "$audit_dir/tree/$baseline_path"
+	done < <(git -C "$kernel_repo" ls-tree -r --name-only "$kernel_ref" -- \
+		include/dt-bindings arch/arm64/boot/dts/mediatek/mt7987.dtsi \
+		arch/arm64/boot/dts/mediatek/mt7987a.dtsi)
 	# linux-event-codes.h is a relative symlink in the kernel; materialize its target.
 	git -C "$kernel_repo" show "$kernel_ref:include/uapi/linux/input-event-codes.h" \
 		> "$audit_dir/tree/include/dt-bindings/input/linux-event-codes.h"

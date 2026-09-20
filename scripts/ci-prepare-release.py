@@ -6,6 +6,7 @@ leaves an incomplete directory that must not be published or reused.
 """
 import argparse
 import hashlib
+from importlib import import_module
 import json
 import os
 from pathlib import Path
@@ -16,8 +17,12 @@ import sys
 import tarfile
 from urllib.parse import quote
 
+from build_config import BUILD, TARGET
+from factory_firmware import FORMAT
+
+simulation = import_module("ci-simulation")
+
 REPO = Path(__file__).resolve().parents[1]
-TARGET = {"debian": "13", "release": "trixie", "kernel": "6.18.51", "extra_storage": "no"}
 CHUNK = 1024 * 1024
 MAX_ENTRIES = 10000
 RAMDIAG_FILES = frozenset({
@@ -102,10 +107,13 @@ def unique_object(pairs):
 
 
 def namespaces(kind):
-    result = {"logs/ci": (".log", ".exit-code", ".txt")}
+    result = {"logs/ci": (".log", ".exit-code", ".txt"),
+              "logs/failure": (".log", ".exit-code", ".txt", ".json", ".tail")}
     if kind == "image":
         result.update({"images": (".tar",), "diagnostics": (".itb", ".json", ".txt"),
                        "packages/armbian": (".deb",),
+                       "packages/simulation": (".deb",),
+                       "validation/qemu": (".json", ".log", ".txt", ".exit-code"),
                        "logs/armbian": (".log", ".txt", ".html", ".json", ".gz", ".xz", ".zst")})
     else:
         result["packages/display"] = (".deb",)
@@ -155,12 +163,15 @@ def validate(root, kind, args, version):
     expected = {"kind": kind, "build_step_outcome": "success", "target": TARGET,
                 "source_commit": args.source_commit, "run_id": args.run_id,
                 "run_attempt": args.run_attempt, "collection_errors": [],
-                "armbian_commit": "7c1bb29eb0e7bd75b0703d86fe654b2680e646da",
-                "kernel_commit": "f6388029ea9e2c9e807d73827658738ea131faee",
+                "armbian_commit": BUILD["armbian_commit"],
+                "kernel_commit": BUILD["kernel_commit"],
+                "kernel_source": BUILD["kernel_source"],
+                "kernel_release": BUILD["kernel_release"],
                 "display_version_source": version,
                 "image_static_audit": "passed" if kind == "image" else "not applicable"}
     if kind == "image":
-        expected.update(factory_format="e87n-uboot-firmware-tar-v1", factory_static_audit="passed")
+        expected.update(factory_format=FORMAT, factory_static_audit="passed",
+                        simulation_validation="passed")
     for key, value in expected.items():
         require(metadata.get(key) == value, "metadata mismatch: " + kind + "." + key)
     require({f"logs/ci/{kind}.log", f"logs/ci/{kind}.exit-code"} <= files, "missing build log or exit-code")
@@ -168,7 +179,8 @@ def validate(root, kind, args, version):
         if name.endswith(".exit-code"):
             require(small_text(root / name, 64, hashes[name]).strip() == "0", "nonzero or invalid exit-code: " + name)
     images = sorted(n for n in files if n.startswith("images/"))
-    packages = sorted(n for n in files if n.startswith("packages/"))
+    package_prefix = "packages/armbian/" if kind == "image" else "packages/display/"
+    packages = sorted(n for n in files if n.startswith(package_prefix))
     require(packages and all((root / n).stat().st_size for n in images + packages), "missing or empty payload")
     if kind == "image":
         diagnostics = {name.removeprefix("diagnostics/") for name in files
@@ -183,6 +195,14 @@ def validate(root, kind, args, version):
         audit = small_text(root / audit_name, CHUNK, hashes[audit_name])
         require(any(line.strip() == "PASS" or line.startswith(("PASS:", "PASS ")) for line in audit.splitlines()),
                 "factory firmware audit log is missing PASS")
+        tested = [n for n in files if n.startswith("packages/simulation/")]
+        require(tested == [f"packages/simulation/e87n-display_{version}_all.deb"],
+                "expected one versioned simulation display package")
+        require("validation/qemu/result.json" in files, "missing simulation evidence")
+        simulation.verify_report(
+            simulation.load_report(root / "validation/qemu/result.json"),
+            firmware_sha256=hashes[images[0]], display_sha256=hashes[tested[0]],
+            source_commit=args.source_commit, run_id=args.run_id, run_attempt=args.run_attempt)
     else:
         require(packages == [f"packages/display/e87n-display_{version}_all.deb"], "expected one standalone versioned display payload")
     hashes["SHA256SUMS"] = hashlib.sha256(manifest.encode("utf-8")).hexdigest()
@@ -217,10 +237,16 @@ def main():
     require(re.fullmatch(r"[0-9][A-Za-z0-9.+~\-]*", version) is not None, "invalid display VERSION")
     image = validate(args.image_artifact, "image", args, version)
     display = validate(args.display_artifact, "display", args, version)
+    # The independent package job must publish the exact bytes tested in QEMU.
+    simulation.verify_report(
+        simulation.load_report(image[0] / "validation/qemu/result.json"),
+        firmware_sha256=image[1][image[2][0]], display_sha256=display[1][display[3][0]],
+        source_commit=args.source_commit, run_id=args.run_id, run_attempt=args.run_attempt)
     output.mkdir(parents=True, exist_ok=False)
     for artifact, name, target in ((image, image[2][0], Path(image[2][0]).name),
                                    (display, display[3][0], Path(display[3][0]).name),
                                    (image, "build-metadata.json", "image-build-metadata.json"),
+                                   (image, "validation/qemu/result.json", "simulation-result.json"),
                                    (display, "build-metadata.json", "display-build-metadata.json")):
         with Reader(artifact[0] / name, artifact[1][name]) as source, (output / target).open("xb") as dest:
             shutil.copyfileobj(source, dest, CHUNK)
@@ -229,7 +255,7 @@ def main():
         (artifact[0] / n, kind + "/" + n, checksum)
         for kind, artifact in (("image", image), ("display", display))
         for n, checksum in sorted(artifact[1].items())
-        if n in ("SHA256SUMS", "build-metadata.json") or n.startswith("logs/")])
+        if n in ("SHA256SUMS", "build-metadata.json") or n.startswith(("logs/", "validation/"))])
     base = "https://github.com/" + args.repository
     image_name, display_name = Path(image[2][0]).name, Path(display[3][0]).name
     download_base = base + "/releases/download/" + quote(args.tag, safe="")
@@ -252,15 +278,21 @@ GitHub 自带的 Source code (zip/tar.gz) 是源码，不是可刷写固件。
 
 下载后运行 `sha256sum 文件名`（macOS：`shasum -a 256 文件名`），与上面的摘要比较。
 
-Experimental Debian 13 (trixie) + Linux 6.18.51; extra_storage=no.
+Experimental Debian {TARGET['debian']} ({TARGET['release']}) + Linux {TARGET['kernel']}; extra_storage={TARGET['extra_storage']}.
+Kernel release: {BUILD['kernel_release']}
+Kernel source: {BUILD['kernel_source']} at {BUILD['kernel_commit']}
+Armbian source commit: {BUILD['armbian_commit']}
 Default login: root / doumao over SSH port 22. First connect only to a trusted
 LAN; change the public default password immediately after login with `passwd`.
 Wired interfaces request DHCP; locale zh_CN.UTF-8, timezone Asia/Shanghai.
 
-Experimental firmware: software validated by static checks only, NOT hardware validated.
+Experimental firmware: software validated by static checks and same-build Docker/QEMU acceptance, NOT hardware validated.
+The QEMU virt guest uses this firmware's kernel/initrd and a private copy of its
+production rootfs. Its emulated hardware does not validate MT7987 peripherals or
+the real U-Boot handoff. The tested display package matches the download SHA-256.
 No board has been validated: boot, networking, display and thermal behavior still
 require hardware testing. The uncompressed USTAR archive uses format
-`e87n-uboot-firmware-tar-v1` and contains `sysupgrade-edgepi-e87n/kernel` (FIT)
+`{FORMAT}` and contains `sysupgrade-edgepi-e87n/kernel` (FIT)
 and `sysupgrade-edgepi-e87n/root` (ext4).
 
 Use this .tar only in the original U-Boot recovery page's `firmware` field.
@@ -271,7 +303,7 @@ eMMC GPT, boot chain and factory data) and a successful hardware RAM test boot
 of this candidate are required before any flash. This release does not establish
 either prerequisite and provides no whole-eMMC installer.
 
-此固件为实验版本，仅通过软件静态校验，尚未经过硬件验证。仅可用于原厂 U-Boot
+此固件为实验版本，已通过软件静态校验及同构建 Docker/QEMU 验收，尚未经过硬件验证。仅可用于原厂 U-Boot
 恢复页面的 `firmware` 字段，禁止用于 SIMG/GPT/FIP 或 LuCI sysupgrade。
 刷写前必须完成并验证恢复备份，并通过本候选固件的硬件 RAM 启动测试。
 

@@ -3,20 +3,24 @@
 import contextlib
 import copy
 import hashlib
+from importlib import import_module
 import importlib.util
 import io
 import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/ci-publish-release.py"
+sys.path.insert(0, str(SCRIPT.parent))
 SPEC = importlib.util.spec_from_file_location("publisher", SCRIPT)
 publisher = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(publisher)
+fixture_report = import_module("test-ci-simulation").fixture_report
 SOURCE, TAG, REPOSITORY = "a1" * 20, "e87n-v1.0", "owner/repo"
 SECRET = "ghp_fixture_never_log_this"
 
@@ -122,11 +126,18 @@ class PublisherTests(unittest.TestCase):
             (self.assets / name).write_bytes(("fixture " + name).encode())
         for kind in ("image", "display"):
             metadata = {"kind": kind, "build_step_outcome": "success", "source_commit": SOURCE,
+                        "run_id": "123", "run_attempt": "1",
                         "target": dict(publisher.TARGET), "collection_errors": [],
                         "image_static_audit": "passed" if kind == "image" else "not applicable"}
+            metadata.update({key: publisher.BUILD[key] for key in
+                             ("armbian_commit", "kernel_commit", "kernel_source", "kernel_release")})
             if kind == "image":
-                metadata.update(factory_format="e87n-uboot-firmware-tar-v1", factory_static_audit="passed")
+                metadata.update(factory_format=publisher.FORMAT, factory_static_audit="passed",
+                                simulation_validation="passed")
             (self.assets / f"{kind}-build-metadata.json").write_text(json.dumps(metadata))
+        (self.assets / "simulation-result.json").write_text(json.dumps(fixture_report(
+            (self.assets / "e87n-trixie-uboot-firmware.tar").read_bytes(),
+            (self.assets / "e87n-display_1.2.3_all.deb").read_bytes(), SOURCE, "123", "1")))
         self.manifest()
         self.fake = FakeGh(self)
         self.output, self.errors = io.StringIO(), io.StringIO()
@@ -382,11 +393,15 @@ class PublisherTests(unittest.TestCase):
             cases += [{**original, "target": target} for target in (None, [], {},
                       {**publisher.TARGET, "debian": "12"}, {**publisher.TARGET, "release": "bookworm"},
                       {**publisher.TARGET, "kernel": "6.18.50"}, {**publisher.TARGET, "extra_storage": "yes"})]
+            for key in ("armbian_commit", "kernel_commit", "kernel_source", "kernel_release"):
+                cases.append({k: v for k, v in original.items() if k != key})
+                cases.append({**original, key: "wrong"})
             if kind == "image":
                 cases.append({**original, "image_static_audit": "not proven"})
                 for key, invalid in (
-                        ("factory_format", (None, "", "raw-gpt", "e87n-uboot-firmware-tar-v2")),
-                        ("factory_static_audit", (None, "", "failed", "not proven", "not applicable", True))):
+                        ("factory_format", (None, "", "raw-gpt", "e87n-uboot-firmware-tar-v1")),
+                        ("factory_static_audit", (None, "", "failed", "not proven", "not applicable", True)),
+                        ("simulation_validation", (None, "", "failed", "not proven", "not applicable", True))):
                     cases.append({k: v for k, v in original.items() if k != key})
                     cases.extend({**original, key: value} for value in invalid)
             for metadata in cases:
@@ -478,13 +493,20 @@ class PublisherTests(unittest.TestCase):
         self.assertEqual(self.fake.calls, [])
 
     def test_corrupt_payload_is_rejected_before_auth_and_hashes_are_streamed(self):
-        (self.assets / "e87n-trixie-uboot-firmware.tar").write_bytes(b"changed payload")
+        firmware = self.assets / "e87n-trixie-uboot-firmware.tar"
+        original = firmware.read_bytes()
+        firmware.write_bytes(b"changed payload")
         self.assertNotEqual(self.run_cli(), 0)
         self.assertEqual(self.fake.calls, [])
         self.manifest()
+        # Updating checksums cannot reuse evidence for different firmware.
+        self.assertNotEqual(self.run_cli(), 0)
+        self.assertEqual(self.fake.calls, [])
+        firmware.write_bytes(original)
+        self.manifest()
         with mock.patch.object(Path, "read_bytes", side_effect=AssertionError("Payload must stream")):
             files = publisher.validate_assets(self.assets, SOURCE)
-        self.assertEqual(len(files), 8)
+        self.assertEqual(len(files), 9)
         payload = b"x" * (2 * 1024 * 1024 + 7)
         reader = mock.MagicMock(wraps=io.BytesIO(payload))
         context = mock.MagicMock()
@@ -492,6 +514,25 @@ class PublisherTests(unittest.TestCase):
         with mock.patch.object(Path, "open", return_value=context):
             self.assertEqual(publisher.digest(Path("fixture")), hashlib.sha256(payload).hexdigest())
         self.assertEqual(reader.read.call_args_list, [mock.call(1024 * 1024)] * 4)
+
+    def test_wrong_simulation_evidence_is_rejected_before_auth(self):
+        path = self.assets / "simulation-result.json"
+        original = json.loads(path.read_text())
+        for section, key, value in (
+                ("binding", "source_commit", "b" * 40), ("binding", "run_id", "124"),
+                ("binding", "run_attempt", "2"), ("artifacts", "firmware_tar_sha256", "b" * 64),
+                ("artifacts", "display_deb_sha256", "b" * 64), ("guest", "display_package", False)):
+            report = copy.deepcopy(original)
+            report[section][key] = value
+            path.write_text(json.dumps(report))
+            self.manifest()
+            with self.subTest(section=section, key=key):
+                self.assertNotEqual(self.run_cli(), 0)
+                self.assertEqual(self.fake.calls, [])
+        path.write_text(json.dumps({**original, "status": "FAIL"}))
+        self.manifest()
+        self.assertNotEqual(self.run_cli(), 0)
+        self.assertEqual(self.fake.calls, [])
 
 
 if __name__ == "__main__":

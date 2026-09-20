@@ -5,18 +5,25 @@ Reference: Yuzhii0718/bl-mt798x-dhcpd@4d5f0ffe02c5410c545bfb3f4112346877c75a72
 board/mediatek/common/{untar,mmc_helper}.c. Hardware acceptance remains separate.
 """
 import contextlib
+import gzip
 import hashlib
+import io
 import json
 import lzma
 import os
 from pathlib import Path
+import re
+import shlex
 import stat
 import struct
 import subprocess
 import tarfile
+import tempfile
+import zlib
+from build_config import BUILD, KERNEL_RELEASE
 
-FORMAT = "e87n-uboot-firmware-tar-v1"
-RELEASE = "6.18.51-current-filogic"
+FORMAT = "e87n-uboot-firmware-tar-v2"
+RELEASE = KERNEL_RELEASE
 MIB = 1024 * 1024
 KERNEL_LIMIT = 32 * MIB
 # Conservative packaging policy, NOT a measured free-RAM guarantee. A running
@@ -32,6 +39,504 @@ MEMORY = struct.pack(">4I", 0, 0x40000000, 0, 0x40000000)
 RESERVATIONS = {"wmcpu-reserved@50000000": (0x50000000, 0x100000),
                 "ramoops@7ff70000": (0x7ff70000, 0x10000),
                 "secmon@7ff80000": (0x7ff80000, 0x80000)}
+CONTROL_LIMIT = 2 * MIB
+REPO = Path(__file__).resolve().parents[1]
+MODULE_LIMIT = 64 * MIB
+PROVENANCE = "usr/share/e87n/build-provenance.json"
+BUILD_RECIPE = "usr/share/e87n/build-recipe.json"
+
+
+def canonical(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        require(key not in result, "duplicate JSON field: " + key)
+        result[key] = value
+    return result
+
+
+def read_json(data):
+    return json.loads(data, object_pairs_hook=json_object,
+                      parse_constant=lambda value: require(False, "nonfinite JSON: " + value))
+
+
+def relative_path(name):
+    require(isinstance(name, str) and name and not name.startswith("/") and
+            all(part not in ("", ".", "..") for part in name.split("/")) and
+            not any(c.isspace() or ord(c) < 32 for c in name), "unsafe relative path: " + repr(name))
+    return name
+
+
+def rooted(root, name):
+    """Resolve target symlinks in the image, including Debian's merged /usr."""
+    root = Path(root).resolve(strict=True)
+    pending, parts, hops = str(name).split("/"), [], 0
+    while pending:
+        part = pending.pop(0)
+        if part in ("", "."):
+            continue
+        if part == "..":
+            require(parts, "target symlink escapes image: " + str(name))
+            parts.pop()
+            continue
+        candidate = root.joinpath(*parts, part)
+        if candidate.is_symlink():
+            hops += 1
+            require(hops <= 40, "target symlink loop: " + str(name))
+            link = os.readlink(candidate)
+            if link.startswith("/"):
+                parts = []
+            pending = link.split("/") + pending
+        else:
+            parts.append(part)
+    return root.joinpath(*parts)
+
+
+def file_record(path):
+    path = regular(path)
+    return {"bytes": path.stat().st_size, "sha256": sha(path)}
+
+
+def tree_record(directory):
+    """Bind every inode path, mode and payload/link without following directory links."""
+    require(directory.is_dir() and not directory.is_symlink(), "missing inventory directory: " + str(directory))
+    records = {}
+    for folder, dirs, files in os.walk(directory, followlinks=False):
+        for name in sorted(dirs + files):
+            path = Path(folder) / name
+            info = path.lstat()
+            record = {"mode": stat.S_IMODE(info.st_mode), "uid": info.st_uid, "gid": info.st_gid}
+            if stat.S_ISLNK(info.st_mode):
+                record.update(type="link", target=os.readlink(path))
+            elif stat.S_ISDIR(info.st_mode):
+                record.update(type="directory")
+            else:
+                require(stat.S_ISREG(info.st_mode), "special file in inventory: " + str(path))
+                record.update(type="file", bytes=info.st_size, sha256=sha(path))
+            records[path.relative_to(directory).as_posix()] = record
+    return {"entries": len(records), "sha256": digest(canonical(records))}
+
+
+def installed_packages(root):
+    """Actual dpkg database, not package names or versions inferred from the recipe."""
+    data = regular(rooted(root, "var/lib/dpkg/status"), 32 * MIB).read_text()
+    packages, seen = [], set()
+    for paragraph in data.split("\n\n"):
+        fields = {}
+        for line in paragraph.splitlines():
+            if line.startswith((" ", "\t")):
+                continue
+            key, sep, value = line.partition(": ")
+            if sep and key in ("Package", "Architecture", "Version", "Status"):
+                require(key not in fields, "duplicate dpkg field: " + key)
+                fields[key] = value
+        if not fields:
+            continue
+        identity = (fields.get("Package"), fields.get("Architecture"))
+        require(identity not in seen, "duplicate dpkg package record")
+        seen.add(identity)
+        if fields.get("Status", "").endswith(" ok installed"):
+            require(all(fields.get(k) for k in ("Package", "Architecture", "Version")),
+                    "incomplete installed dpkg record")
+            packages.append({k.lower(): fields[k] for k in ("Package", "Architecture", "Version", "Status")})
+    required = ["linux-image-current-" + BUILD["linux_family"], "linux-dtb-current-" + BUILD["linux_family"]]
+    kernels = [p for p in packages if p["package"] in required]
+    require(len(kernels) == 2 and {p["package"] for p in kernels} == set(required) and
+            all(p["status"] == "hold ok installed" and p["architecture"] == "arm64" for p in kernels) and
+            len({p["version"] for p in kernels}) == 1, "kernel/DTB packages must be held, arm64, matching versions")
+    return sorted(packages, key=lambda p: (p["package"], p["architecture"]))
+
+
+def module_bytes(path):
+    data = regular(path, MODULE_LIMIT).read_bytes()
+    if path.suffix == ".gz":
+        with gzip.GzipFile(fileobj=io.BytesIO(data)) as stream:
+            data = stream.read(MODULE_LIMIT + 1)
+    elif path.suffix == ".xz":
+        decoder = lzma.LZMADecompressor(memlimit=128 * MIB)
+        data = decoder.decompress(data, max_length=MODULE_LIMIT + 1)
+        require(decoder.eof and not decoder.unused_data, "invalid/oversize xz module")
+    elif path.suffix == ".zst":
+        # Host decompressor only; never invoke a target ELF or load a module.
+        with subprocess.Popen(["zstd", "-d", "-q", "-c", str(path)], stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL) as process:
+            data = process.stdout.read(MODULE_LIMIT + 1)
+            if len(data) > MODULE_LIMIT:
+                process.kill()
+            require(process.wait(timeout=30) == 0, "invalid/oversize zstd module")
+    require(len(data) <= MODULE_LIMIT, "oversize decompressed module")
+    return data
+
+
+def module_info(path):
+    data = module_bytes(path)
+    require(len(data) >= 64 and data[:6] == b"\x7fELF\x02\x01" and
+            struct.unpack_from("<HH", data, 16) == (1, 183), "module is not arm64 relocatable ELF: " + str(path))
+    offset, = struct.unpack_from("<Q", data, 40)
+    size, count, strings_index = struct.unpack_from("<HHH", data, 58)
+    require(size == 64 and 0 < count <= 65535 and strings_index < count and
+            offset >= 64 and offset + size * count <= len(data), "invalid ELF section table")
+    sections = [struct.unpack_from("<IIQQQQIIQQ", data, offset + i * size) for i in range(count)]
+    def section_bytes(section):
+        start, length = section[4:6]
+        require(start + length <= len(data), "ELF section outside module")
+        return data[start:start + length]
+    strings = section_bytes(sections[strings_index])
+    infos = []
+    for section in sections:
+        end = strings.find(b"\0", section[0])
+        require(section[0] < len(strings) and end >= section[0], "invalid ELF section name")
+        if strings[section[0]:end] == b".modinfo":
+            infos.append(section_bytes(section))
+    require(len(infos) == 1, "module needs one .modinfo section")
+    result = {}
+    for entry in infos[0].split(b"\0"):
+        key, sep, value = entry.partition(b"=")
+        if sep and key in (b"name", b"vermagic", b"depends"):
+            key = key.decode()
+            require(key not in result, "duplicate module metadata: " + key)
+            result[key] = value.decode("ascii")
+    require(all(k in result for k in ("name", "vermagic", "depends")), "missing module identity/vermagic/depends")
+    require(result["vermagic"].split()[:1] == [RELEASE], "module vermagic differs from FIT release: " + str(path))
+    return result
+
+
+def module_name(path):
+    match = re.fullmatch(r"(.+)\.ko(?:\.(?:xz|gz|zst))?", Path(path).name)
+    require(match is not None, "unsupported module filename: " + path)
+    return match[1].replace("-", "_")
+
+
+def audit_modules(root, config):
+    base = rooted(root, "lib/modules/" + RELEASE)
+    if not base.is_dir():
+        base = rooted(root, "usr/lib/modules/" + RELEASE)
+    require(base.is_dir(), "matching kernel module directory missing")
+    modules, infos, names = {}, {}, {}
+    for folder, dirs, files in os.walk(base, followlinks=False):
+        for filename in files:
+            if ".ko" not in filename:
+                continue
+            path = Path(folder) / filename
+            relative = path.relative_to(base).as_posix()
+            relative_path(relative)
+            name = module_name(relative)
+            require(name not in names, "duplicate module name: " + name)
+            info = module_info(path)
+            require(info["name"].replace("-", "_") == name, "module name differs from filename")
+            names[name], modules[relative], infos[relative] = relative, path, info
+    require(modules and len({i["vermagic"] for i in infos.values()}) == 1, "modules have inconsistent vermagic")
+    builtins = {module_name(relative_path(line)) for line in regular(base / "modules.builtin").read_text().splitlines() if line}
+    deps = {}
+    for line in regular(base / "modules.dep").read_text().splitlines():
+        name, sep, tail = line.partition(":")
+        require(sep and name in modules and name not in deps, "invalid/stale/duplicate modules.dep entry: " + name)
+        values = tail.split()
+        require(len(values) == len(set(values)) and all(v in modules for v in values), "missing module dependency: " + name)
+        deps[name] = set(values)
+    require(set(deps) == set(modules), "modules.dep does not cover installed modules")
+    for path, info in infos.items():
+        for dependency in filter(None, info["depends"].replace("-", "_").split(",")):
+            require(dependency in builtins or dependency in names and names[dependency] in deps[path],
+                    "module metadata dependency missing from modules.dep: " + dependency)
+    # Include soft dependencies needed by modprobe (e.g. pre: crypto helpers).
+    softdep = base / "modules.softdep"
+    if softdep.exists():
+        for line in softdep.read_text().splitlines():
+            words = line.split("#", 1)[0].split()
+            if not words:
+                continue
+            require(len(words) >= 3 and words[0] == "softdep", "invalid modules.softdep")
+            owner = words[1].replace("-", "_")
+            require(owner in names or owner in builtins, "unknown softdep owner")
+            for dependency in words[2:]:
+                if dependency in ("pre:", "post:"):
+                    continue
+                dependency = dependency.replace("-", "_")
+                require(dependency in names or dependency in builtins, "missing soft dependency: " + dependency)
+                if owner in names and dependency in names:
+                    deps[names[owner]].add(names[dependency])
+    for metadata in ("modules.alias", "modules.dep.bin", "modules.alias.bin"):
+        regular(base / metadata)
+    require(config.get("MEDIATEK_2P5GE_PHY") == "m" and config.get("MTK_NET_PHYLIB") in ("m", "y"),
+            "required modular MT7987 PHY/shared library config missing")
+    required = ["mtk_2p5ge"] + (["mtk_phy_lib"] if config["MTK_NET_PHYLIB"] == "m" else [])
+    for name in required:
+        require(name in names and names[name].startswith("kernel/drivers/net/phy/mediatek/"),
+                "required PHY module missing/wrong path: " + name)
+    for name in deps:
+        module_closure(deps, name)
+    return {"tree": tree_record(base), "count": len(modules),
+            "vermagic": next(iter(infos.values()))["vermagic"]}, deps
+
+
+def audit_initrd_listing(listing, deps):
+    names = {name.removeprefix("./").rstrip("/") for name in listing.splitlines()}
+    present = set()
+    uncompressed = {re.sub(r"\.(xz|gz|zst)$", "", path): path for path in deps}
+    for name in names:
+        match = re.fullmatch(r"(?:usr/)?lib/modules/([^/]+)/(.+\.ko(?:\.(?:xz|gz|zst))?)", name)
+        if match:
+            key = re.sub(r"\.(xz|gz|zst)$", "", match[2])
+            require(match[1] == RELEASE and key in uncompressed, "initrd has foreign/unknown module: " + name)
+            present.add(uncompressed[key])
+    for name in present:
+        require(deps[name] <= present, "initrd missing module dependency for: " + name)
+    require({"init", "scripts/local", "scripts/functions"} <= names, "initrd missing normal local root resolver")
+
+
+def audit_initrd_modules(root, initrd, deps):
+    """Parse newc in memory; compare module bytes, never extract cpio paths to disk."""
+    limit = 256 * MIB
+    data = regular(initrd, KERNEL_LIMIT).read_bytes()
+    config = regular(rooted(root, "boot/config-" + RELEASE), CONTROL_LIMIT).read_text().splitlines()
+    consumed, position, frames, seen, last_name = 0, 0, 0, set(), None
+    seen_firmware = set()
+    base = rooted(root, "lib/modules/" + RELEASE)
+    if not base.is_dir():
+        base = rooted(root, "usr/lib/modules/" + RELEASE)
+    by_key = {re.sub(r"\.(xz|gz|zst)$", "", p): p for p in deps}
+    while position < len(data):
+        while position < len(data) and data[position] == 0:
+            position += 1  # cpio archives may have 512B padding
+        if position == len(data):
+            break
+        prefix = data[position:position + 6]
+        if prefix[:2] == b"\x1f\x8b" or prefix == b"\xfd7zXZ\0" or prefix[:4] == b"\x28\xb5\x2f\xfd":
+            frames += 1
+            require(frames <= 64, "excessive initrd compression frames")
+            data, position = data[position:], 0
+        if prefix[:2] == b"\x1f\x8b":
+            require("CONFIG_RD_GZIP=y" in config, "kernel cannot decompress gzip initrd")
+            decoder = zlib.decompressobj(31)
+            expanded = decoder.decompress(data, limit - consumed + 1)
+            require(decoder.eof and not decoder.unconsumed_tail, "invalid/oversize gzip initrd")
+            data = expanded + decoder.unused_data
+            require(len(data) + consumed <= limit, "oversize expanded initrd")
+            continue
+        if prefix == b"\xfd7zXZ\0":
+            require("CONFIG_RD_XZ=y" in config, "kernel cannot decompress xz initrd")
+            decoder = lzma.LZMADecompressor(memlimit=128 * MIB)
+            expanded = decoder.decompress(data, max_length=limit - consumed + 1)
+            require(decoder.eof, "invalid/oversize xz initrd")
+            data = expanded + decoder.unused_data
+            require(len(data) + consumed <= limit, "oversize expanded initrd")
+            continue
+        if prefix[:4] == b"\x28\xb5\x2f\xfd":
+            require("CONFIG_RD_ZSTD=y" in config, "kernel cannot decompress zstd initrd")
+            # zstd can decode concatenated frames; use a private input file so
+            # stdout can be bounded without a stdin/stdout pipe deadlock.
+            with tempfile.NamedTemporaryFile(prefix="e87n-initrd-", suffix=".zst") as source:
+                source.write(data)
+                source.flush()
+                with subprocess.Popen(["zstd", "-d", "-q", "-c", source.name], stdout=subprocess.PIPE,
+                                      stderr=subprocess.DEVNULL) as process:
+                    expanded = process.stdout.read(limit - consumed + 1)
+                    if len(expanded) + consumed > limit:
+                        process.kill()
+                    require(process.wait(timeout=30) == 0, "invalid/oversize zstd initrd")
+            require(len(expanded) + consumed <= limit, "oversize expanded initrd")
+            data = expanded
+            continue
+        record = memoryview(data)[position:]
+        require(len(record) >= 110 and prefix in (b"070701", b"070702"), "unsupported/truncated initrd cpio")
+        values = [int(record[6 + n * 8:14 + n * 8].tobytes(), 16) for n in range(13)]
+        mode, file_size, name_size, checksum = values[1], values[6], values[11], values[12]
+        start = (110 + name_size + 3) & ~3
+        end = (start + file_size + 3) & ~3
+        require(name_size > 0 and end <= len(record) and record[110 + name_size - 1] == 0,
+                "invalid cpio entry bounds")
+        name = record[110:110 + name_size - 1].tobytes().decode("utf-8").removeprefix("./")
+        contents = record[start:start + file_size]
+        if prefix == b"070702":
+            require(sum(contents) & 0xffffffff == checksum, "cpio checksum mismatch")
+        require(name == "TRAILER!!!" or name == "." or relative_path(name), "unsafe cpio name")
+        match = re.fullmatch(r"(?:usr/)?lib/modules/([^/]+)/(.+\.ko(?:\.(?:xz|gz|zst))?)", name)
+        if match:
+            key = re.sub(r"\.(xz|gz|zst)$", "", match[2])
+            require(match[1] == RELEASE and key in by_key and key not in seen and stat.S_ISREG(mode),
+                    "foreign/duplicate/nonregular module in initrd")
+            # Compare ELF bytes even if initramfs-tools changed compression.
+            with tempfile.NamedTemporaryFile(prefix="e87n-initrd-module-", suffix=Path(name).suffix) as module:
+                module.write(contents)
+                module.flush()
+                require(module_bytes(Path(module.name)) == module_bytes(base / by_key[key]),
+                        "initrd module bytes differ from rootfs: " + name)
+            seen.add(key)
+        firmware = re.fullmatch(r"(?:usr/)?lib/firmware/(mediatek/mt7987/i2p5ge-phy-(?:pmb|DSPBitTb)\.bin)(?:\.(?:xz|zst))?", name)
+        if firmware:
+            key = firmware[1]
+            require(key not in seen_firmware and stat.S_ISREG(mode), "duplicate/nonregular PHY firmware in initrd")
+            with tempfile.NamedTemporaryFile(prefix="e87n-initrd-firmware-", suffix=Path(name).suffix) as blob:
+                blob.write(contents)
+                blob.flush()
+                require(module_bytes(Path(blob.name)) == regular(rooted(root, "usr/lib/firmware/" + key)).read_bytes(),
+                        "initrd PHY firmware differs from audited rootfs: " + name)
+            seen_firmware.add(key)
+        consumed += end
+        require(consumed <= limit, "oversize expanded initrd")
+        position += end
+        last_name = name
+    require(last_name == "TRAILER!!!", "initrd missing cpio trailer")
+    present = {by_key[key] for key in seen}
+    for module in present:
+        require(deps[module] <= present, "initrd module content dependency missing: " + module)
+
+
+def collect_evidence(root):
+    """Read final rootfs: no extlinux assumptions, target execution or device access."""
+    def read(name, limit=CONTROL_LIMIT):
+        return regular(rooted(root, name), limit).read_bytes()
+    boot = "boot/"
+    config_bytes = read(boot + "config-" + RELEASE)
+    config = {}
+    for line in config_bytes.decode().splitlines():
+        match = re.fullmatch(r"CONFIG_([A-Z0-9_]+)=(.+)", line)
+        if match:
+            require(match[1] not in config, "duplicate kernel config symbol")
+            config[match[1]] = match[2]
+    for name in "ARM64 MODULES MMC MMC_BLOCK MMC_MTK EFI_PARTITION EXT4_FS BLK_DEV_INITRD DEVTMPFS FW_LOADER".split():
+        require(config.get(name) == "y", "required factory boot config missing: " + name)
+    version = read("etc/debian_version", 256).decode().strip()
+    require(version == BUILD["debian_point"], "actual Debian point release differs from build policy")
+    components = {name: file_record(rooted(root, boot + path)) for name, path in {
+        "kernel": "vmlinuz-" + RELEASE, "config": "config-" + RELEASE,
+        "dtb": "dtb-" + RELEASE + "/mediatek/mt7987a-edgepi-e87n.dtb",
+        "initrd": "initrd.img-" + RELEASE}.items()}
+    kernel = read(boot + "vmlinuz-" + RELEASE, KERNEL_LIMIT)
+    require(kernel[56:60] == b"ARM\x64" and ("Linux version " + RELEASE + " ").encode() in kernel,
+            "actual Image does not identify the expected ARM64 kernel release")
+    os_release = read("etc/os-release").decode()
+    fields = {}
+    for line in os_release.splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        key, separator, value = line.partition("=")
+        require(separator and key not in fields, "invalid/duplicate os-release field")
+        parsed = shlex.split(value)
+        require(len(parsed) <= 1, "invalid os-release value")
+        fields[key] = parsed[0] if parsed else ""
+    require(all(fields.get(key) == value for key, value in {
+        "ID": "debian", "VERSION_ID": BUILD["debian_version"], "VERSION_CODENAME": BUILD["release"]}.items()),
+        "actual rootfs is not reviewed Debian Trixie")
+    provenance_bytes = read(PROVENANCE)
+    provenance = read_json(provenance_bytes)
+    require(provenance.get("schema") == 1 and provenance.get("hardware_validation") == "pending" and
+            provenance.get("build") == BUILD, "build provenance differs from reviewed build policy")
+    sources = provenance.get("source_files")
+    require(isinstance(sources, dict) and sources, "missing actual recipe source files")
+    for path, value in sources.items():
+        relative_path(path)
+        require(isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value), "invalid recipe source hash")
+    require(provenance.get("recipe_sha256") == digest(canonical(sources)), "recipe source digest mismatch")
+    recipe_bytes = read(BUILD_RECIPE)
+    recipe = read_json(recipe_bytes)
+    require(recipe.get("schema") == 1 and type(recipe.get("source_dirty")) is bool and
+            re.fullmatch(r"[0-9a-f]{40}", recipe.get("source_commit", "")) and
+            recipe.get("recipe_sha256") == provenance["recipe_sha256"], "invalid compiled build recipe identity")
+    require(provenance.get("source_commit") == recipe["source_commit"] and
+            type(provenance.get("source_dirty")) is bool and provenance["source_dirty"] == recipe["source_dirty"],
+            "source commit/dirty state differs between receipts")
+    for key in ("patched_kernel_commit", "patched_kernel_tree"):
+        if key in recipe:
+            require(re.fullmatch(r"[0-9a-f]{40}", recipe[key]), "invalid patched kernel identity")
+    for key in ("kernel_release", "kernel_source", "kernel_commit", "armbian_commit"):
+        require(recipe.get(key) == BUILD[key], "compiled build recipe mismatch: " + key)
+    require(recipe.get("kernel_sha256") == components["kernel"]["sha256"] and
+            recipe.get("kernel_config_sha256") == components["config"]["sha256"],
+            "compiled recipe Image/config does not match actual files")
+    patches = recipe.get("patches")
+    require(isinstance(patches, list), "missing actual applied patch list")
+    seen = set()
+    for patch in patches:
+        require(isinstance(patch, dict) and set(patch) == {"path", "sha256"}, "invalid patch record")
+        path = relative_path(patch["path"])
+        source_path = path if path.startswith("userpatches/") else "userpatches/" + path
+        require(source_path not in seen and sources.get(source_path) == patch["sha256"], "patch not bound to recipe sources")
+        seen.add(source_path)
+    # The installed blobs must match the reviewed repository, not just hashes
+    # supplied by the same rootfs under audit.
+    reviewed = {}
+    for line in (REPO / "firmware/SHA256SUMS").read_text().splitlines():
+        value, path = line.split("  ", 1)
+        require(path not in reviewed and re.fullmatch(r"[0-9a-f]{64}", value), "invalid reviewed firmware manifest")
+        reviewed[path] = value
+    firmware = {}
+    for path, expected_size in (("mediatek/mt7987/i2p5ge-phy-pmb.bin", 98304),
+                                ("mediatek/mt7987/i2p5ge-phy-DSPBitTb.bin", 28672)):
+        record = file_record(rooted(root, "usr/lib/firmware/" + path))
+        require(record == {"bytes": expected_size, "sha256": reviewed[path]}, "PHY firmware hash/size mismatch: " + path)
+        firmware[path] = record
+    license_hash = digest(read("usr/share/doc/e87n-phy-firmware/LICENCE.mediatek"))
+    require(license_hash == reviewed["LICENCE.mediatek"], "PHY firmware licence hash mismatch")
+    modules, deps = audit_modules(root, config)
+    components.update(modules=modules, firmware={"required_phy": firmware, "licence_sha256": license_hash,
+                      "tree": tree_record(rooted(root, "usr/lib/firmware"))})
+    return {"schema": 1, "debian_version": version, "packages": installed_packages(root),
+            "os_release_sha256": digest(os_release.encode()),
+            "dpkg_status_sha256": digest(read("var/lib/dpkg/status", 32 * MIB)),
+            "build_provenance_sha256": digest(provenance_bytes), "build_recipe_sha256": digest(recipe_bytes),
+            "recipe_sha256": provenance["recipe_sha256"], "source": recipe,
+            "applied_patches_sha256": digest(canonical(patches)), "components": components}, deps
+
+
+def build_id(control):
+    """Content identity, not a signature. Root payload hash prevents circular identity."""
+    return digest(canonical({key: value for key, value in control.items() if key != "build_id"}))
+
+
+def module_closure(deps, start):
+    visited, active = set(), set()
+    def visit(name):
+        require(name not in active, "cyclic module dependency: " + name)
+        if name in visited:
+            return
+        active.add(name)
+        for dependency in sorted(deps[name]):
+            visit(dependency)
+        active.remove(name)
+        visited.add(name)
+    visit(start)
+    return visited
+
+
+def verify_module_indexes(root, deps):
+    """Ask host kmod to resolve the shipped binary indexes; --show-depends never loads."""
+    root = Path(root).resolve(strict=True)
+    base = rooted(root, "lib/modules/" + RELEASE)
+    if not base.is_dir():
+        base = rooted(root, "usr/lib/modules/" + RELEASE)
+    # kmod's --dirname is not chroot: an absolute /lib symlink in the image
+    # would otherwise resolve in the host. Only expose the already-resolved tree.
+    with tempfile.TemporaryDirectory(prefix="e87n-kmod-index-") as temporary:
+        stage = Path(temporary).resolve()
+        linked = stage / "lib/modules" / RELEASE
+        linked.parent.mkdir(parents=True)
+        linked.symlink_to(base, target_is_directory=True)
+        for module in sorted(deps):
+            if module_name(module) not in ("mtk_2p5ge", "mtk_phy_lib"):
+                continue
+            expected = module_closure(deps, module)
+            result = run("modprobe", "--show-depends", "--ignore-install", "--config", "/dev/null",
+                         "--dirname", stage, "--set-version", RELEASE, module_name(module),
+                         capture_output=True, text=True, timeout=30).stdout
+            actual = set()
+            for line in result.splitlines():
+                fields = line.split()
+                if fields and fields[0] == "builtin":
+                    continue
+                require(len(fields) == 2 and fields[0] == "insmod", "unexpected host modprobe output")
+                path = Path(fields[1])
+                require(path.is_absolute() and linked in path.parents, "module index points outside active release")
+                actual.add(relative_path(path.relative_to(linked).as_posix()))
+            require(actual == expected, "binary module index/dependency closure mismatch: " + module)
 
 
 def bootargs(root_uuid):
@@ -228,7 +733,7 @@ def inspect_tar(path, work):
                     header[345:500] == bytes(155), "need simple USTAR for vendor parser")
             require(header[:100].split(b"\0", 1)[0].decode() == member.name,
                     "vendor TAR name differs from host TAR name")
-            limit = KERNEL_LIMIT if name == "kernel" else (65536 if name == "CONTROL" else ROOT_LIMIT)
+            limit = KERNEL_LIMIT if name == "kernel" else (CONTROL_LIMIT if name == "CONTROL" else ROOT_LIMIT)
             require(member.size <= limit, "TAR member too large")
             target = work / name
             with archive.extractfile(member) as source, target.open("xb") as dest:
@@ -243,7 +748,7 @@ def inspect_tar(path, work):
             require(not any(chunk), "trailing/noncanonical TAR data")
             tail_size += len(chunk)
     require(tail_size >= 1024, "truncated TAR end marker")
-    control = json.loads(paths["CONTROL"].read_text())
+    control = read_json(paths["CONTROL"].read_bytes())
     require(type(control.get("headless", False)) is bool, "invalid headless firmware profile")
     require(control.get("format") == FORMAT and control.get("layout") == LAYOUT and
             control.get("kernel_release") == RELEASE and control.get("hardware_validation") == "pending",
@@ -251,6 +756,11 @@ def inspect_tar(path, work):
     for name in ("kernel", "root"):
         require(control["payloads"][name] == {"bytes": paths[name].stat().st_size, "sha256": sha(paths[name])},
                 "firmware payload checksum/size mismatch: " + name)
+    require(isinstance(control.get("evidence"), dict) and control["evidence"].get("schema") == 1,
+            "missing final rootfs evidence")
+    require(control.get("debian_version") == control["evidence"].get("debian_version") and
+            control.get("debian_version") == BUILD["debian_point"], "wrong actual Debian version")
+    require(control.get("build_id") == build_id(control), "firmware build ID mismatch")
     root_size = paths["root"].stat().st_size
     require(root_size == ext4_size(paths["root"]), "root payload must end at exact filesystem boundary")
     # Vendor erases 512 KiB after the rootfs, aligned to 64 KiB. Never let this

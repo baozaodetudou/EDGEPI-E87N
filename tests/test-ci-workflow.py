@@ -5,6 +5,7 @@
 # ///
 """Workflow contracts and isolated CI fixtures; never invoke real builders/sudo."""
 import hashlib
+from importlib import import_module
 import json
 import os
 from pathlib import Path
@@ -17,6 +18,12 @@ import unittest
 import yaml
 
 REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO / "scripts"))
+from build_config import BUILD, TARGET
+from factory_firmware import FORMAT
+
+fixture_report = import_module("test-ci-simulation").fixture_report
+
 WORKFLOW = REPO / ".github/workflows/build-e87n.yml"
 
 
@@ -30,14 +37,12 @@ class WorkflowPolicy(unittest.TestCase):
         events = self.workflow["on"]
         self.assertEqual(set(events), {"workflow_dispatch"})
         self.assertIn(events["workflow_dispatch"], (None, ""))
-        self.assertEqual(self.workflow["env"]["E87N_KERNEL_VERSION"], "6.18.51")
+        self.assertNotIn("E87N_KERNEL_VERSION", self.workflow["env"])
         self.assertEqual(set(WORKFLOW.parent.glob("*.yml")) | set(WORKFLOW.parent.glob("*.yaml")), {WORKFLOW})
         self.assertNotIn("inputs.", WORKFLOW.read_text())
-        for needle, file in (
-            ("commit:f6388029ea9e2c9e807d73827658738ea131faee", "userpatches/config/sources/families/edgepi-e87n.conf"),
-            ("7c1bb29eb0e7bd75b0703d86fe654b2680e646da", "build-armbian.sh"),
-        ):
-            self.assertIn(needle, (REPO / file).read_text())
+        for path in [WORKFLOW, *(REPO / "scripts").glob("ci-*")]:
+            for pin in (BUILD["kernel_version"], BUILD["kernel_commit"], BUILD["armbian_commit"]):
+                self.assertNotIn(pin, path.read_text(), str(path))
 
     def test_permissions_runners_and_actions(self):
         self.assertEqual(self.workflow["permissions"], {"contents": "read"})
@@ -69,9 +74,10 @@ class WorkflowPolicy(unittest.TestCase):
         ramdiag = (REPO / "scripts/ci-build.sh").read_text()
         self.assertIn("scripts/ci-build-ramdiag.sh", ramdiag)
         ramdiag_builder = (REPO / "scripts/ci-build-ramdiag.sh").read_text()
-        self.assertIn('ramdiag_source="$work/ramdiag"', ramdiag_builder)
-        self.assertIn('cp -a -- "$repo_dir/scripts/factory_firmware.py" "$work/factory_firmware.py"', ramdiag_builder)
-        self.assertIn("ln -s init-network-first", ramdiag_builder)
+        self.assertIn('ramdiag_source="$repo_dir/scripts/ramdiag"', ramdiag_builder)
+        self.assertNotIn("cp -a", ramdiag_builder)
+        self.assertNotIn("ln -s", ramdiag_builder)
+        self.assertIn('scripts/build_config.py" kernel_release)', ramdiag_builder)
 
     def test_release_is_manual_main_only_after_all_success(self):
         job = self.workflow["jobs"]["release"]
@@ -87,14 +93,25 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertIn('"$GITHUB_REF" == refs/heads/main', preflight["run"])
         self.assertIn("ci-publish-release.py preflight", preflight["run"])
         self.assertEqual(preflight["env"], {"GH_TOKEN": "${{ github.token }}"})
-        self.assertIn('release_tag="e87n-trixie-6.18.51-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"', preflight["run"])
+        self.assertIn('release_tag="e87n-${release}-${kernel_version}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"', preflight["run"])
 
     def test_zero_input_tag_generation_and_preflight_failure(self):
         step = next(s for s in self.workflow["jobs"]["validate"]["steps"] if s.get("id") == "release_tag")
         with tempfile.TemporaryDirectory(prefix="e87n-auto-tag-") as directory:
             root = Path(directory)
+            (root / "scripts").mkdir()
+            (root / "userpatches/config").mkdir(parents=True)
+            shutil.copyfile(REPO / "scripts/build_config.py", root / "scripts/build_config.py")
+            # A future reviewed config must flow into the tag and artifact name.
+            config = {**BUILD, "kernel_version": "6.18.99",
+                      "kernel_release": "6.18.99-current-" + BUILD["linux_family"]}
+            (root / "userpatches/config/e87n-build.json").write_text(json.dumps(config))
             mocks = root / "mocks.sh"
             mocks.write_text('''python3() {
+    if [[ $1 == scripts/build_config.py ]]; then
+        command "$E87N_TEST_PYTHON" "$@"
+        return $?
+    fi
     printf '%s\\n' "$@" >> "$E87N_PREFLIGHT_ARGS"
     return "${E87N_PREFLIGHT_EXIT:-0}"
 }
@@ -103,17 +120,18 @@ export -f python3
             env = {**os.environ, "BASH_ENV": str(mocks), "GITHUB_EVENT_NAME": "workflow_dispatch",
                    "GITHUB_REF": "refs/heads/main", "GITHUB_SHA": "a" * 40,
                    "GITHUB_REPOSITORY": "fixture/repo", "GITHUB_RUN_ATTEMPT": "1",
-                   "GIT_TERMINAL_PROMPT": "0",
+                   "GIT_TERMINAL_PROMPT": "0", "E87N_TEST_PYTHON": sys.executable,
                    "INPUT_RELEASE_TAG": "must-not-affect-tag", "E87N_PREFLIGHT_EXIT": "0"}
-            # No real Python/GitHub command runs; check shell expansion and output propagation.
+            # Run the real config CLI; GitHub preflight is intercepted.
             for run_id in ("34737922588", "34737922589"):
                 output, arguments = root / (run_id + ".output"), root / (run_id + ".args")
                 env.update(GITHUB_RUN_ID=run_id, GITHUB_OUTPUT=str(output), E87N_PREFLIGHT_ARGS=str(arguments))
                 result = subprocess.run(["bash", "-euo", "pipefail", "-c", step["run"]], env=env,
-                                        text=True, capture_output=True)
+                                        cwd=root, text=True, capture_output=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                tag = "e87n-trixie-6.18.51-" + run_id + "-1"
-                self.assertEqual(output.read_text(), "release_tag=" + tag + "\n")
+                tag = "e87n-trixie-6.18.99-" + run_id + "-1"
+                artifact = "e87n-trixie-6.18.99-candidate-" + run_id + "-1"
+                self.assertEqual(output.read_text(), "release_tag=" + tag + "\nimage_artifact=" + artifact + "\n")
                 self.assertEqual(arguments.read_text().splitlines(), ["scripts/ci-publish-release.py", "preflight",
                     "--repository", "fixture/repo", "--source-commit", "a" * 40, "--tag", tag])
             for index, changes in enumerate(({"E87N_PREFLIGHT_EXIT": "42"},
@@ -121,7 +139,7 @@ export -f python3
                                               {"GITHUB_EVENT_NAME": "push"})):
                 output = root / f"failed-{index}.output"
                 result = subprocess.run(["bash", "-euo", "pipefail", "-c", step["run"]],
-                    env={**env, **changes, "GITHUB_OUTPUT": str(output)}, text=True, capture_output=True)
+                    env={**env, **changes, "GITHUB_OUTPUT": str(output)}, cwd=root, text=True, capture_output=True)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertFalse(output.exists(), "A failed preflight must not emit a release tag")
 
@@ -129,8 +147,14 @@ export -f python3
         steps = self.workflow["jobs"]["release"]["steps"]
         download = next(s for s in steps if 'gh run download' in s.get("run", ""))
         self.assertEqual(download["run"].count('gh run download "$GITHUB_RUN_ID"'), 2)
-        for name in ("e87n-trixie-6.18.51-candidate", "e87n-display-candidate"):
-            self.assertIn(name + '-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}', download["run"])
+        self.assertIn('e87n-display-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}', download["run"])
+        self.assertIn('--name "$IMAGE_ARTIFACT"', download["run"])
+        self.assertEqual(download["env"]["IMAGE_ARTIFACT"], "${{ needs.validate.outputs.image_artifact }}")
+        upload = next(s for s in self.workflow["jobs"]["image"]["steps"]
+                      if s.get("with", {}).get("path") == "output/ci/artifacts/")
+        self.assertEqual(upload["with"]["name"], download["env"]["IMAGE_ARTIFACT"])
+        self.assertEqual(self.workflow["jobs"]["validate"]["outputs"]["image_artifact"],
+                         "${{ steps.release_tag.outputs.image_artifact }}")
         self.assertNotIn("--pattern", download["run"])
         prepare = next(s for s in steps if "ci-prepare-release.py" in s.get("run", ""))
         publish = next(s for s in steps if "ci-publish-release.py publish" in s.get("run", ""))
@@ -148,7 +172,8 @@ export -f python3
             self.assertEqual(len(uploads), 2)
             for upload in uploads:
                 self.assertEqual(upload["if"], "${{ always() }}")
-                self.assertIn("github.run_attempt", upload["with"]["name"])
+                if upload["with"]["name"] != "${{ needs.validate.outputs.image_artifact }}":
+                    self.assertIn("github.run_attempt", upload["with"]["name"])
                 self.assertEqual(upload["with"]["retention-days"], "14")
             collect = next(s for s in steps if "ci-collect-artifacts.py" in s.get("run", ""))
             self.assertEqual(collect["if"], "${{ always() }}")
@@ -181,7 +206,7 @@ export -f python3
                        if s.get("name") == "Install validation tools")
         runner = (REPO / "scripts/ci-prepare-runner.sh").read_text()
         for package in ("u-boot-tools", "e2fsprogs", "util-linux", "device-tree-compiler", "python3",
-                        "initramfs-tools-core", "fdisk", "libcrypt1", "cpio"):
+                        "initramfs-tools-core", "fdisk", "kmod", "zstd", "libcrypt1", "cpio"):
             with self.subTest(package=package):
                 self.assertIn(package, install.split())
                 self.assertIn(package, runner.split())
@@ -215,10 +240,14 @@ class Fixtures(unittest.TestCase):
         self.root = Path(self.temp.name)
         (self.root / "scripts").mkdir()
         for name in ("ci-build.sh", "ci-build-ramdiag.sh", "ci-collect-artifacts.py",
-                     "ci-prepare-runner.sh", "ci-validate.sh"):
+                     "ci-prepare-runner.sh", "ci-validate.sh", "ci-simulation.py",
+                     "factory_firmware.py", "build_config.py"):
             shutil.copyfile(REPO / "scripts" / name, self.root / "scripts" / name)
-        shutil.copytree(REPO / "scripts/ramdiag", self.root / "scripts/ramdiag")
-        self.env = {**os.environ, "GITHUB_SHA": "fixture-commit", "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "2"}
+        shutil.copytree(REPO / "scripts/ramdiag", self.root / "scripts/ramdiag",
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        self.put("userpatches/config/e87n-build.json", (REPO / "userpatches/config/e87n-build.json").read_text())
+        self.put("testing/validate.py", (REPO / "testing/validate.py").read_text())
+        self.env = {**os.environ, "GITHUB_SHA": "a" * 40, "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "2"}
         self.env["RUNNER_TEMP"] = str(self.root)
         for key in list(self.env):
             if key.startswith("E87N_MOCK_") or key in ("BASH_ENV", "E87N_KERNEL_VERSION", "GITHUB_ACTIONS", "E87N_RUNNER_ENVIRONMENT"):
@@ -246,7 +275,8 @@ class Fixtures(unittest.TestCase):
         for name in names:
             self.put(name, source)
         self.put("tests/test-ramdiag.py", (REPO / "tests/test-ramdiag.py").read_text())
-        for name in ("test-ci-workflow.py", "test-ci-prepare-release.py", "test-ci-publish-release.py"):
+        for name in ("test-ci-workflow.py", "test-ci-prepare-release.py", "test-ci-publish-release.py",
+                     "test-build-config.py", "test-ci-simulation.py"):
             self.put("tests/" + name, "pass\n")
         mocks = self.put("validation-mocks.sh", '''actionlint() { return 0; }
 shellcheck() { return 0; }
@@ -273,10 +303,20 @@ export -f actionlint shellcheck python3
 
     def prepare_mocks(self, result=0, image=True):
         self.put("packaging/e87n-display/VERSION", "1.2.3\n")
-        self.put("userpatches/config/sources/families/edgepi-e87n.conf", "# commit:f6388029ea9e2c9e807d73827658738ea131faee\n")
-        self.put("build-armbian.sh", "#!/bin/bash\n# 7c1bb29eb0e7bd75b0703d86fe654b2680e646da\nprintf '%s\\n' \"$@\" > image-args\n" +
+        self.put("build-armbian.sh", "#!/bin/bash\nprintf '%s\\n' \"$@\" > image-args\n" +
                  ("mkdir -p source/armbian-build/output/images\nprintf 'fixture image' > source/armbian-build/output/images/test.img.xz\n" if image else "") + f"exit {result}\n")
         self.put("scripts/build-display-deb.sh", "#!/bin/bash\nprintf '%s\\n' \"$@\" > display-args\nmkdir -p \"$2\"\nprintf 'fixture deb' > \"$2/e87n-display_1.2.3_all.deb\"\n" + f"exit {result}\n")
+        report = fixture_report(b"fixture firmware", b"fixture deb", "a" * 40, "123", "2")
+        self.put("testing/mock-runner.py", "import json, pathlib, sys\n"
+                 "args = sys.argv[1:]\n"
+                 "output = pathlib.Path(args[args.index('--output') + 1])\n"
+                 "output.mkdir(parents=True)\n"
+                 f"(output / 'result.json').write_text({json.dumps(report)!r})\n")
+        self.put("testing/run-container.sh", '#!/bin/bash\nset -euo pipefail\n'
+                 'printf "simulation\\n" >> build-events\n'
+                 'printf "%s\\n" "$@" > simulation-args\n'
+                 'python3 testing/mock-runner.py "$@"\n'
+                 'exit "${E87N_MOCK_SIMULATION_EXIT:-0}"\n')
         mocks = self.put("mocks.sh", """uname() { if [[ $1 == -s ]]; then echo Linux; else echo aarch64; fi; }
 sudo() {
     if [[ $* == '-n true' ]]; then return 0; fi
@@ -350,14 +390,22 @@ export -f uname sudo xz dpkg-deb
         self.assertEqual(firmware.read_text(), "fixture firmware")
         self.assertEqual((self.root / "source/armbian-build/output/images/test.img.xz").read_text(), "fixture image")
         self.assertEqual((self.root / "build-events").read_text().splitlines(),
-                         ["image-audit", "ramdiag-build", "firmware-build", "firmware-audit"])
+                         ["image-audit", "ramdiag-build", "firmware-build", "firmware-audit", "simulation"])
+        self.assertEqual((self.root / "display-args").read_text().splitlines(),
+                         ["--output-dir", str(self.root / "output/ci/simulation-display-debs")])
+        self.assertEqual((self.root / "simulation-args").read_text().splitlines(), [
+            "--firmware", str(firmware), "--display-deb",
+            str(self.root / "output/ci/simulation-display-debs/e87n-display_1.2.3_all.deb"),
+            "--output", str(self.root / "output/ci/simulation"), "--source-commit", "a" * 40,
+            "--run-id", "123", "--run-attempt", "2"])
         self.assertIn("PASS", (self.root / "output/ci/logs/factory-firmware-audit-1.log").read_text())
         self.put("source/armbian-build/output/debs/kernel.deb")
         result = self.collect("image", "success")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         metadata = json.loads((self.root / "output/ci/artifacts/build-metadata.json").read_text())
-        self.assertEqual(metadata["factory_format"], "e87n-uboot-firmware-tar-v1")
+        self.assertEqual(metadata["factory_format"], FORMAT)
         self.assertEqual(metadata["factory_static_audit"], "passed")
+        self.assertEqual(metadata["simulation_validation"], "passed")
         self.assertEqual(metadata["files_collected"]["images"], 1)
         self.assertEqual(metadata["files_collected"]["diagnostics"], 8)
         self.assertEqual([p.name for p in (self.root / "output/ci/artifacts/images").iterdir()], [firmware.name])
@@ -377,6 +425,38 @@ export -f uname sudo xz dpkg-deb
         self.assertEqual(metadata["factory_static_audit"], "not proven")
         self.assertFalse((self.root / "factory-build-args").exists())
         self.assertFalse(list(dest.rglob("candidate.img")))
+
+    def test_simulation_failure_preserves_report_and_blocks_success(self):
+        self.prepare_mocks()
+        self.env["E87N_MOCK_SIMULATION_EXIT"] = "45"
+        result = self.run_script("ci-build.sh", "image")
+        self.assertEqual(result.returncode, 45, result.stdout + result.stderr)
+        self.assertEqual(self.collect("image", "failure").returncode, 0)
+        dest = self.root / "output/ci/artifacts"
+        self.assertTrue((dest / "validation/qemu/result.json").is_file())
+        metadata = json.loads((dest / "build-metadata.json").read_text())
+        self.assertEqual(metadata["simulation_validation"], "not proven")
+
+    def test_missing_simulation_report_blocks_successful_collection(self):
+        self.prepare_mocks()
+        self.assertEqual(self.run_script("ci-build.sh", "image").returncode, 0)
+        (self.root / "output/ci/simulation/result.json").unlink()
+        self.put("source/armbian-build/output/debs/kernel.deb")
+        result = self.collect("image", "success")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("required same-build simulation evidence", result.stdout)
+
+    def test_simulation_from_another_attempt_is_rejected(self):
+        self.prepare_mocks()
+        self.assertEqual(self.run_script("ci-build.sh", "image").returncode, 0)
+        path = self.root / "output/ci/simulation/result.json"
+        report = json.loads(path.read_text())
+        report["binding"]["run_attempt"] = "1"
+        path.write_text(json.dumps(report))
+        self.put("source/armbian-build/output/debs/kernel.deb")
+        result = self.collect("image", "success")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("binding mismatch", result.stdout)
 
     def test_factory_packager_failure_stops_verification_and_preserves_evidence(self):
         self.prepare_mocks()
@@ -446,6 +526,22 @@ export -f uname sudo xz dpkg-deb
         self.assertFalse((self.root / "image-args").exists())
         self.assertFalse((self.root / "should-not-exist").exists())
 
+    def test_shell_and_collector_follow_changed_reviewed_config(self):
+        self.prepare_mocks()
+        config = {**BUILD, "kernel_version": "6.18.99",
+                  "kernel_release": "6.18.99-current-" + BUILD["linux_family"],
+                  "kernel_commit": "b" * 40, "armbian_commit": "c" * 40}
+        self.put("userpatches/config/e87n-build.json", json.dumps(config))
+        self.env["E87N_KERNEL_VERSION"] = config["kernel_version"]
+        result = self.run_script("ci-build.sh", "display")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        result = self.collect("display", "success")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        metadata = json.loads((self.root / "output/ci/artifacts/build-metadata.json").read_text())
+        self.assertEqual(metadata["target"]["kernel"], config["kernel_version"])
+        for key in ("kernel_commit", "kernel_release", "armbian_commit"):
+            self.assertEqual(metadata[key], config[key])
+
     def test_stale_output_is_preserved_and_rejected(self):
         self.prepare_mocks()
         sentinel = self.put("source/armbian-build/output/images/old.img", "keep me")
@@ -469,6 +565,13 @@ export -f uname sudo xz dpkg-deb
     def test_stale_ramdiag_output_is_preserved_and_rejected(self):
         self.prepare_mocks()
         sentinel = self.put("output/ci/ramdiag/old.itb", "keep me")
+        self.assertNotEqual(self.run_script("ci-build.sh", "image").returncode, 0)
+        self.assertEqual(sentinel.read_text(), "keep me")
+        self.assertFalse((self.root / "image-args").exists())
+
+    def test_stale_simulation_package_is_preserved_and_rejected(self):
+        self.prepare_mocks()
+        sentinel = self.put("output/ci/simulation-display-debs/old.deb", "keep me")
         self.assertNotEqual(self.run_script("ci-build.sh", "image").returncode, 0)
         self.assertEqual(sentinel.read_text(), "keep me")
         self.assertFalse((self.root / "image-args").exists())
@@ -507,8 +610,12 @@ export -f uname sudo xz dpkg-deb
         dest = self.root / "output/ci/artifacts"
         metadata = json.loads((dest / "build-metadata.json").read_text())
         self.assertEqual(metadata["build_step_outcome"], "failure")
-        self.assertEqual(metadata["source_commit"], "fixture-commit")
-        self.assertEqual(metadata["factory_format"], "e87n-uboot-firmware-tar-v1")
+        self.assertEqual(metadata["source_commit"], "a" * 40)
+        self.assertEqual(metadata["target"], TARGET)
+        for key in ("kernel_source", "kernel_release", "kernel_commit", "armbian_commit"):
+            self.assertEqual(metadata[key], BUILD[key])
+        self.assertEqual(metadata["simulation_validation"], "not proven")
+        self.assertEqual(metadata["factory_format"], FORMAT)
         self.assertEqual(metadata["factory_static_audit"], "not proven")
         self.assertEqual(image.stat().st_ino, (dest / "images/candidate-uboot-firmware.tar").stat().st_ino)
         for line in (dest / "SHA256SUMS").read_text().splitlines():

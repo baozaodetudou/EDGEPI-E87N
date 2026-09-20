@@ -32,7 +32,7 @@ sudo -n apt-get clean
 sudo -n apt-get update
 sudo -n apt-get install -y --no-install-recommends \
 	bash ca-certificates git sudo curl xz-utils procps util-linux python3 \
-	device-tree-compiler u-boot-tools initramfs-tools-core fdisk gdisk e2fsprogs zstd libcrypt1 cpio
+	device-tree-compiler u-boot-tools initramfs-tools-core fdisk gdisk e2fsprogs kmod zstd libcrypt1 cpio
 sudo -n apt-get clean
 df -h "$repo_dir"
 available_kib=$(df -Pk "$repo_dir" | awk 'END { print $4 }')

@@ -80,7 +80,7 @@ class FakeHost:
         self.links = {PHY + "/driver": "../../../../bus/mdio_bus/drivers/MediaTek MT7987 2.5GbE PHY"}
         log = b"[1.0] SYNTHETIC MT7987 PHY firmware loaded\n[2.0] SYNTHETIC pwm-fan ready\n"
         self.commands = {
-            UNAME: b"Linux mock-board 6.18.51-current-filogic SYNTHETIC aarch64 GNU/Linux\n",
+            UNAME: b"Linux mock-board 6.18.52-current-edgepi-e87n SYNTHETIC aarch64 GNU/Linux\n",
             LSBLK: b'{"blockdevices":[{"name":"mmcblk0","type":"disk","size":"8G","ro":false}]}\n',
             FINDMNT: b'{"filesystems":[{"target":"/","source":"/dev/mmcblk0p1","fstype":"ext4"}]}\n',
             LINK: b'[{"ifindex":2,"ifname":"eth0","operstate":"UP"}]\n',

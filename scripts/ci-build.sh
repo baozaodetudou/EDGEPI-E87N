@@ -2,6 +2,8 @@
 # CI adapter only; the board recipe and display package builder own their policy.
 set -Eeuo pipefail
 export GIT_TERMINAL_PROMPT=0 DEBIAN_FRONTEND=noninteractive
+# Both jobs must produce byte-identical display packages for the QEMU binding.
+export SOURCE_DATE_EPOCH=0
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_dir"
 [[ $# == 1 && ( $1 == image || $1 == display ) ]] || {
@@ -17,10 +19,14 @@ record_exit() {
 }
 trap record_exit EXIT
 
-[[ ${E87N_KERNEL_VERSION:-6.18.51} == 6.18.51 ]] || {
-	printf 'FAIL: kernel version must be the reviewed pin 6.18.51\n' >&2
+kernel_version=$(python3 scripts/build_config.py kernel_version)
+[[ ${E87N_KERNEL_VERSION:-$kernel_version} == "$kernel_version" ]] || {
+	printf 'FAIL: kernel version must be the reviewed pin %s\n' "$kernel_version" >&2
 	exit 2
 }
+release=$(python3 scripts/build_config.py release)
+board=$(python3 scripts/build_config.py board)
+extra_storage=$(python3 scripts/build_config.py extra_storage)
 
 if [[ $kind == display ]]; then
 	# Do not duplicate VERSION parsing or invent a CI-only Debian version.
@@ -47,21 +53,20 @@ fi
 # fresh checkouts; retaining these directories makes a failed manual retry clear.
 [[ ! -e source/armbian-build/output && ! -L source/armbian-build/output &&
    ! -e output/ci/firmware && ! -L output/ci/firmware &&
-   ! -e output/ci/ramdiag && ! -L output/ci/ramdiag ]] || {
+   ! -e output/ci/ramdiag && ! -L output/ci/ramdiag &&
+   ! -e output/ci/simulation-display-debs && ! -L output/ci/simulation-display-debs &&
+   ! -e output/ci/simulation && ! -L output/ci/simulation ]] || {
 	printf 'FAIL: existing Armbian or firmware output; use a fresh job, do not reuse candidates\n' >&2
 	exit 1
 }
-grep -Fq "commit:f6388029ea9e2c9e807d73827658738ea131faee" \
-	userpatches/config/sources/families/edgepi-e87n.conf
-grep -Fq '7c1bb29eb0e7bd75b0703d86fe654b2680e646da' build-armbian.sh
 sudo -n true
 # Explicit `build` bypasses the framework's undecided/interactive command.
 # PREFER_DOCKER=no makes the framework use native sudo even with Docker present.
 # Empty CARD_DEVICE/SEND_TO_SERVER disable device writing and external publishing.
 bash build-armbian.sh build \
-	BOARD=edgepi-e87n BRANCH=current RELEASE=trixie \
+	BOARD="$board" BRANCH=current RELEASE="$release" \
 	BUILD_DESKTOP=no BUILD_MINIMAL=yes BSPFREEZE=yes \
-	E87N_EXTRA_STORAGE=no \
+	E87N_EXTRA_STORAGE="$extra_storage" \
 	KERNEL_CONFIGURE=no KERNEL_BTF=no EXTRAWIFI=no \
 	CPUTHREADS=4 USE_TMPFS=no KERNEL_GIT=shallow \
 	PREFER_DOCKER=no COMPRESS_OUTPUTIMAGE=xz \
@@ -77,13 +82,12 @@ printf 'Read-only image audit: %s -> %s/candidate.img\n' "$candidate" "$audit_di
 # Decompression verifies xz integrity; raw scratch never enters the artifact
 # tree. Retain it for the remainder of this disposable job, even on failure.
 xz -dc -- "$candidate" > "$audit_dir/candidate.img"
-sudo -n bash scripts/verify-image.sh --release trixie --require-usb-root \
+sudo -n bash scripts/verify-image.sh --release "$release" --require-usb-root \
 	--headless --require-system "$audit_dir/candidate.img" \
 	2>&1 | tee output/ci/logs/image-audit-1.log
 
 # Build a disposable RAM-only network/SSH diagnostic matrix from the same
-# image. This proves the FIT hand-off and early userspace without touching the
-# production firmware TAR or any board storage.
+# image. Assembly alone does not prove boot or early userspace execution.
 sudo -n bash scripts/ci-build-ramdiag.sh \
 	--image "$audit_dir/candidate.img" --output-dir "$repo_dir/output/ci/ramdiag"
 
@@ -96,4 +100,18 @@ sudo -n python3 scripts/build-factory-firmware.py \
 # shellcheck disable=SC2024
 sudo -n python3 scripts/verify-factory-firmware.py "$firmware_output" --headless \
 	> output/ci/logs/factory-firmware-audit-1.log 2>&1
-printf 'PASS: image and factory firmware static audits passed; hardware validation is pending.\n'
+# Build the same VERSION source locally for the final-firmware guest's package
+# lifecycle test. The independent display job still owns the release download.
+bash scripts/build-display-deb.sh --output-dir "$repo_dir/output/ci/simulation-display-debs"
+packages=(output/ci/simulation-display-debs/e87n-display_*.deb)
+[[ ${#packages[@]} == 1 && -s ${packages[0]} && ! -L ${packages[0]} ]] || {
+	printf 'FAIL: expected one standalone display package for simulation\n' >&2
+	exit 1
+}
+bash testing/run-container.sh \
+	--firmware "$firmware_output" --display-deb "$repo_dir/${packages[0]}" \
+	--output "$repo_dir/output/ci/simulation" \
+	--source-commit "${GITHUB_SHA:?}" --run-id "${GITHUB_RUN_ID:?}" \
+	--run-attempt "${GITHUB_RUN_ATTEMPT:?}" \
+	2>&1 | tee output/ci/logs/simulation.log
+printf 'PASS: static audits and container/QEMU runner completed; collection must verify same-build evidence. Hardware validation is pending.\n'

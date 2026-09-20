@@ -1,7 +1,7 @@
 Subject: [PATCH] net: phy: realtek: retain optional RTL8221B LED properties on 6.18
 
-Baseline: official Linux 6.18.51,
-f6388029ea9e2c9e807d73827658738ea131faee.
+Revalidated baseline: Frank-W Linux 6.18.52,
+a638fabe36f293e58ab6be002af04b866959c546.
 
 Port the existing optional 790 properties to realtek/realtek_main.c.
 This baseline has standard LED callbacks for RTL8211E/F, but not

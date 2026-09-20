@@ -293,7 +293,7 @@ def check_debs(directory):
         fields = dict(re.findall(r"^([A-Za-z-]+):[ \t]*(.*)$", control["control"].decode(), re.M))
         name = fields.get("Package", "")
         require(fields.get("Architecture") == "arm64", "deb is not arm64: " + str(package))
-        require(name in ("linux-image-current-filogic", "linux-dtb-current-filogic"),
+        require(name in ("linux-image-current-edgepi-e87n", "linux-dtb-current-edgepi-e87n"),
                 "unexpected E87N package: " + name)
         require(name not in kinds, "multiple kernel package sets; select a single build directory")
         require(bool(fields.get("Version")), "deb Version missing")
@@ -308,8 +308,8 @@ def check_debs(directory):
             require(entry not in files, "duplicate package payload: " + entry)
             files[entry] = data
         ok("read package without extraction: " + str(package))
-    require(kinds == {"linux-image-current-filogic", "linux-dtb-current-filogic"} and len(versions) == 1,
-            "need matching-version linux-image-current-filogic and linux-dtb-current-filogic packages")
+    require(kinds == {"linux-image-current-edgepi-e87n", "linux-dtb-current-edgepi-e87n"} and len(versions) == 1,
+            "need matching-version linux-image-current-edgepi-e87n and linux-dtb-current-edgepi-e87n packages")
     kernel = one([n for n in files if n.startswith("boot/vmlinuz-")], "packaged kernel")
     release = kernel[len("boot/vmlinuz-"):]
     config = "boot/config-" + release
@@ -466,9 +466,9 @@ def main():
   bash scripts/verify-artifacts.sh --debs source/armbian-build/output/debs
   bash scripts/verify-artifacts.sh --extracted-rootfs /path/to/root --boot-dir /path/to/boot
   bash scripts/verify-artifacts.sh --release bookworm --extracted-rootfs /path/to/old-root
-  bash scripts/verify-artifacts.sh --extracted-rootfs /path/to/root --config /path/to/.config --kernel-release 6.12.108-current-filogic
+  bash scripts/verify-artifacts.sh --extracted-rootfs /path/to/root --config /path/to/.config --kernel-release 6.12.108-current-edgepi-e87n
 Requires Python >=3.8; zstd executable only for zstd-compressed inputs.
---debs checks one matching arm64 current-filogic image/DTB package set recursively,
+--debs checks one matching arm64 current-edgepi-e87n image/DTB package set recursively,
 not rootfs/firmware/extlinux. Directory mode checks all self-contained extlinux
 labels against one config/release; boot paths are relative to the bootfs root.
 Rootfs checks require ID=debian and matching VERSION_ID/VERSION_CODENAME for

@@ -1,0 +1,12 @@
+.git
+source
+output
+build
+**/__pycache__
+**/.DS_Store
+**/._*
+.env
+.env.*
+*.img
+*.img.xz
+*.deb

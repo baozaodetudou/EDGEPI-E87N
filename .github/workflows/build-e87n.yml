@@ -1,4 +1,4 @@
-name: E87N Debian 13 release
+name: E87N experimental release
 
 on:
   workflow_dispatch:
@@ -18,7 +18,6 @@ defaults:
 env:
   GIT_TERMINAL_PROMPT: '0'
   DEBIAN_FRONTEND: noninteractive
-  E87N_KERNEL_VERSION: '6.18.51'
 
 jobs:
   validate:
@@ -26,6 +25,7 @@ jobs:
     timeout-minutes: 25
     outputs:
       release_tag: ${{ steps.release_tag.outputs.release_tag }}
+      image_artifact: ${{ steps.release_tag.outputs.image_artifact }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -42,10 +42,14 @@ jobs:
           fi
           # Include the attempt so a GitHub Actions re-run never collides with
           # a draft/tag left behind by an earlier attempt of the same run.
-          release_tag="e87n-trixie-6.18.51-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          release=$(python3 scripts/build_config.py release)
+          kernel_version=$(python3 scripts/build_config.py kernel_version)
+          release_tag="e87n-${release}-${kernel_version}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          image_artifact="e87n-${release}-${kernel_version}-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           python3 scripts/ci-publish-release.py preflight \
             --repository "$GITHUB_REPOSITORY" --source-commit "$GITHUB_SHA" --tag "$release_tag"
           printf 'release_tag=%s\n' "$release_tag" >> "$GITHUB_OUTPUT"
+          printf 'image_artifact=%s\n' "$image_artifact" >> "$GITHUB_OUTPUT"
       - name: Install validation tools
         run: |
           mkdir -p output/ci/logs
@@ -55,7 +59,7 @@ jobs:
             sudo -n apt-get install -y --no-install-recommends \
               gcc shellcheck python3-yaml python3-pil fonts-dejavu-core device-tree-compiler \
               u-boot-tools e2fsprogs util-linux python3 initramfs-tools-core fdisk \
-              patch zstd xz-utils dpkg-dev init-system-helpers python3-minimal libcrypt1 cpio
+              patch kmod zstd xz-utils dpkg-dev init-system-helpers python3-minimal libcrypt1 cpio
             GOBIN="$RUNNER_TEMP/e87n-tools" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
             echo "$RUNNER_TEMP/e87n-tools" >> "$GITHUB_PATH"
           } 2>&1 | tee output/ci/logs/validation-tools.log
@@ -83,6 +87,9 @@ jobs:
           retention-days: 14
 
   release:
+    # The image job must pass same-build Docker/QEMU acceptance of the final
+    # firmware TAR; collection, preparation and publication each recheck its
+    # evidence against the TAR/deb hashes and source/run/attempt identity.
     needs: [validate, display, image]
     if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && needs.validate.result == 'success' && needs.display.result == 'success' && needs.image.result == 'success' }}
     runs-on: ubuntu-24.04
@@ -98,10 +105,11 @@ jobs:
       - name: Download this run's successful artifacts
         env:
           GH_TOKEN: ${{ github.token }}
+          IMAGE_ARTIFACT: ${{ needs.validate.outputs.image_artifact }}
         run: |
           gh auth status --hostname github.com >/dev/null 2>&1
           gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
-            --name "e87n-trixie-6.18.51-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --name "$IMAGE_ARTIFACT" \
             --dir output/release-input/image
           gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
             --name "e87n-display-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
@@ -191,7 +199,7 @@ jobs:
         run: |
           mkdir -p output/ci/logs
           bash scripts/ci-prepare-runner.sh 2>&1 | tee output/ci/logs/runner.log
-      - name: Build pinned Trixie minimal image and audit U-Boot firmware tar
+      - name: Build pinned image and validate final firmware in Docker and QEMU
         id: build
         # Reserve time for hashing and uploads below, including build failures.
         timeout-minutes: 285
@@ -216,7 +224,7 @@ jobs:
         timeout-minutes: 25
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: e87n-trixie-6.18.51-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ needs.validate.outputs.image_artifact }}
           path: output/ci/artifacts/
           if-no-files-found: warn
           compression-level: 0

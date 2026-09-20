@@ -7,12 +7,18 @@ environment dump, credentials, device evidence, or previous local output is read
 import argparse
 import errno
 import hashlib
+from importlib import import_module
 import json
 import os
 from pathlib import Path
 import shutil
 import stat
 import sys
+
+from build_config import BUILD, TARGET
+from factory_firmware import FORMAT
+
+simulation = import_module("ci-simulation")
 
 REPO = Path(__file__).resolve().parents[1]
 DEST = REPO / "output/ci/artifacts"
@@ -125,6 +131,10 @@ def main():
         if args.status == "success":
             check_ramdiag_shape(ramdiag, errors)
         counts["packages"] = collect_tree(output / "debs", "packages/armbian", (".deb",), errors)
+        counts["simulation_packages"] = collect_tree(
+            REPO / "output/ci/simulation-display-debs", "packages/simulation", (".deb",), errors)
+        counts["simulation_evidence"] = collect_tree(
+            REPO / "output/ci/simulation", "validation/qemu", (".json", ".log", ".txt", ".exit-code"), errors)
         counts["framework_logs"] = collect_tree(output / "logs", "logs/armbian", (".log", ".txt", ".html", ".json", ".gz", ".xz", ".zst"), errors)
     else:
         counts["packages"] = collect_tree(REPO / "output/ci/display-debs", "packages/display", (".deb",), errors)
@@ -133,6 +143,7 @@ def main():
         REPO / "output/ci/failure-evidence", "logs/failure", (".log", ".exit-code", ".txt", ".json", ".tail"), errors)
 
     factory_audit_passed = False
+    simulation_passed = False
     if args.status == "success":
         required_names = ("images", "packages", "diagnostics") if args.kind == "image" else ("packages",)
         for name in required_names:
@@ -151,17 +162,34 @@ def main():
                     errors.append("factory firmware audit log is missing PASS")
             except (OSError, ValueError) as error:
                 errors.append("required factory firmware audit log: " + str(error))
+            try:
+                firmware = list((DEST / "images").rglob("*.tar"))
+                display = list((DEST / "packages/simulation").rglob("*.deb"))
+                if len(firmware) != 1 or len(display) != 1:
+                    raise ValueError("simulation requires exactly one firmware and tested display package")
+                simulation.verify_report(
+                    simulation.load_report(DEST / "validation/qemu/result.json"),
+                    firmware_sha256=simulation.sha256_file(firmware[0]),
+                    display_sha256=simulation.sha256_file(display[0]),
+                    source_commit=os.environ.get("GITHUB_SHA"),
+                    run_id=os.environ.get("GITHUB_RUN_ID"), run_attempt=os.environ.get("GITHUB_RUN_ATTEMPT"))
+                simulation_passed = True
+            except (OSError, ValueError) as error:
+                errors.append("required same-build simulation evidence: " + str(error))
     metadata = {
         "kind": args.kind,
         "build_step_outcome": args.status or "not-started",
         "source_commit": os.environ.get("GITHUB_SHA", "unknown"),
         "run_id": os.environ.get("GITHUB_RUN_ID", "unknown"),
         "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT", "unknown"),
-        "target": {"debian": "13", "release": "trixie", "kernel": "6.18.51", "extra_storage": "no"},
-        "armbian_commit": "7c1bb29eb0e7bd75b0703d86fe654b2680e646da",
-        "kernel_commit": "f6388029ea9e2c9e807d73827658738ea131faee",
+        "target": TARGET,
+        "armbian_commit": BUILD["armbian_commit"],
+        "kernel_commit": BUILD["kernel_commit"],
+        "kernel_source": BUILD["kernel_source"],
+        "kernel_release": BUILD["kernel_release"],
+        "simulation_validation": ("passed" if simulation_passed else "not proven") if args.kind == "image" else "not applicable",
         "image_static_audit": ("passed" if args.status == "success" else "not proven") if args.kind == "image" else "not applicable",
-        "factory_format": "e87n-uboot-firmware-tar-v1" if args.kind == "image" else "not applicable",
+        "factory_format": FORMAT if args.kind == "image" else "not applicable",
         "factory_static_audit": ("passed" if factory_audit_passed else "not proven") if args.kind == "image" else "not applicable",
         "board_validation": "pending; a successful build or checksum is not hardware acceptance",
         "failure_artifacts": "may be incomplete; consult build_step_outcome and logs before use",

@@ -9,10 +9,10 @@ done
 actionlint .github/workflows/*.yml
 for script in scripts/ci-*.sh; do bash -n "$script"; done
 shellcheck scripts/ci-*.sh
-python3 -B - scripts/ci-*.py scripts/build-factory-firmware.py \
+python3 -B - scripts/ci-*.py scripts/build_config.py tests/test-build-config.py scripts/build-factory-firmware.py \
 	scripts/verify-factory-firmware.py scripts/factory_firmware.py \
 	scripts/prepare-factory-rootfs.py board-support/factory-boot/factory_boot.py \
-	scripts/ramdiag/*.py tests/test-ci-*.py tests/test-ramdiag.py \
+	scripts/ramdiag/*.py testing/validate.py tests/test-ci-*.py tests/test-ramdiag.py \
 	tests/test-factory-firmware.py tests/test-factory-rootfs.py <<'PY'
 from pathlib import Path
 import sys
@@ -25,3 +25,5 @@ PY
 python3 tests/test-ci-workflow.py
 python3 tests/test-ci-prepare-release.py
 python3 tests/test-ci-publish-release.py
+python3 -B tests/test-build-config.py
+python3 -B tests/test-ci-simulation.py

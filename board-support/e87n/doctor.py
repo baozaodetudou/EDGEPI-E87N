@@ -16,7 +16,7 @@ import stat
 import zlib
 
 
-_VERSION = "6.18.51"
+_VERSION = "6.18.52"
 _DT = "sys/firmware/devicetree/base"
 _SMALL = 16384
 _LARGE = 1024 * 1024

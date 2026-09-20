@@ -1,37 +1,19 @@
-Subject: [PATCH] net: phy: mediatek: retain optional E87N LED mode on Linux 6.18
+Subject: [PATCH] net: phy: retain E87N MT7987 LED mode on Frank-W 6.18.52
 
-Baseline: official Linux 6.18.51,
-f6388029ea9e2c9e807d73827658738ea131faee.
+Apply board LED settings after the maintained probe defaults, before pin mux.
 
-Depends on the 752 port for this baseline. Reuse mtk.h LED register
-definitions rather than duplicating the old flat-driver constants.
-Only mediatek,e87n-led-mode on MT7987 selects the existing E87N
-timing, active-low link and activity settings. Program these before
-pinctrl selection and the checked shared LED-state reads.
-MT7988 and boards without the property keep their existing behavior.
-
----
-diff --git a/drivers/net/phy/mediatek/mtk-2p5ge.c b/drivers/net/phy/mediatek/mtk-2p5ge.c
 --- a/drivers/net/phy/mediatek/mtk-2p5ge.c
 +++ b/drivers/net/phy/mediatek/mtk-2p5ge.c
-@@ -8,6 +8,7 @@
- #include <linux/of_platform.h>
- #include <linux/pinctrl/consumer.h>
- #include <linux/phy.h>
-+#include <linux/property.h>
- #include <linux/unaligned.h>
- 
- #include "mtk.h"
-@@ -756,6 +757,38 @@
- 	return phy_restore_page(phydev, oldpage, ret);
- }
+@@ -631,6 +631,38 @@
+ 				       MTK_2P5GPHY_LED_TX_BLINK_SET);
+ };
  
 +/* LED0 carries both colours on E87N; apply only to its MT7987 PHY. */
 +static int mt7987_2p5ge_e87n_led_config(struct phy_device *phydev)
 +{
 +	int ret;
 +
-+	if (!device_property_read_bool(&phydev->mdio.dev,
++	if (!of_property_read_bool(phydev->mdio.dev.of_node,
 +				       "mediatek,e87n-led-mode"))
 +		return 0;
 +
@@ -58,17 +40,20 @@ diff --git a/drivers/net/phy/mediatek/mtk-2p5ge.c b/drivers/net/phy/mediatek/mtk
 +			     MTK_PHY_LED_BLINK_2500TX | MTK_PHY_LED_BLINK_2500RX);
 +}
 +
- static int mt7987_2p5ge_phy_config_init(struct phy_device *phydev)
+ static int mt798x_2p5ge_phy_probe(struct phy_device *phydev)
  {
- 	struct mt7987_2p5ge_phy_priv *priv = phydev->priv;
-@@ -777,6 +810,10 @@
- 		return ret;
- 	ret = phy_set_bits_mmd(phydev, MDIO_MMD_VEND2, MTK_PHY_LED1_ON_CTRL,
- 			       MTK_PHY_LED_ON_FDX | MTK_PHY_LED_ON_HDX);
-+	if (ret < 0)
-+		return ret;
+ 	struct mtk_socphy_priv *priv;
+@@ -700,6 +733,12 @@
+ 			 MTK_2P5GPHY_LED_TX_BLINK_SET |
+ 			 MTK_2P5GPHY_LED_RX_BLINK_SET);
+ 
++	if (phydev->drv->phy_id == MTK_2P5GPHY_ID_MT7987) {
++		ret = mt7987_2p5ge_e87n_led_config(phydev);
++		if (ret < 0)
++			return ret;
++	}
 +
-+	ret = mt7987_2p5ge_e87n_led_config(phydev);
- 	if (ret < 0)
- 		return ret;
+ 	/* Switch pinctrl after setting polarity to avoid bogus blinking */
+ 	pinctrl = devm_pinctrl_get_select(&phydev->mdio.dev, "i2p5gbe-led");
+ 	if (IS_ERR(pinctrl))
  

@@ -169,7 +169,7 @@ def check(root, boot, headless=False):
         required_packages -= {"python3", "python3-pil", "fonts-dejavu-core", "e87n-display"}
         require("e87n-display" not in installed, "headless image has e87n-display installed")
     require(required_packages <= installed, "missing installed base packages: " + ", ".join(sorted(required_packages - installed)))
-    require({"linux-image-current-filogic", "linux-dtb-current-filogic"} <= held,
+    require({"linux-image-current-edgepi-e87n", "linux-dtb-current-edgepi-e87n"} <= held,
             "experimental image/DTB packages are not held")
     if not headless:
         owned = set(data("/var/lib/dpkg/info/e87n-display.list").decode().splitlines())
@@ -198,12 +198,12 @@ def check(root, boot, headless=False):
     require(os.readlink(root / "etc/resolv.conf") == "/run/systemd/resolve/stub-resolv.conf", "DNS resolver link missing")
     fdtget = shutil.which("fdtget")
     require(fdtget is not None, "host fdtget required")
-    dtb = audit.rooted(boot, "/dtb-6.18.51-current-filogic/mediatek/mt7987a-edgepi-e87n.dtb")
+    dtb = audit.rooted(boot, f"/dtb-{audit.RELEASE}/mediatek/mt7987a-edgepi-e87n.dtb")
     for index in (0, 1):
         result = subprocess.run([fdtget, str(dtb), "/aliases", "ethernet" + str(index)],
                                 capture_output=True, text=True, timeout=10, check=False)
         require(result.returncode == 0 and result.stdout.strip() ==
-                "/soc/ethernet@15100000/mac@" + str(index), "missing/wrong GMAC alias in actual DTB")
+                "/soc_netsys/ethernet@15100000/mac@" + str(index), "missing/wrong GMAC alias in actual DTB")
     print("PASS: root password SSH profile, unique first-boot identity, DHCP, Shanghai/zh_CN.UTF-8 and signed APT sources%s (static only)." %
           ("" if headless else ", display package"))
 

@@ -1,0 +1,127 @@
+Subject: [PATCH] thermal: lvts: bound eFuse bit extraction in both decoders
+
+Frank-W 6.18.52 sets MT7987 gt_calib_bit_offset to 32. Shifting the
+first u32 by 32 is undefined in both calibration functions. Decode the
+eight-bit field from bytes, including cross-byte fields, with checked
+lengths before reading. Preserve the maintained bit offset and coefficients.
+
+The older E87N 830 and vendor 6.12 table use bit 24 (byte index 3);
+the maintained table uses bit 32 (byte index 4). This patch does not
+guess a different hardware layout or replace measured calibration values.
+Restore the old E87N rejection of invalid golden temperature and blank
+sensor calibration for MT7987. Other SoCs retain their fallback policy.
+A failed MT7987 calibration must fail probe, not synthesize a temperature.
+
+diff --git a/drivers/thermal/mediatek/lvts_thermal.c b/drivers/thermal/mediatek/lvts_thermal.c
+index 6b76f64..acbfee6 100644
+--- a/drivers/thermal/mediatek/lvts_thermal.c
++++ b/drivers/thermal/mediatek/lvts_thermal.c
+@@ -136,6 +136,7 @@ struct lvts_data {
+ 	int temp_offset;
+ 	int gt_calib_bit_offset;
+ 	unsigned int def_calibration;
++	bool require_valid_calibration;
+ };
+ 
+ struct lvts_sensor {
+@@ -708,16 +709,46 @@ static int lvts_sensor_init(struct device *dev, struct lvts_ctrl *lvts_ctrl,
+  * The data description gives byte offsets constituting each calibration value
+  * for each sensor.
+  */
++/* Decode an eight-bit field from the little-endian eFuse bit stream. */
++static int lvts_calibration_gt(const u8 *calib, size_t len,
++			       const struct lvts_data *data, u32 *gt)
++{
++	size_t byte;
++	unsigned int shift;
++	u32 value;
++
++	if (!calib || !gt || data->gt_calib_bit_offset < 0)
++		return -EINVAL;
++
++	byte = data->gt_calib_bit_offset / 8;
++	shift = data->gt_calib_bit_offset % 8;
++	if (byte >= len || (shift && len - byte < 2))
++		return -EINVAL;
++
++	value = calib[byte];
++	if (shift)
++		value |= (u32)calib[byte + 1] << 8;
++	value = (value >> shift) & 0xff;
++	if (data->require_valid_calibration &&
++	    (!value || value >= LVTS_GOLDEN_TEMP_MAX))
++		return -ENODATA;
++
++	*gt = value;
++	return 0;
++}
++
+ static int lvts_calibration_init(struct device *dev, struct lvts_ctrl *lvts_ctrl,
+ 					const struct lvts_ctrl_data *lvts_ctrl_data,
+ 					u8 *efuse_calibration,
+ 					size_t calib_len)
+ {
+-	int i;
++	int i, ret;
+ 	u32 gt;
+ 
+-	/* A zero value for gt means that device has invalid efuse data */
+-	gt = (((u32 *)efuse_calibration)[0] >> lvts_ctrl->lvts_data->gt_calib_bit_offset) & 0xff;
++	ret = lvts_calibration_gt(efuse_calibration, calib_len,
++				  lvts_ctrl->lvts_data, &gt);
++	if (ret)
++		return ret;
+ 
+ 	lvts_for_each_valid_sensor(i, lvts_ctrl_data) {
+ 		const struct lvts_sensor_data *sensor =
+@@ -733,6 +764,10 @@ static int lvts_calibration_init(struct device *dev, struct lvts_ctrl *lvts_ctrl
+ 				(efuse_calibration[sensor->cal_offsets[0]] << 0) +
+ 				(efuse_calibration[sensor->cal_offsets[1]] << 8) +
+ 				(efuse_calibration[sensor->cal_offsets[2]] << 16);
++			if (lvts_ctrl->lvts_data->require_valid_calibration &&
++			    (!lvts_ctrl->calibration[i] ||
++			     lvts_ctrl->calibration[i] == GENMASK(23, 0)))
++				return -ENODATA;
+ 		} else if (lvts_ctrl->lvts_data->def_calibration) {
+ 			lvts_ctrl->calibration[i] = lvts_ctrl->lvts_data->def_calibration;
+ 		} else {
+@@ -794,16 +829,15 @@ static int lvts_calibration_read(struct device *dev, struct lvts_domain *lvts_td
+ 	return 0;
+ }
+ 
+-static int lvts_golden_temp_init(struct device *dev, u8 *calib,
++static int lvts_golden_temp_init(struct device *dev, u8 *calib, size_t calib_len,
+ 				 const struct lvts_data *lvts_data)
+ {
+ 	u32 gt;
++	int ret;
+ 
+-	/*
+-	 * The golden temp information is contained in the first 32-bit
+-	 * word  of efuse data at a specific bit offset.
+-	 */
+-	gt = (((u32 *)calib)[0] >> lvts_data->gt_calib_bit_offset) & 0xff;
++	ret = lvts_calibration_gt(calib, calib_len, lvts_data, &gt);
++	if (ret)
++		return dev_err_probe(dev, ret, "Invalid golden temperature calibration\n");
+ 
+ 	/* A zero value for gt means that device has invalid efuse data */
+ 	if (gt && gt < LVTS_GOLDEN_TEMP_MAX)
+@@ -830,7 +864,8 @@ static int lvts_ctrl_init(struct device *dev, struct lvts_domain *lvts_td,
+ 	if (ret)
+ 		return ret;
+ 
+-	ret = lvts_golden_temp_init(dev, lvts_td->calib, lvts_data);
++	ret = lvts_golden_temp_init(dev, lvts_td->calib, lvts_td->calib_len,
++				    lvts_data);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -1786,6 +1821,7 @@ static const struct lvts_data mt7987_lvts_ap_data = {
+ 	.temp_offset	= LVTS_COEFF_B_MT7987,
+ 	.gt_calib_bit_offset = 32,
+ 	.def_calibration = 19380,
++	.require_valid_calibration = true,
+ };
+ 
+ static const struct lvts_data mt7988_lvts_ap_data = {

@@ -2,6 +2,7 @@
 # Build the architecture-independent userspace package without installing it.
 set -Eeuo pipefail
 export LC_ALL=C
+export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-0}
 umask 022
 
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)

@@ -3,7 +3,7 @@ set -Eeuo pipefail
 export GIT_TERMINAL_PROMPT=0
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 framework_dir=${1:-"$repo_dir/source/armbian-build"}
-framework_pin=7c1bb29eb0e7bd75b0703d86fe654b2680e646da
+framework_pin=$(python3 "$repo_dir/scripts/build_config.py" armbian_commit)
 [[ $(git -C "$framework_dir" rev-parse HEAD) == "$framework_pin" ]] || {
 	printf 'Framework fixes only verified against %s\n' "$framework_pin" >&2; exit 2;
 }

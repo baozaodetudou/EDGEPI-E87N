@@ -33,7 +33,7 @@ SYMBOLS = (
     "EXT4_FS MMC MMC_BLOCK MMC_MTK BLK_DEV_NVME SCSI BLK_DEV_SD USB_STORAGE USB_UAS "
     "BTRFS_FS FB_TFT FB_TFT_NV3007 SENSORS_PWM_FAN"
 ).split()
-CONFIG = "# Linux/arm64 6.18.51 Kernel Configuration\n" + "".join(
+CONFIG = "# Linux/arm64 6.18.52 Kernel Configuration\n" + "".join(
     f"CONFIG_{symbol}={'m' if symbol in ('VETH', 'OVERLAY_FS', 'FB_TFT_NV3007') else 'y'}\n"
     for symbol in SYMBOLS)
 
@@ -59,7 +59,7 @@ class DoctorTests(unittest.TestCase):
     def populate(self):
         self.put("usr/lib/os-release", 'ID=debian\nVERSION_ID="13"\nVERSION_CODENAME=trixie\n')
         self.link("etc/os-release", "usr/lib/os-release")
-        self.put("proc/sys/kernel/osrelease", "6.18.51-current-filogic\n")
+        self.put("proc/sys/kernel/osrelease", "6.18.52-current-edgepi-e87n\n")
         self.put(f"{DT}/model", b"EdgePi E87N\0")
         self.put(f"{DT}/compatible", b"edgepi,e87n\0mediatek,mt7987\0")
         self.put("proc/meminfo", "MemTotal: 1011132 kB\nMemAvailable: 750000 kB\n")
@@ -177,7 +177,7 @@ class DoctorTests(unittest.TestCase):
     def test_wrong_os_kernel_and_board_are_errors(self):
         self.populate()
         self.put("usr/lib/os-release", "ID=openwrt\nVERSION_ID=24\nVERSION_CODENAME=other\n")
-        self.put("proc/sys/kernel/osrelease", "6.18.510-current-filogic\n")
+        self.put("proc/sys/kernel/osrelease", "6.18.520-current-edgepi-e87n\n")
         self.put(f"{DT}/compatible", b"unrelated,board\0")
         report = self.report()
         self.assertEqual(report["exit_code"], 2)
@@ -198,7 +198,7 @@ class DoctorTests(unittest.TestCase):
                 self.assertNotEqual(self.check("os")["status"], "ok")
 
     def test_bad_kernel_release_does_not_select_boot_config_path(self):
-        for release in ("6.18.51/../../etc/shadow", "6.18.51\n6.18.51", "garbage", "6.18.51evil"):
+        for release in ("6.18.52/../../etc/shadow", "6.18.52\n6.18.52", "garbage", "6.18.52evil"):
             with self.subTest(release=release):
                 self.put("proc/sys/kernel/osrelease", release)
                 report = self.report()
@@ -350,10 +350,10 @@ class DoctorTests(unittest.TestCase):
                 self.assertIsNone(check["details"]["config"]["CONFIG_CGROUPS"])
 
     def test_config_fallback_uses_exact_running_release_and_labels_provenance(self):
-        self.put("proc/sys/kernel/osrelease", "6.18.51-current-filogic")
-        self.put("boot/config-6.18.50-current-filogic", CONFIG)
+        self.put("proc/sys/kernel/osrelease", "6.18.52-current-edgepi-e87n")
+        self.put("boot/config-6.18.50-current-edgepi-e87n", CONFIG)
         self.assertEqual(self.check("kernel_config")["status"], "unknown")
-        self.put("boot/config-6.18.51-current-filogic", CONFIG)
+        self.put("boot/config-6.18.52-current-edgepi-e87n", CONFIG)
         report = self.report()
         self.assertFalse(report["checks"]["kernel_config"]["details"]["running_kernel_source"])
         self.assertEqual(report["checks"]["containers"]["status"], "warning")
@@ -361,7 +361,7 @@ class DoctorTests(unittest.TestCase):
 
     def test_runtime_config_takes_precedence_over_boot_copy(self):
         self.populate()
-        self.put("boot/config-6.18.51-current-filogic", CONFIG.replace("CONFIG_MMC=y", "CONFIG_MMC=n"))
+        self.put("boot/config-6.18.52-current-edgepi-e87n", CONFIG.replace("CONFIG_MMC=y", "CONFIG_MMC=n"))
         self.assertEqual(self.check("storage")["details"]["config"]["CONFIG_MMC"], "y")
 
     def test_corrupt_or_expanding_gzip_never_uses_partial_config(self):
@@ -506,7 +506,7 @@ class DoctorTests(unittest.TestCase):
         secret = "PRIVATE_UNIQUE_SECRET"
         self.put("usr/lib/os-release", "ID=debian\nVERSION_ID=13\nPRETTY_NAME=" + secret)
         self.put("proc/cmdline", f"root=UUID={secret} ip=192.0.2.42 password={secret} ssh_key={secret} rw")
-        self.put("proc/sys/kernel/osrelease", "6.18.51-" + secret)
+        self.put("proc/sys/kernel/osrelease", "6.18.52-" + secret)
         self.put(f"{DT}/serial-number", secret)
         self.put(f"{NET}/address", "00:11:22:33:44:55")
         self.link("sys/class/net/enx001122334455", NET)

@@ -1,0 +1,34 @@
+Subject: [PATCH] image: materialize kernel-assigned loop partition nodes in containers
+
+Docker has a private /dev without host udev events. Partition scanning can
+succeed in sysfs while /dev/loopNpM is absent. Use the kernel's actual device
+number, never guess a major/minor. Refresh stale private block nodes after a
+loop number is reused, and refuse symlinks/non-block collisions.
+
+--- a/lib/functions/image/loop.sh
++++ b/lib/functions/image/loop.sh
+@@ -21,6 +21,24 @@
+ function check_loop_device_internal() {
+ 	local device="${1}"
+ 	display_alert "Checking loop device" "${device}" "debug"
++	if [[ ${device} =~ ^/dev/loop[0-9]+p[0-9]+$ && -r /sys/class/block/${device##*/}/dev ]]; then
++		local device_major device_minor expected_device_number actual_device_number
++		IFS=: read -r device_major device_minor < "/sys/class/block/${device##*/}/dev" || return 1
++		[[ $device_major =~ ^[0-9]+$ && $device_minor =~ ^[0-9]+$ ]] || return 1
++		# Only the requested loop partition's private /dev entry is changed.
++		# Its backing image and the kernel partition table are untouched.
++		[[ ! -L $device ]] || return 1
++		[[ ! -e $device || -b $device ]] || return 1
++		printf -v expected_device_number '%x:%x' "$device_major" "$device_minor"
++		actual_device_number=$(stat -c '%t:%T' "$device" 2>/dev/null || true)
++		if [[ $actual_device_number != "$expected_device_number" ]]; then
++			if [[ -b $device ]]; then
++				run_host_command_logged rm -- "$device"
++			fi
++			run_host_command_logged mknod -m0660 "$device" b "$device_major" "$device_minor"
++		fi
++	fi
++
+ 	if [[ ! -b "${device}" ]]; then
+ 		if [[ $CONTAINER_COMPAT == yes && -b "/tmp/${device}" ]]; then
+ 			display_alert "Creating device node" "${device}"
