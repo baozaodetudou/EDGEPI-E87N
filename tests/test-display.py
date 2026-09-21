@@ -400,26 +400,37 @@ class RendererTests(unittest.TestCase):
         self.addCleanup(display._cjk_font.cache_clear)
 
     def capture_render(self, snapshot, screen, theme="dark"):
+        image, texts, boxes, _ = self.capture_render_layout(snapshot, screen, theme)
+        return image, texts, boxes
+
+    def capture_render_layout(self, snapshot, screen, theme="dark"):
         texts, boxes = [], []
-        original = ImageDraw.ImageDraw.text
-        def record(draw, xy, text, *args, **kwargs):
+        panels = []
+        original_text = ImageDraw.ImageDraw.text
+        original_rectangle = ImageDraw.ImageDraw.rounded_rectangle
+        def record_text(draw, xy, text, *args, **kwargs):
             texts.append(text)
             boxes.append(draw.textbbox(xy, text, font=kwargs["font"], anchor=kwargs.get("anchor")))
-            return original(draw, xy, text, *args, **kwargs)
-        with mock.patch.object(ImageDraw.ImageDraw, "text", new=record):
+            return original_text(draw, xy, text, *args, **kwargs)
+        def record_rectangle(draw, xy, *args, **kwargs):
+            panels.append(tuple(xy))
+            return original_rectangle(draw, xy, *args, **kwargs)
+        with mock.patch.object(ImageDraw.ImageDraw, "text", new=record_text), \
+                mock.patch.object(ImageDraw.ImageDraw, "rounded_rectangle", new=record_rectangle):
             image = display.render(snapshot, screen, theme=theme)
-        return image, texts, boxes
+        return image, texts, boxes, panels
 
     def test_all_pages_legible_in_bounds_and_distinct(self):
         images = set()
         for screen in display.SCREENS:
             with self.subTest(screen=screen):
-                image, texts, boxes = self.capture_render(display.preview_snapshot(), screen)
+                image, texts, boxes, panels = self.capture_render_layout(
+                    display.preview_snapshot(), screen)
                 self.assertEqual(image.size, (428, 142))
                 self.assertEqual(image.mode, "RGB")
-                self.assertGreater(len(texts), 4)
+                self.assertGreaterEqual(len(texts), 4)
                 self.assertGreater(len(image.getcolors(maxcolors=100000)), 20)
-                for left, top, right, bottom in boxes:
+                for left, top, right, bottom in boxes + panels:
                     self.assertGreaterEqual(left, 0)
                     self.assertGreaterEqual(top, 0)
                     self.assertLessEqual(right, 428)
@@ -427,11 +438,10 @@ class RendererTests(unittest.TestCase):
                 images.add(image.tobytes())
         self.assertEqual(len(images), len(display.SCREENS))
 
-    def test_missing_measurements_are_dashes_and_rpm_is_not_rendered(self):
+    def test_missing_measurements_do_not_invent_values_or_render_rpm(self):
         for screen in display.SCREENS:
             with self.subTest(screen=screen):
                 _, texts, _ = self.capture_render({}, screen)
-                self.assertIn("--", texts)
                 self.assertNotIn("0", texts)
                 self.assertNotIn("0.0 C", texts)
                 self.assertFalse(any("RPM" in str(text) for text in texts))
@@ -451,34 +461,44 @@ class RendererTests(unittest.TestCase):
                     "fan": {"rpm": 0}, "mem_total_kib": 1024, "mem_available_kib": 1024,
                     "uptime_seconds": 0}
         _, texts, _ = self.capture_render(snapshot, "overview")
-        for text in ("0.0 C", "无IP", "0%", "风扇"):
+        for text in ("0.0 C", "0%"):
             self.assertIn(text, texts)
+        for text in ("网口1", "无IP", "风扇"):
+            self.assertNotIn(text, texts)
 
     def test_overview_shows_assigned_ip_usage_ram_temperature_and_fan(self):
         snapshot = display.preview_snapshot()
         _, texts, _ = self.capture_render(snapshot, "overview")
-        for text in ("E87N  /  系统", "在线", "网口1", "192.0.2.87", "网口2",
-                     "无IP", "CPU", "24%", "内存", "38%", "温度", "58.8 C", "风扇",
+        for text in ("E87N  /  系统", "在线", "网口1", "192.0.2.87",
+                     "网口2", "198.51.100.23",
+                     "CPU", "24%", "内存", "38%", "温度", "58.8 C", "风扇",
                      "自动 75%"):
             self.assertIn(text, texts)
+        self.assertNotIn("无IP", texts)
         self.assertNotIn("0.42", texts)  # Load average is not CPU usage.
         snapshot.pop("cpu_usage_percent")
         _, texts, _ = self.capture_render(snapshot, "overview")
-        self.assertEqual(texts[texts.index("CPU") + 1], "--")
+        self.assertNotIn("CPU", texts)
 
-    def test_overview_uses_fan_level_and_pwm_but_ignores_tachometer(self):
+    def test_overview_uses_available_fan_pwm_but_ignores_tachometer(self):
         snapshot = display.preview_snapshot()
         for fan, detail in (
-            ({"rpm": 0, "pwm": 0}, "-- 0%"),
-            ({"rpm": 1234, "pwm": 192}, "-- 75%"),
-            ({"state": 2, "max_state": 3}, "--"),
-            ({"rpm": -1, "pwm": 256, "state": 4, "max_state": 3}, "--"),
-            ({"rpm": True, "pwm": True}, "--"),
+            ({"rpm": 0, "pwm": 0}, "0%"),
+            ({"rpm": 1234, "pwm": 192}, "75%"),
         ):
             with self.subTest(fan=fan):
                 snapshot["fan"] = fan
                 _, texts, _ = self.capture_render(snapshot, "overview")
+                self.assertIn("风扇", texts)
                 self.assertIn(detail, texts)
+                self.assertNotIn("--", texts)
+                self.assertFalse(any("RPM" in str(text) for text in texts))
+        for fan in ({"rpm": -1, "pwm": 256, "state": 4, "max_state": 3},
+                    {"rpm": True, "pwm": True}):
+            with self.subTest(fan=fan):
+                snapshot["fan"] = fan
+                _, texts, _ = self.capture_render(snapshot, "overview")
+                self.assertNotIn("风扇", texts)
                 self.assertFalse(any("RPM" in str(text) for text in texts))
 
     def test_overview_prefers_up_ipv4_then_ipv6_and_marks_socket_free_fallback(self):
@@ -494,7 +514,7 @@ class RendererTests(unittest.TestCase):
         data["local_ipv4"] = ["192.0.2.87"]
         self.assertEqual(display._overview_address(data), ("LOCAL IPv4", "192.0.2.87"))
         data["local_ipv4"] = []
-        self.assertEqual(display._overview_address(data), ("br-lan", "fe80::87"))
+        self.assertEqual(display._overview_address(data), ("NO IP", "--"))
         data["network"][0]["carrier"] = 0
         self.assertEqual(display._overview_address(data), ("NO IP", "--"))
 
@@ -510,7 +530,7 @@ class RendererTests(unittest.TestCase):
             self.assertEqual(display._overview_address(data), ("NO IP", "--"))
         for value in (None, -1, 101, float("nan"), float("inf"), True, "50"):
             _, texts, _ = self.capture_render({"cpu_usage_percent": value}, "overview")
-            self.assertEqual(texts[texts.index("CPU") + 1], "--")
+            self.assertNotIn("CPU", texts)
 
     def test_overview_full_addresses_and_extreme_values_do_not_clip_or_overlap(self):
         snapshot = display.preview_snapshot()
@@ -529,11 +549,71 @@ class RendererTests(unittest.TestCase):
                     self.assertFalse(left < other_right and other_left < right
                                      and top < other_bottom and other_top < bottom, texts)
 
-    def test_network_is_totals_and_link_unknown_is_not_down(self):
+    def test_network_shows_cumulative_totals_without_rates(self):
         _, texts, _ = self.capture_render(display.preview_snapshot(), "network")
-        for text in ("网络  /  网口", "网口1", "网口2", "RX 31.8 GiB", "TX 7.6 GiB", "在线", "断开"):
+        for text in ("网络  /  网口", "网口1", "网口2", "RX 31.8 GiB",
+                     "TX 7.6 GiB", "RX 1.1 GiB", "TX 329.7 MiB", "在线"):
             self.assertIn(text, texts)
+        self.assertNotIn("断开", texts)
         self.assertFalse(any("/s" in text for text in texts))
+
+    def test_single_active_port_hides_idle_port_and_uses_full_width_card(self):
+        snapshot = {"uptime_seconds": 60, "network": [
+            {"name": "eth0", "carrier": 1, "ipv4": "192.0.2.87", "ipv6": [],
+             "rx_bytes": 1234, "tx_bytes": 5678},
+            {"name": "eth1", "carrier": 0, "ipv4": "198.51.100.87",
+             "ipv6": ["2001:db8::87", "fe80::87"],
+             "rx_bytes": 9999, "tx_bytes": 8888},
+        ]}
+        for screen in ("overview", "network"):
+            with self.subTest(screen=screen):
+                _, texts, _, panels = self.capture_render_layout(snapshot, screen)
+                self.assertIn("网口1", texts)
+                self.assertIn("eth0", texts)
+                self.assertNotIn("网口2", texts)
+                self.assertNotIn("eth1", texts)
+                self.assertNotIn("断开", texts)
+                if screen == "overview":
+                    full_width = [box for box in panels
+                                  if box[0] <= 12 and box[2] >= 416
+                                  and box[1] <= 55 and box[3] >= 90]
+                else:
+                    full_width = [box for box in panels
+                                  if box[0] <= 12 and box[2] >= 416
+                                  and box[1] <= 40 and box[3] >= 130]
+                self.assertTrue(full_width, panels)
+
+    def test_unknown_carrier_requires_ipv4_or_global_ipv6(self):
+        snapshot = {"network": [
+            {"name": "eth0", "carrier": None, "ipv6": ["fe80::87"]},
+            {"name": "eth1", "carrier": None, "ipv6": ["2001:db8::87"]},
+        ]}
+        self.assertEqual([item["name"] for item in display._network_items(snapshot)], ["eth1"])
+        _, texts, _, panels = self.capture_render_layout(snapshot, "network")
+        self.assertIn("网口2", texts)
+        self.assertIn("eth1", texts)
+        self.assertNotIn("网口1", texts)
+        self.assertNotIn("eth0", texts)
+        self.assertTrue(any(box[0] <= 12 and box[2] >= 416 for box in panels), panels)
+
+    def test_two_active_ports_keep_two_cards(self):
+        snapshot = {"uptime_seconds": 60, "network": [
+            {"name": "eth0", "carrier": 1, "ipv4": "192.0.2.87", "ipv6": [],
+             "rx_bytes": 1234, "tx_bytes": 5678},
+            {"name": "eth1", "carrier": 1, "ipv4": "198.51.100.87", "ipv6": [],
+             "rx_bytes": 9012, "tx_bytes": 3456},
+        ]}
+        for screen in ("overview", "network"):
+            with self.subTest(screen=screen):
+                _, texts, _, panels = self.capture_render_layout(snapshot, screen)
+                for text in ("网口1", "eth0", "192.0.2.87", "网口2", "eth1", "198.51.100.87"):
+                    self.assertIn(text, texts)
+                if screen == "overview":
+                    cards = [box for box in panels if 48 <= box[1] <= 56 and 90 <= box[3] <= 98]
+                else:
+                    cards = [box for box in panels if 35 <= box[1] <= 42 and box[3] >= 130]
+                self.assertEqual(len(cards), 2, panels)
+                self.assertTrue(all(185 <= box[2] - box[0] <= 205 for box in cards), cards)
 
     def test_socket_free_ipv4_fallback_is_visible_without_repeating_ipv6(self):
         snapshot = {"local_ipv4": ["192.0.2.87"], "network": [
@@ -549,12 +629,22 @@ class RendererTests(unittest.TestCase):
         self.assertIn("192.0.2.87", network)
         self.assertEqual(network.count("fe80::87"), 1)
 
+    def test_storage_hides_devices_without_temperature_data(self):
+        snapshot = {"uptime_seconds": 60, "storage": [
+            {"name": "nvme0", "temp_mc": None},
+            {"name": "nvme1", "temp_mc": 42000},
+        ]}
+        _, texts, _ = self.capture_render(snapshot, "storage")
+        self.assertNotIn("nvme0", texts)
+        self.assertIn("nvme1", texts)
+        self.assertIn("42.0 C", texts)
+
     def test_cpu_memory_fan_and_traffic_pages_render_real_semantics(self):
         snapshot = display.preview_snapshot()
         expectations = {
             "cpu": ("24%", "0.42", "0.31", "0.28", "1800 MHz", "ondemand", "cpufreq-dt"),
             "memory": ("38%", "已用 384.0 MiB", "可用 640.0 MiB", "1.0 GiB"),
-            "fan": ("自动", "档位 L2/3", "75%", "kernel-thermal", "step_wise", "无测速"),
+            "fan": ("自动", "档位", "L2/3", "75%", "step_wise", "无测速"),
             "traffic": ("32.9 GiB", "7.9 GiB", "end0", "192.0.2.87"),
         }
         for screen, expected in expectations.items():
@@ -562,16 +652,54 @@ class RendererTests(unittest.TestCase):
                 _, texts, _ = self.capture_render(snapshot, screen)
                 for text in expected:
                     self.assertIn(text, texts)
+                if screen == "fan":
+                    self.assertNotIn("kernel-thermal", texts)
                 self.assertFalse(any("RPM" in str(text) for text in texts))
 
-    def test_optional_rotation_pages_follow_available_live_data(self):
-        requested = ["overview", "fan", "storage", "network"]
-        self.assertEqual(display._available_pages({}, requested), ["overview", "network"])
-        self.assertEqual(display._available_pages({"fan": {"state": 0}}, requested),
-                         ["overview", "fan", "network"])
-        self.assertEqual(display._available_pages({"storage": [{"name": "nvme0"}]}, requested),
-                         ["overview", "storage", "network"])
-        self.assertEqual(display._available_pages({}, ["fan", "storage"]), ["overview"])
+    def test_rotation_pages_require_effective_live_data(self):
+        requested = ["cpu", "memory", "thermal", "fan", "network", "traffic", "storage"]
+        invalid = {
+            "cpu_usage_percent": None,
+            "cpu_frequency": {"current_khz": 0, "governor": "", "driver": "  "},
+            "loadavg": [None, None, None],
+            "mem_total_kib": 0,
+            "mem_available_kib": None,
+            "cpu_temp_mc": float("nan"),
+            "phy_temp_mc": None,
+            "fan": {"state": 0, "max_state": None, "pwm": None, "pwm_percent": None,
+                    "control": None, "mode": None, "policy": None},
+            "network": [{"name": "eth0", "carrier": 0, "ipv4": None, "ipv6": [],
+                         "rx_bytes": None, "tx_bytes": None}],
+            "storage": [{"name": "nvme0", "temp_mc": None}],
+        }
+        self.assertEqual(display._available_pages(invalid, requested), ["overview"])
+        self.assertEqual(display._available_pages({}, requested), ["overview"])
+        self.assertEqual(display._available_pages({}, ["overview"] + requested), ["overview"])
+
+        cases = {
+            "cpu": {"cpu_usage_percent": 0},
+            "memory": {"mem_total_kib": 1024, "mem_available_kib": 1024},
+            "thermal": {"cpu_temp_mc": 0},
+            "fan": {"fan": {"state": 0, "max_state": 3}},
+            "network": {"network": [{"name": "eth0", "carrier": 1, "ipv4": None, "ipv6": []}]},
+            "traffic": {"network": [{"name": "eth0", "carrier": 1,
+                                      "rx_bytes": 0, "tx_bytes": None}]},
+            "storage": {"storage": [{"name": "nvme0", "temp_mc": 0}]},
+        }
+        for page, snapshot in cases.items():
+            with self.subTest(page=page):
+                self.assertEqual(display._available_pages(snapshot, [page]), [page])
+
+        sparse = {"cpu_usage_percent": 12.5,
+                  "storage": [{"name": "nvme0", "temp_mc": 41000}]}
+        self.assertEqual(display._available_pages(sparse, requested), ["cpu", "storage"])
+
+        linked_without_counters = {
+            "network": [{"name": "eth0", "carrier": 1,
+                         "rx_bytes": None, "tx_bytes": None}],
+        }
+        self.assertEqual(display._available_pages(linked_without_counters,
+                                                  ["network", "traffic"]), ["network"])
 
     def test_malformed_snapshot_fields_do_not_invent_values_or_overrun(self):
         data = {"cpu_temp_mc": float("nan"), "phy_temp_mc": "40", "fan": None,
@@ -582,14 +710,13 @@ class RendererTests(unittest.TestCase):
                 "storage": [{"name": "nvme\t" + "x" * 200, "temp_mc": None}] * 4}
         for screen in display.SCREENS:
             _, texts, boxes = self.capture_render(data, screen)
-            self.assertIn("--", texts)
             self.assertFalse(any("\n" in text or "\t" in text for text in texts))
             self.assertTrue(all(0 <= left <= right <= 428 and 0 <= top <= bottom <= 142
                                 for left, top, right, bottom in boxes))
         _, texts, _ = self.capture_render(data, "network")
-        self.assertIn("网口1", texts)
-        self.assertIn("无IPv4", texts)
-        self.assertIn("无IPv6", texts)
+        self.assertNotIn("网口1", texts)
+        self.assertNotIn("无IPv4", texts)
+        self.assertNotIn("无IPv6", texts)
 
     def test_invalid_snapshot_root_or_screen_is_an_error(self):
         with self.assertRaises(display.DisplayError):
@@ -615,10 +742,11 @@ class RendererTests(unittest.TestCase):
         for theme in display.THEMES:
             for screen in display.SCREENS:
                 with self.subTest(theme=theme, screen=screen):
-                    image, _, boxes = self.capture_render(display.preview_snapshot(), screen, theme)
+                    image, _, boxes, panels = self.capture_render_layout(
+                        display.preview_snapshot(), screen, theme)
                     self.assertEqual(image.size, (428, 142))
                     self.assertTrue(all(0 <= left <= right <= 428 and 0 <= top <= bottom <= 142
-                                        for left, top, right, bottom in boxes))
+                                        for left, top, right, bottom in boxes + panels))
 
     def test_preview_cli_all_layouts_never_uses_hardware_or_live_config(self):
         original_import = __import__
@@ -697,7 +825,7 @@ class DaemonTests(unittest.TestCase):
             snapshot.assert_not_called()
             renderer.assert_not_called()
 
-    def test_reloads_enabled_screen_and_refresh_every_loop(self):
+    def test_reloads_enabled_screen_and_refresh_with_fixed_page_fallback(self):
         configs = [fixture_config(False, 20, "overview", 2),
                    fixture_config(True, 30, "thermal", 3),
                    fixture_config(False, 40, "network", 4),
@@ -711,13 +839,27 @@ class DaemonTests(unittest.TestCase):
             self.assertEqual(config.call_count, 4)
             factory.assert_called_once_with()
             self.assertEqual(snapshot.call_count, 2)
-            self.assertEqual(renderer.call_args_list, [mock.call({}, "thermal", theme="dark"),
-                                                       mock.call({}, "storage", theme="dark")])
+            self.assertEqual(renderer.call_args_list, [mock.call({}, "overview", theme="dark"),
+                                                       mock.call({}, "overview", theme="dark")])
             self.assertEqual(sleep.call_args_list, [mock.call(2), mock.call(3), mock.call(4), mock.call(60)])
             self.assertEqual(factory.return_value.draw.call_count, 2)
             factory.return_value.close.assert_called_once_with()
 
-    def test_rotation_switches_pages_on_configured_interval(self):
+    def test_fixed_page_returns_when_telemetry_recovers(self):
+        config = fixture_config(True, screen="storage", rotation_enabled=False, refresh=2)
+        snapshots = [{}, {"storage": [{"name": "nvme0", "temp_mc": 41000}]}]
+        with mock.patch.object(display, "load_display_config", return_value=config), \
+                mock.patch.object(display, "Framebuffer") as factory, \
+                mock.patch.object(display, "read_snapshot", side_effect=snapshots), \
+                mock.patch.object(display, "render", return_value="fixture image") as renderer, \
+                mock.patch.object(display.time, "sleep", side_effect=[None, KeyboardInterrupt]):
+            self.assertEqual(display.main(["--daemon"]), 0)
+        self.assertEqual(renderer.call_args_list,
+                         [mock.call(snapshots[0], "overview", theme="dark"),
+                          mock.call(snapshots[1], "storage", theme="dark")])
+        factory.return_value.close.assert_called_once_with()
+
+    def test_rotation_skips_unavailable_pages_at_configured_interval(self):
         config = fixture_config(True, screen="storage", theme="aurora", rotation_enabled=True, rotation_seconds=3,
                                 rotation_screens=["overview", "network"], refresh=2)
         with mock.patch.object(display, "load_display_config", return_value=config), \
@@ -729,7 +871,7 @@ class DaemonTests(unittest.TestCase):
             self.assertEqual(display.main(["--daemon"]), 0)
         self.assertEqual(renderer.call_args_list, [mock.call({}, "overview", theme="aurora"),
                                                    mock.call({}, "overview", theme="aurora"),
-                                                   mock.call({}, "network", theme="aurora")])
+                                                   mock.call({}, "overview", theme="aurora")])
         factory.return_value.close.assert_called_once_with()
 
     def test_rotation_leaves_optional_page_when_live_data_disappears(self):

@@ -1,9 +1,9 @@
 # E87N 真实板卡显示验收（2026-09-21）
 
 本记录包含同一台真实 E87N 的连续验证：早先的基础 framebuffer 验收使用
-`e87n-display 1.1.5-1`，随后升级到 `1.2.0-1`；2026 年 9 月 21 日又将独立包升级到
-`1.3.0-1`，验证八个页面、三种配色、旧配置迁移和独立发布回归。历史结果保留在下文，
-本文件的最新结论以 `1.3.0-1` 验收为准。
+`e87n-display 1.1.5-1`，随后升级到 `1.2.0-1` 和 `1.3.0-1`；2026 年 9 月 21 日又升级到
+`1.3.1-1`，验证动态网口隐藏、单口全宽、缺失遥测过滤、固定页面回退和八页轮换配置。
+历史结果保留在下文，本文件的最新结论以 `1.3.1-1` 验收为准。
 
 ## 设备与软件
 
@@ -13,9 +13,37 @@
 | 系统 | Debian 13 Trixie / Armbian unofficial |
 | 内核 | `6.18.52-current-edgepi-e87n` |
 | framebuffer | `fb_nv3007`、`428×142`、16-bit RGB565 |
-| 显示包 | `e87n-display 1.3.0-1`（由 `1.2.0-1` 独立升级） |
+| 显示包 | `e87n-display 1.3.1-1`（由 `1.3.0-1` 独立升级） |
 | 中文字体 | `fonts-wqy-microhei 0.2.0-beta-4` |
 | 网口 | `eth0`、`eth1` |
+
+## `e87n-display 1.3.1-1` 验收结果
+
+- 在板端从当前源码构建 `e87n-display_1.3.1-1_all.deb`，SHA-256 为
+  `49977cdc18449fe66e55d1d9e25eacbefbfdaaba8c35b80d5ddf519d349a7333`；包元数据为
+  `Package: e87n-display`、`Version: 1.3.1-1`、`Architecture: all`。
+- 使用 APT 从 `1.3.0-1` 原地升级并保留 `/etc/e87n/display.json`，随后配置
+  `overview,cpu,memory,thermal,fan,network,traffic,storage` 八页、3 秒轮换和 `aurora`
+  主题。最终配置保持 `rotation_enabled=true`、20% 亮度和 2 秒数据刷新。
+- 实时快照中 `eth0` 为 `carrier=1`、IPv4 `192.168.20.201`；`eth1` 为 `carrier=0`，仍有
+  link-local IPv6 和历史 RX/TX 计数。新版筛选后只有 `eth0`，总览和网络页只渲染全宽
+  `网口1` 卡片，不再显示空的 `eth1`。风扇页显示“自动”、`L1/3`、`50%`、`step_wise`
+  和“无测速”，不显示内部值 `kernel-thermal`。
+- 板上没有存储温度遥测；实时可用页为 `overview`、`cpu`、`memory`、`thermal`、`fan`、
+  `network`、`traffic`。固定选择 `storage` 时 daemon 页面集合为 `overview`，恢复八页轮换后
+  `storage` 自动跳过。
+- 对上述 7 个可用页面逐一测试 `dark`、`aurora`、`light` 三种主题，共 21 组。每组均从
+  真实 `/dev/fb0` 读回完整 `121552` 字节（stride `856`）RGB565 帧，21 个 SHA-256 均不同，
+  且均不是全零帧。
+- 板端回归通过：`test-display.py` 57 项、`test-hardware.py` 58 项、`test-doctor.py` 44 项、
+  `test-verify-display-fan.py` 32 项、`test-display-package.py` 19 项、
+  `test-ci-prepare-release.py` 11 项；`scripts/ci-display-regressions.sh` 通过。
+- 最终服务为 `active (running)`、`NRestarts=0`、`ExecMainStatus=0`；安装及页面/主题切换后的
+  10 分钟 journal 没有 warning 或更高等级记录。
+- 本轮只升级显示 deb，没有刷写 U-Boot、内核、DTB 或整机镜像。
+
+以上 framebuffer 读回证明新版服务已向设备 framebuffer 写入各页面的不同像素内容，但不
+等于摄像头或肉眼确认 LCD 面板的颜色、方向和清晰度。
 
 ## `e87n-display 1.3.0-1` 验收结果
 

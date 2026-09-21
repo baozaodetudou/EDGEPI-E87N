@@ -36,18 +36,20 @@ sudo e87nctl display on
 ```
 
 Screens: overview, cpu, memory, thermal, fan, network, traffic, storage.
-Themes: dark, aurora, light. Themes are colour skins; all pages keep the same layout.
+Themes: dark, aurora, light. Themes are colour skins; telemetry availability uses
+the same filtering and compact layout rules in every theme.
 The fan remains automatic even with the display off. Configuration is
 `/etc/e87n/display.json`; service name is `e87n-display.service`. Unknown
 measurements are not successful hardware tests.
 
 The default overview is 428x142 pixels, enabled at 20% brightness and refreshed
-every 2 seconds. It has two fixed `LAN 1`/`LAN 2` cards with link state and an
-assigned local IPv4/IPv6 address, followed by CPU usage, RAM used, CPU
-temperature and kernel fan state. The fan card shows `AUTO`, cooling level and
-PWM percentage only; the screen deliberately does not display tachometer RPM.
-Missing values remain `--`, and neither PWM nor cooling level proves rotation.
-The kernel is the only fan writer.
+every 2 seconds. Eligible network interfaces are shown as compact LAN cards;
+two cards share the row and one card expands to the full row. Missing telemetry
+hides its card or row instead of leaving an empty panel. The remaining content
+shows available CPU usage, RAM used, CPU temperature and kernel fan state. The
+fan card shows `AUTO`, cooling level and PWM percentage only; the screen
+deliberately does not display tachometer RPM. Neither PWM nor cooling level
+proves rotation. The kernel is the only fan writer.
 
 CPU usage comes from consecutive aggregate `/proc/stat` counters, excluding
 guest double-counting and treating idle/iowait as idle. The first sample,
@@ -58,8 +60,10 @@ retains the baseline and shows usage from its second valid sample. RAM used is
 
 IP reads use only the standard library: a local read-only `SIOCGIFADDR` query
 for primary IPv4 and bounded `/proc/net/if_inet6` reads for IPv6. Selection
-prefers carrier-up interfaces, primary IPv4, then global IPv6, with link-local
-addresses as a fallback. Tentative, duplicate-failed and deprecated IPv6
+shows carrier-up interfaces. `carrier=0` hides an interface unconditionally,
+even if stale addresses or counters remain. When carrier is unknown, an
+interface is shown only with a valid IPv4 or global IPv6 address; link-local
+IPv6 alone is insufficient. Tentative, duplicate-failed and deprecated IPv6
 addresses are excluded. There are no DNS lookups, packets or network changes.
 The existing service permits only AF_UNIX, so IPv4 also has a bounded
 `/proc/net/fib_trie` fallback accepting only `/32 host LOCAL` entries. That
@@ -83,7 +87,11 @@ and on/off behavior are preserved; changing settings while off keeps it off.
 The daemon reloads settings every iteration, so a new screen, theme or interval
 takes effect after its current sleep without a service restart. Rotation is
 disabled by default; `refresh_seconds` refreshes data and `rotation_seconds`
-changes pages.
+changes pages. All eight pages remain configurable. Automatic rotation filters
+every page whose required telemetry is unavailable. A configured fixed page
+temporarily falls back to `overview` when unavailable and returns automatically
+when its data recovers. The current device has no usable storage-temperature
+telemetry, so `storage` is configurable but skipped at runtime.
 
 Offline checks and preview (Pillow and DejaVu Sans required):
 

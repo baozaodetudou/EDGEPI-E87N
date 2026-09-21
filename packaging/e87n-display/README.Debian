@@ -30,9 +30,19 @@ Module configuration: /etc/modules-load.d/e87n-display.conf
 Both are dpkg conffiles. Use --force-confdef --force-confold with unattended
 dpkg upgrades when existing local settings must take precedence.
 
-Themes are dark, aurora and light colour skins over the same eight page layouts.
+Themes are dark, aurora and light colour skins over the same data semantics and
+availability rules.
 Pages are overview, cpu, memory, thermal, fan, network, traffic and storage.
-Fan and storage are skipped during automatic rotation when their telemetry is absent.
+All eight pages remain configurable. Missing telemetry hides its card, row and
+automatic-rotation page. An unavailable fixed page temporarily falls back to
+overview and returns to the configured page when telemetry recovers. The current
+device has no usable storage-temperature telemetry, so storage is configurable
+but skipped at runtime.
+
+Network cards are filtered before layout. `carrier=0` always hides a port,
+regardless of stale addresses or counters. With unknown carrier, a port is shown
+only when it has a valid IPv4 or global IPv6 address; link-local IPv6 alone is
+not enough. A single visible port uses a full-width card.
 Automatic page rotation is disabled by default; enable it with `e87nctl display
 rotation on` and choose a 2-60 second interval with `rotation-seconds`.
 

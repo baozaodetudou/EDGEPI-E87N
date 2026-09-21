@@ -4,7 +4,7 @@
 
 ## 当前配置与历史候选 — 2026-09-21
 
-当前最小镜像预装同源构建的 `e87n-display` 基线包，启用 NV3007 与 PWM 背光设备树节点，提供模块自动加载配置和下一次启动启用的显示服务。Firmware workflow 用 QEMU 验证该预装基线；供升级和重新安装的 deb 由独立 Display Release 发布，不要求与 firmware 同版本，见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)。构建不再安装旧 headless 黑名单。2026 年 9 月 21 日已在真实设备上验证 Debian 13、`fb_nv3007`、中文字体、双网口卡片、背光命令和短时风扇测试，完整结果见 [FINAL-VALIDATION-20260921.md](FINAL-VALIDATION-20260921.md)。
+当前最小镜像预装同源构建的 `e87n-display` 基线包，启用 NV3007 与 PWM 背光设备树节点，提供模块自动加载配置和下一次启动启用的显示服务。当前独立显示包版本为 `1.3.1-1`。Firmware workflow 用 QEMU 验证该预装基线；供升级和重新安装的 deb 由独立 Display Release 发布，不要求与 firmware 同版本，见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)。构建不再安装旧 headless 黑名单。2026 年 9 月 21 日已在真实设备上验证 Debian 13、`fb_nv3007`、中文字体、断链网口隐藏、单口全宽、缺失页面跳过、固定页回退、背光命令和短时风扇测试；完整结果见 [FINAL-VALIDATION-20260921.md](FINAL-VALIDATION-20260921.md)。
 
 [9 月 13 日历史屏幕/风扇候选](candidate-display-fan-20260913.md)保留其当次构建、静态检查、导出与哈希证据。9 月 12 日的 Trixie 与 Bookworm 镜像也属历史候选；这些文件均不能作为当前最小配置交付。
 
@@ -14,7 +14,8 @@ candidate3 的 Docker/QEMU 软件验收及独立显示包生命周期结果见[�
 
 - 当前使用维护中的 Frank-W MT7987 内核，加上 `userpatches/kernel/edgepi-e87n-6.18/` 的 E87N 补丁；包括 GPL NV3007 fbtft 驱动、GMAC aliases、1 GiB 保留内存及 LVTS 修正。SPI/背光内建，`fb_nv3007` 模块配置为随启动加载；补丁数量及摘要以本次构建 receipt 为准。
 - `/dev/fb0` 使用 428×142、16-bit RGB565；原 SPI 52 MHz、270°旋转保持，刷新配置上限改为 30 FPS。实际界面默认每 2 秒更新，不能把 30 当作实测帧率。
-- 八页原生界面：`overview` 设备概览、`cpu` CPU 使用率/负载/频率、`memory` 内存占用与容量、`thermal` 温度、`fan` 风扇控制状态、`network` 双网口链路与地址、`traffic` 汇总流量与速率、`storage` NVMe 温度。未发现的指标显示 `--`；Python/Pillow、DejaVu 拉丁字体和 WQY MicroHei 中文字体由 Debian 软件包提供。
+- 八页原生界面：`overview` 设备概览、`cpu` CPU 使用率/负载/频率、`memory` 内存占用与容量、`thermal` 温度、`fan` 风扇控制状态、`network` 有效网口链路与地址、`traffic` 累计流量汇总、`storage` NVMe 温度。全部八页都可配置；缺失遥测对应的卡片、行和自动轮换页面隐藏，不保留空面板。Python/Pillow、DejaVu 拉丁字体和 WQY MicroHei 中文字体由 Debian 软件包提供。
+- 网口 `carrier=0` 时无论残留地址或计数都隐藏；carrier 未知时仅有效 IPv4 或全局 IPv6 足以显示，link-local IPv6 单独存在不够。只有一个有效网口时卡片占满整行。
 - 风扇默认由内核 `pwm-fan` + thermal `step_wise` 自动控制。界面显示 `AUTO`、`LEVEL`、`PWM%` 和 kernel policy；小屏不显示 tachometer RPM，也不把 PWM 或 cooling level 当作转速。
 - 背光 PWM2、50000 ns、normal polarity；用户亮度在软件中反向映射。上电默认 raw 26（暗），显示服务应用保存的亮度，首次默认 20%。逻辑关闭写 raw 26，不能使用常见的 raw 0 或 `bl_power=4` 关闭方法。
 - 风扇 PWM1、50000 ns，四级 `0/128/192/255`，50/65/75℃触发 1/2/3 档，迟滞 2℃。这些是控制阈值，不是芯片安全额定温度。没有用户态风扇写入者，不会与内核 governor 抢控制。
@@ -38,7 +39,7 @@ e87nctl display on
 ```
 
 亮度为整数 0–100；页面为 `overview|cpu|memory|thermal|fan|network|traffic|storage`；
-主题为 `dark|aurora|light`，只改变颜色，不改变布局或字段；
+主题为 `dark|aurora|light`，只改变颜色，不改变字段语义或数据可用性规则；
 刷新和轮换间隔为整数 2–60 秒。默认总览、20% 亮度、每 2 秒刷新，轮换默认关闭。
 `display config` 只读显示校验后的已保存或默认配置，`display refresh` 保存数据刷新间隔。
 设置保存在 `/etc/e87n/display.json`，采用校验、锁及原子持久化；关闭时改设置不会偷偷点亮。
@@ -58,9 +59,10 @@ e87nctl display rotation off
 ```
 
 `refresh_seconds` 负责同一页面的数据重绘；`rotation_seconds` 负责页面切换。轮换页面列表
-至少一个、最多八个，页面不能重复。自动轮换时，如果没有风扇或 NVMe 遥测，会跳过
-`fan` 或 `storage`；固定选择时仍显示缺失值。旧版缺少新字段时会自动使用默认值，旧主题
-`dual`、`single`、`compact` 分别迁移为 `dark`、`light`、`aurora`。
+至少一个、最多八个，页面不能重复。自动轮换会过滤所有缺少必要遥测的页面；固定页面
+不可用时临时显示 `overview`，数据恢复后自动回到配置页面。当前设备没有可用存储温度，
+所以 `storage` 可配置但会自动跳过。旧版缺少新字段时会自动使用默认值，旧主题 `dual`、
+`single`、`compact` 分别迁移为 `dark`、`light`、`aurora`。
 
 配置文件 `/etc/e87n/display.json` 的当前字段如下：
 
@@ -68,9 +70,9 @@ e87nctl display rotation off
 | --- | --- | --- |
 | `enabled` | 布尔值 | 是否绘制并保持屏幕开启 |
 | `brightness_percent` | 整数 0–100 | 用户可见亮度；硬件背光为 active-low |
-| `screen` | 八个已定义页面之一 | 固定页面，也是轮换的首选页面 |
+| `screen` | 八个已定义页面之一 | 配置的固定页面；不可用时临时显示 overview |
 | `refresh_seconds` | 整数 2–60 | 数据采样/重绘周期，不是页面切换周期 |
-| `theme` | `dark\|aurora\|light` | 只改变配色，不改变布局或字段 |
+| `theme` | `dark\|aurora\|light` | 只改变配色，不改变字段语义或可用性规则 |
 | `rotation_enabled` | 布尔值 | 是否自动轮换页面 |
 | `rotation_seconds` | 整数 2–60 | 自动轮换的页面切换周期 |
 | `rotation_screens` | 1–8 个不重复页面 | 自动轮换的页面顺序 |

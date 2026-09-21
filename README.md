@@ -102,12 +102,17 @@ journalctl -u e87n-display.service -b --no-pager
 当前小屏的硬件链路已经按原始 E87N OpenWrt 项目适配：NV3007、428×142、RGB565、270°
 旋转、PWM 背光和独立 Debian 服务。`e87n-display` 提供 `overview`、`cpu`、`memory`、
 `thermal`、`fan`、`network`、`traffic`、`storage` 八个页面；显示程序不会接管风扇，
-只读取内核暴露的状态。
+只读取内核暴露的状态。当前独立显示包版本为 `1.3.1-1`。
 
-三种主题现在是相同布局的配色皮肤：`dark` 深色工业、`aurora` 黑紫霓虹、`light` 明亮高对比。
-页面可以按 2–60 秒自动轮换，默认关闭；默认数据每 2 秒刷新，轮换间隔默认 3 秒。
-没有风扇或 NVMe 遥测时，自动轮换会跳过对应可选页面。主题与轮换只改变显示方式，
-风扇仍由 Linux 内核 thermal governor 控制。
+三种主题是相同数据语义和可用性规则的配色皮肤：`dark` 深色工业、`aurora` 黑紫霓虹、
+`light` 明亮高对比；实时数据可用性会让布局自动收缩。网口 `carrier=0` 时即使残留地址或
+计数仍会隐藏；carrier 未知时，只有有效 IPv4 或全局 IPv6 才显示，只有 link-local IPv6
+不够。只剩一个可见网口时卡片占满整行。缺失遥测对应的卡片、行和自动轮换页面都会隐藏。
+
+八个页面始终都可配置。固定页面暂时不可用时先显示 `overview`，数据恢复后自动回到配置的
+固定页面；自动轮换只经过当前有有效数据的页面。当前设备没有可用的存储温度遥测，因此
+`storage` 虽可配置但运行时会自动跳过。页面轮换范围为 2–60 秒，默认关闭；默认数据每 2 秒
+刷新，轮换间隔默认 3 秒。风扇仍由 Linux 内核 thermal governor 控制。
 
 ```sh
 e87nctl display theme dark
@@ -131,7 +136,7 @@ systemctl restart e87n-display.service
 镜像构建输入和低频固件版本来自
 [`userpatches/config/e87n-build.json`](userpatches/config/e87n-build.json)，当前
 `firmware_version` 为 `2026.09.1`，目标为 Debian 13 / Linux 6.18.52。独立显示包版本来自
-[`packaging/e87n-display/VERSION`](packaging/e87n-display/VERSION)。构建入口：
+[`packaging/e87n-display/VERSION`](packaging/e87n-display/VERSION)，当前为 `1.3.1-1`。构建入口：
 
 ```sh
 python3 scripts/build_config.py

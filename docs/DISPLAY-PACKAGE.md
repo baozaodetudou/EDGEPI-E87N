@@ -6,7 +6,7 @@
 `board-support/` 按仓库相对结构复制到 `/tmp/overlay/e87n-package/`，customize 在
 目标 chroot 中调用该脚本，再通过 APT 安装产物。当前源码已经接入预装流程，
 并启用 LCD/背光节点及显示服务；包版本以 `packaging/e87n-display/VERSION` 为准，当前为
-`1.3.0-1`。
+`1.3.1-1`。
 独立 deb 用于升级和重新安装，不表示基础镜像默认无屏幕。
 candidate3 属于此前的 headless 配置，其验收不能替代当前显示配置的重建与实机测试。
 
@@ -36,11 +36,11 @@ stride、偏移和 framebuffer 内存边界。
 
 ```sh
 ./scripts/build-display-deb.sh --output-dir ./output/debs
-./scripts/build-display-deb.sh --output-dir ./output/debs --version 1.3.0-1
+./scripts/build-display-deb.sh --output-dir ./output/debs --version 1.3.1-1
 ```
 
 产物严格命名为 `e87n-display_VERSION_all.deb`，例如
-`output/debs/e87n-display_1.3.0-1_all.deb`。标准输出包含构建进度，调用方应按版本
+`output/debs/e87n-display_1.3.1-1_all.deb`。标准输出包含构建进度，调用方应按版本
 构造文件名，不能将整个 stdout 当作路径。版本须为合法 Debian 版本，发布新内容时
 递增版本；可用 `dpkg --compare-versions` 检查先后。构建先写独立临时目录，成功后
 替换同名产物；失败不覆盖原产物。`dpkg-deb --root-owner-group` 固定包内 root:root
@@ -143,7 +143,7 @@ thermal governor。重新显示使用 `e87nctl display on`。只有确定不再�
 `/etc/e87n/display.json`，同时立即应用背光设置；不建议用编辑器直接覆盖 JSON。
 
 ```sh
-# 三种配色主题；页面布局和数据语义不变
+# 三种配色主题；数据语义不变，布局按有效遥测自动收缩
 e87nctl display theme dark       # 默认深色工业配色
 e87nctl display theme aurora     # 黑紫霓虹配色
 e87nctl display theme light      # 明亮高对比配色
@@ -169,9 +169,15 @@ e87nctl display config
 `storage`；亮度范围为 `0..100`，数据刷新
 和页面轮换间隔范围均为 `2..60` 秒。`refresh_seconds` 控制同一页面多久重新采样，
 `rotation_seconds` 控制页面多久切换，两者互不冲突。轮换页面列表必须是 1–8 个不重复页面。
-自动轮换时，如果没有风扇或 NVMe 遥测，会跳过 `fan` 或 `storage`；固定选择这些页面时仍会
-显示明确的缺失值。保留的 1.2 配置中 `dual`、`single`、`compact` 会分别迁移到 `dark`、
-`light`、`aurora`，下一次通过 `e87nctl` 保存设置时写回新名称。
+全部八页都可配置，但自动轮换会按实时数据过滤每个不可用页面；缺失遥测对应的卡片、行或
+页面不保留空占位。固定选择的页面暂时不可用时显示 `overview`，数据恢复后自动回到配置的
+固定页面。当前设备没有可用存储温度遥测，因此 `storage` 仍可配置，但运行时会自动跳过。
+保留的 1.2 配置中 `dual`、`single`、`compact` 会分别迁移到 `dark`、`light`、`aurora`，
+下一次通过 `e87nctl` 保存设置时写回新名称。
+
+网口可见性独立于主题：`carrier=0` 时，无论是否残留地址或 RX/TX 计数都隐藏；carrier 未知
+时，仅有效 IPv4 或全局 IPv6 能让网口显示，link-local IPv6 单独存在不够。两个有效网口
+并排显示，只有一个有效网口时卡片使用整行全宽布局。
 
 配置文件中的 8 个字段如下：
 
@@ -179,9 +185,9 @@ e87nctl display config
 | --- | --- | --- |
 | `enabled` | `true` / `false` | 是否绘制并保持屏幕开启 |
 | `brightness_percent` | `0..100` | 屏幕亮度百分比 |
-| `screen` | 八个已定义页面之一 | 固定显示页面 |
+| `screen` | 八个已定义页面之一 | 配置的固定页面；不可用时临时回退 overview |
 | `refresh_seconds` | `2..60` | 同一页面的数据刷新周期 |
-| `theme` | `dark` / `aurora` / `light` | 只改变配色，不改变布局或字段 |
+| `theme` | `dark` / `aurora` / `light` | 只改变配色，不改变数据语义或可用性规则 |
 | `rotation_enabled` | `true` / `false` | 是否自动轮换页面 |
 | `rotation_seconds` | `2..60` | 页面轮换周期 |
 | `rotation_screens` | 1–8 个不重复页面 | 页面轮换顺序 |
@@ -241,16 +247,19 @@ e87nctl display config
 systemctl show e87n-display.service -p NRestarts -p ExecMainStatus
 ```
 
-观察实体屏幕至少 30 秒，应按配置顺序循环；缺少风扇或 NVMe 数据时对应可选页会被跳过。若页面
-不变，先确认 `rotation_enabled=true`、页面列表有效、服务为 `active`，再查看 journal；不要
-把“配置文件写入成功”误认为 framebuffer 已正常写入。
+观察实体屏幕至少 30 秒，应按配置顺序循环；缺失必要遥测的页面会被跳过，当前设备因没有
+存储温度而应跳过 `storage`。还应拔掉一个网口，确认 `carrier=0` 的端口即使有残留地址/计数
+也隐藏，单端口卡片变为全宽；carrier 未知且只有 link-local IPv6 时也不应显示。固定选择
+不可用页面时应临时看到 `overview`，恢复遥测后自动返回配置页。若页面不变，先确认
+`rotation_enabled=true`、页面列表有效、服务为 `active`，再查看 journal；不要把“配置文件
+写入成功”误认为 framebuffer 已正常写入。
 
 ## 安装、预装与维护
 
 在已启动的目标 Debian 系统安装或升级：
 
 ```sh
-sudo apt-get install ./e87n-display_1.3.0-1_all.deb
+sudo apt-get install ./e87n-display_1.3.1-1_all.deb
 dpkg-query -W -f='${Package} ${Version} ${Status}\n' e87n-display
 dpkg-query -L e87n-display
 systemctl status e87n-display.service
@@ -284,7 +293,7 @@ disable/mask 的选择，禁用且未运行的服务不会被升级启动。手�
 
 ```sh
 sudo apt-get -y -o Dpkg::Options::=--force-confdef \
-  -o Dpkg::Options::=--force-confold install ./e87n-display_1.3.0-1_all.deb
+  -o Dpkg::Options::=--force-confold install ./e87n-display_1.3.1-1_all.deb
 sudo apt-get remove e87n-display  # 停止显示；保留配置及服务启用状态记录
 sudo apt-get purge e87n-display   # 删除包的 conffile 与 helper 状态
 ```

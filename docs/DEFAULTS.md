@@ -1,6 +1,6 @@
 # 最小系统默认配置
 
-本配置仅用于本仓库新构建的 Debian 13 Trixie 显示/风扇最小镜像，不修改设备现有 OpenWrt。镜像构建输入和固件发布版本来自 [e87n-build.json](../userpatches/config/e87n-build.json)：当前 `firmware_version` 为 `2026.09.1`，审查目标为 Debian 13.7、Linux 6.18.52 LTS，包内核 release 为 `6.18.52-current-edgepi-e87n`。独立显示包版本来自 `packaging/e87n-display/VERSION`；历史同名镜像不会自动更新。
+本配置仅用于本仓库新构建的 Debian 13 Trixie 显示/风扇最小镜像，不修改设备现有 OpenWrt。镜像构建输入和固件发布版本来自 [e87n-build.json](../userpatches/config/e87n-build.json)：当前 `firmware_version` 为 `2026.09.1`，审查目标为 Debian 13.7、Linux 6.18.52 LTS，包内核 release 为 `6.18.52-current-edgepi-e87n`。独立显示包版本来自 `packaging/e87n-display/VERSION`，当前为 `1.3.1-1`；历史同名镜像不会自动更新。
 
 | 项目 | 默认值 |
 | --- | --- |
@@ -42,12 +42,16 @@ workflow 独立构建和发布 `e87n-display_<version>_all.deb`，可在兼容�
 小屏不显示 RPM；风扇仅显示内核自动模式、cooling level 和 PWM 百分比。RPM 需要硬件测速反馈，
 原机未提供该反馈，不能把 PWM 或 cooling level 换算成转速。
 
-小屏主题与页面轮换：`dark`、`aurora`、`light` 是三套配色皮肤，八个页面的布局和数据语义
-保持一致。使用 `e87nctl display theme dark|aurora|light` 切换主题，使用
+小屏主题与页面轮换：`dark`、`aurora`、`light` 是三套配色皮肤，八个页面的数据语义与
+可用性规则保持一致，布局会按有效遥测自动收缩。使用 `e87nctl display theme dark|aurora|light` 切换主题，使用
 `e87nctl display rotation on` 和
 `e87nctl display pages overview,cpu,memory,thermal,fan,network,traffic,storage`
-启用页面轮换；轮换时间由 `e87nctl display rotation-seconds 3` 设置。缺少风扇或存储遥测时，
-自动轮换会跳过相应可选页面。
+启用页面轮换；轮换时间由 `e87nctl display rotation-seconds 3` 设置。全部八页都可配置；缺少
+遥测时对应卡片、行和自动轮换页面隐藏。固定页面暂时不可用时回退 `overview`，数据恢复后
+自动返回配置页。当前设备没有存储温度遥测，因此 `storage` 会自动跳过。
+
+网口 `carrier=0` 时无论残留地址或计数都隐藏；carrier 未知时只有有效 IPv4 或全局 IPv6
+才显示，只有 link-local IPv6 不够。只剩一个可见网口时，网口卡片使用整行全宽布局。
 
 为防止通用 Filogic 包替换 E87N 移植，保留内核/DTB/BSP 等 Armbian hold。普通 Debian 软件正常更新；解除 hold 或更新内核前需要重新移植并验证。没有自动重启策略。
 
