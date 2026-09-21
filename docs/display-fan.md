@@ -15,6 +15,7 @@ candidate3 的 Docker/QEMU 软件验收及独立显示包生命周期结果见[�
 - 当前使用维护中的 Frank-W MT7987 内核，加上 `userpatches/kernel/edgepi-e87n-6.18/` 的 E87N 补丁；包括 GPL NV3007 fbtft 驱动、GMAC aliases、1 GiB 保留内存及 LVTS 修正。SPI/背光内建，`fb_nv3007` 模块配置为随启动加载；补丁数量及摘要以本次构建 receipt 为准。
 - `/dev/fb0` 使用 428×142、16-bit RGB565；原 SPI 52 MHz、270°旋转保持，刷新配置上限改为 30 FPS。实际界面默认每 2 秒更新，不能把 30 当作实测帧率。
 - 四页原生界面：`overview` 设备概览、`thermal` 温度及风扇、`network` 网卡字节计数、`storage` NVMe 温度。未发现的指标显示 `--`；没有测速线便不编造 RPM。Python/Pillow/DejaVu 字体由 Debian 软件包提供。
+- 风扇默认由内核 `pwm-fan` + thermal `step_wise` 自动控制。界面分别显示 `AUTO`、`LEVEL`、`PWM%` 和真实测速 `RPM`；E87N 当前没有 tachometer 输入时，RPM 显示 `--`，不能用 PWM 推算转速。
 - 背光 PWM2、50000 ns、normal polarity；用户亮度在软件中反向映射。上电默认 raw 26（暗），显示服务应用保存的亮度，首次默认 20%。逻辑关闭写 raw 26，不能使用常见的 raw 0 或 `bl_power=4` 关闭方法。
 - 风扇 PWM1、50000 ns，四级 `0/128/192/255`，50/65/75℃触发 1/2/3 档，迟滞 2℃。这些是控制阈值，不是芯片安全额定温度。没有用户态风扇写入者，不会与内核 governor 抢控制。
 - 串口 ttyS0 保留；禁用 framebuffer console，避免控制台字符覆盖小屏。
@@ -26,6 +27,8 @@ candidate3 的 Docker/QEMU 软件验收及独立显示包生命周期结果见[�
 ```bash
 e87nctl status
 e87nctl fan status
+e87nctl fan test 1 5
+e87nctl acceleration status
 e87nctl display config
 e87nctl display brightness 20
 e87nctl display screen thermal
@@ -36,7 +39,7 @@ e87nctl display on
 
 亮度为整数 0–100；页面为 `overview|thermal|network|storage`；刷新间隔为整数 2–60 秒。默认总览、20% 亮度、每 2 秒刷新。`display config` 只读显示校验后的已保存或默认配置，`display refresh` 保存刷新间隔。设置保存在 `/etc/e87n/display.json`，采用校验、锁及原子持久化；关闭时改设置不会偷偷点亮。`display apply` 仅应用已保存状态，不改配置，供显示服务的启动前步骤使用。使用非 root 管理用户时，写配置命令需要相应权限。
 
-显示服务是 `e87n-display.service`。服务错误会以非零状态退出并重试，不把缺少帧缓冲或错误板型当成成功。它限制设备写权限到 fb0/背光，不能写 thermal/cooling/PWM sysfs。关屏不会停风扇，显示服务停止也不会改变风扇控制。
+`e87nctl fan test LEVEL SECONDS` 是 root-only、0–30 秒的临时冷却档位测试，结束后恢复原档位；它不是持久手动模式，也不关闭 thermal 保护。显示服务是 `e87n-display.service`。服务错误会以非零状态退出并重试，不把缺少帧缓冲或错误板型当成成功。显示服务本身只写 fb0/背光，不写 thermal/cooling/PWM sysfs；关屏不会停风扇，显示服务停止也不会改变风扇控制。
 
 当前不提供任意手动风扇百分比或停扇接口。原系统“55%”会按其 25 档表量化成 PWM130；新四档表的状态编号含义不同，不能直接复用原插件输出。原机器的恒定 55% 是个人设置，不作为新默认值。
 

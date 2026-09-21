@@ -20,13 +20,26 @@ def _refresh(value):
     return int(value)
 
 
+def _seconds(value):
+    if not re.fullmatch(r"[0-9]{1,2}", value) or not 0 <= int(value) <= 30:
+        raise argparse.ArgumentTypeError("SECONDS must be an integer in 0..30")
+    return int(value)
+
+
 def _parser():
     parser = argparse.ArgumentParser(prog="python3 -m e87n")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("status", help="read hardware status as JSON")
     commands.add_parser("doctor", help="read-only system readiness report; not hardware validation")
-    fan = commands.add_parser("fan", help="read-only kernel fan status")
-    fan.add_subparsers(dest="fan_command", required=True).add_parser("status")
+    fan = commands.add_parser("fan", help="inspect or briefly test the kernel fan controller")
+    fan_commands = fan.add_subparsers(dest="fan_command", required=True)
+    fan_commands.add_parser("status", help="read kernel fan status as JSON")
+    test = fan_commands.add_parser("test", help="temporarily set a cooling level and restore it")
+    test.add_argument("state", type=int, metavar="LEVEL")
+    test.add_argument("seconds", type=_seconds, nargs="?", default=5, metavar="SECONDS")
+    acceleration = commands.add_parser("acceleration", help="report CPUFreq and MTK offload readiness")
+    acceleration.add_subparsers(dest="acceleration_command", required=True).add_parser(
+        "status", help="read acceleration status without changing hardware")
     display = commands.add_parser("display", help="view or change E87N display settings")
     setters = display.add_subparsers(dest="display_command", required=True)
     setters.add_parser("config", help="read validated saved/default settings as JSON; no writes")
@@ -52,8 +65,11 @@ def _main(argv=None, *, _hardware=None):
     try:
         if args.command == "status":
             result = hardware.snapshot()
+        elif args.command == "acceleration":
+            result = hardware.acceleration()
         elif args.command == "fan":
-            result = hardware.snapshot()["fan"]
+            result = (hardware.snapshot()["fan"] if args.fan_command == "status"
+                      else hardware.fan_test(args.state, args.seconds))
         elif args.display_command == "config":
             result = hardware.load_display_config()
         else:

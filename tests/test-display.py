@@ -425,7 +425,7 @@ class RendererTests(unittest.TestCase):
         snapshot = display.preview_snapshot()
         _, texts, _ = self.capture_render(snapshot, "thermal")
         self.assertIn("--", texts)
-        self.assertIn("192/255", texts)
+        self.assertIn("75%", texts)
         self.assertIn("2/3", texts)
         self.assertNotIn("192", texts)
         snapshot["fan"]["rpm"] = 1234
@@ -437,14 +437,14 @@ class RendererTests(unittest.TestCase):
                     "fan": {"rpm": 0}, "mem_total_kib": 1024, "mem_available_kib": 1024,
                     "uptime_seconds": 0}
         _, texts, _ = self.capture_render(snapshot, "overview")
-        for text in ("0.0 C", "IP  --", "0", "0%", "PWM --"):
+        for text in ("0.0 C", "IP  --", "0", "0%", "FAN PWM --"):
             self.assertIn(text, texts)
 
     def test_overview_shows_assigned_ip_usage_ram_temperature_and_fan(self):
         snapshot = display.preview_snapshot()
         _, texts, _ = self.capture_render(snapshot, "overview")
         for text in ("end0", "IP  192.0.2.87", "CPU USED", "24%", "RAM USED", "38%",
-                     "CPU TEMP", "58.8 C", "FAN RPM", "--", "PWM 192/255",
+                     "CPU TEMP", "58.8 C", "FAN RPM", "--", "AUTO PWM 75%",
                      "RAM 384.0 MiB / 1.0 GiB"):
             self.assertIn(text, texts)
         self.assertNotIn("0.42", texts)  # Load average is not CPU usage.
@@ -455,11 +455,11 @@ class RendererTests(unittest.TestCase):
     def test_overview_fan_tachometer_and_pwm_remain_distinct(self):
         snapshot = display.preview_snapshot()
         for fan, rpm, detail in (
-            ({"rpm": 0, "pwm": 0}, "0", "PWM 0/255"),
-            ({"rpm": 1234, "pwm": 192}, "1234", "PWM 192/255"),
-            ({"state": 2, "max_state": 3}, "--", "LEVEL 2/3"),
-            ({"rpm": -1, "pwm": 256, "state": 4, "max_state": 3}, "--", "PWM --"),
-            ({"rpm": True, "pwm": True}, "--", "PWM --"),
+            ({"rpm": 0, "pwm": 0}, "0", "FAN PWM 0%"),
+            ({"rpm": 1234, "pwm": 192}, "1234", "FAN PWM 75%"),
+            ({"state": 2, "max_state": 3}, "--", "FAN L2/3"),
+            ({"rpm": -1, "pwm": 256, "state": 4, "max_state": 3}, "--", "FAN PWM --"),
+            ({"rpm": True, "pwm": True}, "--", "FAN PWM --"),
         ):
             with self.subTest(fan=fan):
                 snapshot["fan"] = fan

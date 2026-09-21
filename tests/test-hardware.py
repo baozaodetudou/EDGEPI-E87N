@@ -137,7 +137,10 @@ class HardwareTests(unittest.TestCase):
         self.populate_samples()
         self.assertEqual(self.hw.snapshot(), {
             "cpu_usage_percent": None, "cpu_temp_mc": 62000, "phy_temp_mc": 43500,
-            "fan": {"state": 2, "max_state": 3, "pwm": 192, "rpm": None, "policy": "step_wise"},
+            "fan": {"state": 2, "max_state": 3, "pwm": 192, "pwm_percent": 75, "pwm_enable": 1,
+                    "rpm": None, "rpm_available": False, "policy": "step_wise",
+                    "control": "kernel-thermal", "mode": "auto"},
+            "cpu_frequency": {"driver": None, "governor": None, "current_khz": None, "available_khz": None},
             "loadavg": [0.5, 1.25, 2.75], "mem_total_kib": 1011132,
             "mem_available_kib": 750000, "uptime_seconds": 123.75,
             "network": [{"name": "end0", "ipv4": None, "ipv6": [],
@@ -148,11 +151,13 @@ class HardwareTests(unittest.TestCase):
 
     def test_empty_and_missing_sensors(self):
         result = self.hw.snapshot()
-        self.assertEqual(set(result), {"cpu_usage_percent", "cpu_temp_mc", "phy_temp_mc", "fan", "loadavg", "mem_total_kib",
+        self.assertEqual(set(result), {"cpu_usage_percent", "cpu_temp_mc", "phy_temp_mc", "fan", "cpu_frequency", "loadavg", "mem_total_kib",
                                        "local_ipv4",
                                        "mem_available_kib", "uptime_seconds", "network", "storage"})
         self.assertEqual(result["loadavg"], [None, None, None])
-        self.assertTrue(all(value is None for value in result["fan"].values()))
+        self.assertEqual(result["fan"], {"state": None, "max_state": None, "pwm": None, "pwm_percent": None,
+                                         "pwm_enable": None, "rpm": None, "rpm_available": False,
+                                         "policy": None, "control": None, "mode": None})
         self.assertIsNone(result["cpu_temp_mc"])
         self.assertIsNone(result["phy_temp_mc"])
         self.assertEqual(result["network"], [])
@@ -729,6 +734,30 @@ Local:
         self.assertTrue(writes)
         self.assertTrue(all(data == b"0\n" for name, data in writes if name == "bl_power"))
         self.assertEqual({path: path.read_bytes() for path in fan_files}, before)
+
+    def test_fan_test_requests_level_and_restores_previous_level(self):
+        self.populate_samples()
+        state = self.root / "sys/devices/virtual/thermal/cooling_device9/cur_state"
+        self.assertEqual(state.read_text().splitlines()[-1], "2")
+        code, output, errors = self.cli("fan", "test", "1", "0")
+        self.assertEqual((code, errors), (0, ""))
+        self.assertEqual(state.read_text().splitlines()[-1], "2")
+        result = json.loads(output)
+        self.assertEqual((result["tested_state"], result["restored_state"], result["test_seconds"]), (1, 2, 0))
+
+    def test_fan_test_rejects_non_e87n_or_invalid_level_without_write(self):
+        self.populate_samples()
+        state = self.root / "sys/devices/virtual/thermal/cooling_device9/cur_state"
+        before = state.read_bytes()
+        for args in (("fan", "test", "4", "0"), ("fan", "test", "1", "31")):
+            if args[-1] == "31":
+                with self.assertRaises(SystemExit):
+                    self.cli(*args)
+            else:
+                code, _, errors = self.cli(*args)
+                self.assertEqual(code, 1)
+                self.assertTrue(errors)
+            self.assertEqual(state.read_bytes(), before)
 
 
 if __name__ == "__main__":

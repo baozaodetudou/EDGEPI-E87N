@@ -444,11 +444,15 @@ def render(snapshot, screen="overview", *, font_directory=None):
                 value_size -= 1
             text(draw, (x, 92), value, value_size, width=96, bold=True)
         pwm, state, maximum = fan.get("pwm"), fan.get("state"), fan.get("max_state")
-        fan_detail = "PWM --"
+        mode = "AUTO" if fan.get("mode") == "auto" or fan.get("control") == "kernel-thermal" else "FAN"
+        fan_detail = mode + " PWM --"
         if type(pwm) is int and 0 <= pwm <= 255:
-            fan_detail = "PWM {}/255".format(pwm)
+            percent = fan.get("pwm_percent")
+            if type(percent) is not int or not 0 <= percent <= 100:
+                percent = (pwm * 100 + 127) // 255
+            fan_detail = "{} PWM {}%".format(mode, percent)
         elif type(state) is int and type(maximum) is int and 0 <= state <= maximum <= 255:
-            fan_detail = "LEVEL {}/{}".format(state, maximum)
+            fan_detail = "{} L{}/{}".format(mode, state, maximum)
         text(draw, (10, 123), memory_detail, 12, MUTED, width=264)
         text(draw, (282, 123), fan_detail, 12, MUTED, width=136)
     elif screen == "thermal":
@@ -460,9 +464,13 @@ def render(snapshot, screen="overview", *, font_directory=None):
             text(draw, (x, 61), _temperature(value), 25, width=128, bold=True)
         state = _integer(fan.get("state")) + "/" + _integer(fan.get("max_state"))
         pwm = fan.get("pwm")
-        pwm = _integer(pwm) if type(pwm) is int and 0 <= pwm <= 255 else "--"
-        for y, label, value in ((39, "STATE", state), (64, "PWM", pwm + "/255"),
-                                (89, "RPM", _integer(fan.get("rpm")))):
+        if type(pwm) is int and 0 <= pwm <= 255:
+            pwm = "{}%".format((pwm * 100 + 127) // 255)
+        else:
+            pwm = "--"
+        mode = "AUTO" if fan.get("mode") == "auto" or fan.get("control") == "kernel-thermal" else "--"
+        for y, label, value in ((31, "MODE", mode), (55, "LEVEL", state), (79, "PWM", pwm),
+                                (103, "RPM", _integer(fan.get("rpm")))):
             text(draw, (280, y), label, 12, MUTED)
             text(draw, (332, y), value, 14, width=86)
         text(draw, (10, 119), "POLICY  " + _safe_text(fan.get("policy")), 14, MUTED, width=408)
@@ -493,7 +501,8 @@ def preview_snapshot():
     """Deterministic sample data, explicitly not measurements of a live board."""
     return {
         "cpu_usage_percent": 24.0, "cpu_temp_mc": 58750, "phy_temp_mc": 43250,
-        "fan": {"state": 2, "max_state": 3, "pwm": 192, "rpm": None, "policy": "kernel"},
+        "fan": {"state": 2, "max_state": 3, "pwm": 192, "rpm": None, "policy": "step_wise",
+                "control": "kernel-thermal", "mode": "auto"},
         "loadavg": [0.42, 0.31, 0.28], "mem_total_kib": 1048576,
         "mem_available_kib": 655360, "uptime_seconds": 183845.0,
         "network": [

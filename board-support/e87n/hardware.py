@@ -18,6 +18,7 @@ import secrets
 import socket
 import stat
 import struct
+import time
 from contextlib import ExitStack, contextmanager
 
 
@@ -294,7 +295,9 @@ class _Hardware:
                         self._entries(thermal, r"cooling_device[0-9]+")
                         if self._text(f"{thermal}/{name}/type") == "pwm-fan"), None)
         fan_hwmon = next((path for path, name in names.items() if name == "pwmfan"), None)
-        fan = {"state": None, "max_state": None, "pwm": None, "rpm": None, "policy": None}
+        fan = {"state": None, "max_state": None, "pwm": None, "pwm_percent": None,
+               "pwm_enable": None, "rpm": None, "rpm_available": False,
+               "policy": None, "control": None, "mode": None}
         if cooling:
             fan["max_state"] = self._number(f"{cooling}/max_state", 0, 255)
             fan["state"] = self._number(f"{cooling}/cur_state", 0,
@@ -309,7 +312,15 @@ class _Hardware:
                         break
         if fan_hwmon:
             fan["pwm"] = self._number(f"{fan_hwmon}/pwm1", 0, 255)
+            fan["pwm_percent"] = ((fan["pwm"] * 100) + 127) // 255 if fan["pwm"] is not None else None
+            fan["pwm_enable"] = self._number(f"{fan_hwmon}/pwm1_enable", 0, 2)
             fan["rpm"] = self._number(f"{fan_hwmon}/fan1_input", 0, 200000)
+            fan["rpm_available"] = fan["rpm"] is not None
+        if cooling:
+            fan["control"] = "kernel-thermal"
+            fan["mode"] = "auto" if fan["policy"] else "unknown"
+        elif fan_hwmon:
+            fan["control"] = "hwmon"
 
         network = []
         ipv6 = self._ipv6_addresses()
@@ -370,10 +381,16 @@ class _Hardware:
                 uptime = value
         except (ValueError, IndexError):
             pass
+        cpu_frequency = {"driver": self._text("sys/devices/system/cpu/cpu0/cpufreq/scaling_driver"),
+                          "governor": self._text("sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"),
+                          "current_khz": self._number("sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq", 0, 10000000),
+                          "available_khz": self._text("sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies")}
+        if not any(value is not None for value in cpu_frequency.values()):
+            cpu_frequency = {"driver": None, "governor": None, "current_khz": None, "available_khz": None}
         return {"cpu_usage_percent": cpu_usage,
                 "cpu_temp_mc": max((x for x in cpu if x is not None), default=None),
                 "phy_temp_mc": max((x for x in phy if x is not None), default=None),
-                "fan": fan, "loadavg": load,
+                "fan": fan, "cpu_frequency": cpu_frequency, "loadavg": load,
                 "mem_total_kib": memory.get("MemTotal"),
                 "mem_available_kib": memory.get("MemAvailable"),
                 "uptime_seconds": uptime, "network": network,
@@ -506,6 +523,70 @@ class _Hardware:
                     self._save_config_at(directory, config)
                     self._apply_config(config, descriptors)
         return dict(config)
+
+    def fan_test(self, state, seconds=5):
+        """Apply one cooling level briefly, then restore the kernel-controlled level.
+
+        This is deliberately a test operation, not a persistent manual mode.  The
+        thermal governor remains enabled, so a later governor update may change
+        the level while the test is running.  That is safer than disabling
+        thermal protection or leaving a userspace fan daemon fighting the kernel.
+        """
+        if type(state) is not int or type(seconds) is not int or state < 0 or not 0 <= seconds <= 30:
+            raise HardwareError("fan test requires state 0..max_state and seconds 0..30")
+        self._require_write_authority()
+        cooling = next((f"sys/class/thermal/{name}" for name in
+                        self._entries("sys/class/thermal", r"cooling_device[0-9]+")
+                        if self._text(f"sys/class/thermal/{name}/type") == "pwm-fan"), None)
+        if cooling is None:
+            raise HardwareError("E87N pwm-fan cooling device is unavailable")
+        maximum = self._number(f"{cooling}/max_state", 0, 255)
+        previous = self._number(f"{cooling}/cur_state", 0, maximum if maximum is not None else 255)
+        if maximum is None or previous is None or state > maximum:
+            raise HardwareError("fan test state is outside the kernel cooling range")
+        physical = self._sys_directory(cooling)
+        with self._directory(physical) as directory:
+            fd = os.open("cur_state", os.O_WRONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+                         dir_fd=directory)
+            try:
+                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                    raise HardwareError("cooling state attribute is not a regular sysfs file")
+                payload = f"{state}\n".encode("ascii")
+                if os.write(fd, payload) != len(payload):
+                    raise OSError("short cooling state write")
+            finally:
+                # Restore even if the bounded wait is interrupted.  A failed
+                # restore is surfaced to the caller instead of being hidden.
+                if stat.S_ISREG(os.fstat(fd).st_mode):
+                    time.sleep(seconds)
+                    payload = f"{previous}\n".encode("ascii")
+                    if os.write(fd, payload) != len(payload):
+                        raise OSError("short cooling state restore")
+                os.close(fd)
+        result = self.snapshot()["fan"]
+        result.update({"tested_state": state, "restored_state": previous, "test_seconds": seconds})
+        return result
+
+    def acceleration(self):
+        """Report acceleration readiness without changing hardware."""
+        driver = self._text("sys/devices/system/cpu/cpu0/cpufreq/scaling_driver")
+        governor = self._text("sys/devices/system/cpu/cpu0/cpufreq/scaling_governor")
+        current = self._number("sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq", 0, 10000000)
+        hnat_status = self._text(f"{_DT}/hnat/status")
+        return {
+            "cpu_frequency": {
+                "driver": driver, "governor": governor, "current_khz": current,
+                "linux_cpufreq_active": driver is not None and current is not None,
+                "status": "active" if driver is not None and current is not None else "firmware-fixed-or-unavailable",
+            },
+            "ethernet": {
+                "ordinary_offload": "verify with ethtool -k",
+                "wed": "not proven by sysfs; requires runtime registration and traffic test",
+                "hnat_device_tree": hnat_status or "disabled-or-unavailable",
+            },
+            "crypto": {"arm64_ce": "kernel configuration/runtime benchmark required"},
+            "hardware_validation": "not-performed",
+        }
 
 
 _snapshot_backend = None

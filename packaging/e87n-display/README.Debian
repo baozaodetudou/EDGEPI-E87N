@@ -3,13 +3,19 @@ e87n-display for Debian
 
 This architecture-independent Python package targets the EdgePi E87N and
 requires the board's NV3007 framebuffer and backlight kernel support.
-The kernel remains the sole fan controller. No provisioning, account,
+The kernel remains the default fan controller. `fan test LEVEL SECONDS` is a
+root-only, bounded diagnostic: it briefly requests a thermal cooling level and
+restores the previous level; it is not a persistent manual mode. The board has
+no tachometer input, so RPM is reported as `--`; PWM percentage and RPM are
+different measurements. No provisioning, account,
 network, firmware or kernel installation is performed by this package.
 
 Commands:
   e87nctl status
   e87nctl doctor
   e87nctl fan status
+  e87nctl fan test 1 5
+  e87nctl acceleration status
   e87nctl display brightness 20
   e87nctl display screen thermal
   e87nctl display off

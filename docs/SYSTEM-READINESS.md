@@ -2,6 +2,8 @@
 
 当前目标为 **Debian 13.7 Trixie / Linux 6.18.52 最小命令行系统**，版本以中央配置为准，包含正常 APT、有线 DHCP、SSH、预装小屏包和内核风扇温控。candidate3 的旧 headless 配置已通过完整构建、最终固件审计和同产物 Docker/QEMU 软件验收；当前启用 LCD/背光并预装显示包的配置需要重新构建与验收。这仍是实验性 E87N 移植，尚无 Debian 实机首启与完整硬件验收记录。
 
+现场 E87N 已验证 `pwm-fan` cooling device、`step_wise` policy 和 PWM 输出均存在；当前硬件没有 tachometer，因此 RPM 不可读。Linux CPUFreq 目录不存在，表示本镜像使用固件固定频率，尚未启用未经验证的 MT7987 DVFS。eth0/eth1 的 checksum、TSO/GSO/GRO 普通卸载已启用，但没有 WED/HNAT 注册证据；`e87nctl acceleration status` 只报告这些边界，不把 Kconfig 或普通卸载宣称为硬件转发加速。
+
 当前 candidate3 的正式摘要见[最终验收记录](FINAL-VALIDATION-20260920.md)。QEMU 报告为 `PASS`，但不模拟 MT7987 物理网口、eMMC、SPI 屏幕、PWM 风扇、factory MAC 或原厂 U-Boot，因此不能替代上板验证。
 
 当前交付为 [U-Boot 未压缩 USTAR 固件](UBOOT-FIRMWARE.md)，包含 FIT kernel、含 `/boot` 的 Debian ext4 root 和 CONTROL。**R4 本地已生成，独立最终审计 EXIT 0**；R4 重新打包历史 Actions 34737922588 的原始 RAW，修正 DTB 的 1 GiB/保留区及 bootargs（含 902 等效修正），没有完整重编 Armbian 或内核。主机导出及 SHA-256 比对已完成，V3 已废弃。完整 `.img` / `.img.xz` 仅为中间或历史文件，不可刷写。
