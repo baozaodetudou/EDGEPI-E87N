@@ -128,7 +128,9 @@ workflow “运行成功”与 Release “已发布”仍是两个阶段。某�
 
 旧规则生成的 `e87n-trixie-...-<run_id>`、`e87n-display-...-<run_id>` tag 及早期
 双附件 Release（包括 2026 年 9 月 21 日的现有版本）保留为历史记录。它们不删除、不改写，
-也不作为新版本命名或附件布局的模板。
+也不作为新版本命名或附件布局的模板。preflight 会把旧格式 Display tag 计入版本碰撞；远端
+已经发布过 `e87n-display 1.2.0-1`，所以下一次 Display Release 必须先递增包版本，不能用
+新 tag 重发 `1.2.0-1`。
 
 ## 本地验证工作流
 

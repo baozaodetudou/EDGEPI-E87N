@@ -11,7 +11,8 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "scripts"))
 from build_config import BUILD, KERNEL_RELEASE, KERNEL_VERSION, TARGET, load_config
 from release_identity import (candidate_artifact, display_filename, image_filename,
-                              release_tag, release_title, tag_version)
+                              is_current_release_version, release_tag, release_title,
+                              tag_version)
 
 
 class BuildConfiguration(unittest.TestCase):
@@ -72,6 +73,12 @@ class BuildConfiguration(unittest.TestCase):
                          "edgepi-e87n-debian_2026.09.1_arm64-uboot-firmware.tar")
         self.assertEqual(display_filename(version="1.2.0-1"),
                          "e87n-display_1.2.0-1_all.deb")
+        self.assertTrue(is_current_release_version("display", "e87n-display-v1.2.0-1",
+                                                   version="1.2.0-1"))
+        self.assertTrue(is_current_release_version(
+            "display", "e87n-display-1.2.0-1-35586533613-1", version="1.2.0-1"))
+        self.assertFalse(is_current_release_version(
+            "display", "e87n-display-1.2.0-2-35586533613-1", version="1.2.0-1"))
         for invalid in ("", "bad/value", "1" + "a" * 60):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 tag_version(invalid)

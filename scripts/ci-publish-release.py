@@ -14,7 +14,7 @@ import sys
 from build_config import BUILD, TARGET
 from factory_firmware import FORMAT
 from release_identity import (display_filename, display_version, image_filename,
-                              release_tag, release_title)
+                              is_current_release_version, release_tag, release_title)
 
 simulation = import_module("ci-simulation")
 
@@ -80,14 +80,16 @@ def api(repository, endpoint, absent=False):
     return None if code == 404 else data
 
 
-def find_release(args):
+def find_release(args, include_version_aliases=False):
     # REST /releases/tags only finds published releases; list also exposes drafts.
     matches = []
     for page in range(1, 21):
         releases = api(args.repository, f"releases?per_page=100&page={page}")
         require(isinstance(releases, list) and all(isinstance(r, dict) and
                 isinstance(r.get("tag_name"), str) for r in releases), "Invalid release list")
-        matches.extend(r for r in releases if r["tag_name"] == args.tag)
+        matches.extend(r for r in releases if
+                       (is_current_release_version(args.kind, r["tag_name"])
+                        if include_version_aliases else r["tag_name"] == args.tag))
         require(len(matches) <= 1, "Duplicate releases for tag")
         if len(releases) < 100:
             return matches[0] if matches else None
@@ -100,7 +102,8 @@ def preflight(args):
     require(isinstance(commit, dict) and commit.get("sha") == args.source_commit, "Source commit mismatch")
     for endpoint in (f"git/ref/tags/{args.tag}", f"releases/tags/{args.tag}"):
         require(api(args.repository, endpoint, absent=True) is None, "Tag or release already exists")
-    require(find_release(args) is None, "Release already exists (including drafts)")
+    require(find_release(args, include_version_aliases=True) is None,
+            "Release version already exists (including legacy tags and drafts)")
 
 
 def digest(path):

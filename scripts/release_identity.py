@@ -43,6 +43,16 @@ def release_tag(kind, *, build=BUILD, version=None):
     return value
 
 
+def is_current_release_version(kind, tag, *, build=BUILD, version=None):
+    """Match the stable tag and legacy run-scoped display tags for one version."""
+    if tag == release_tag(kind, build=build, version=version):
+        return True
+    if kind != "display":
+        return False
+    encoded = tag_version(display_version() if version is None else version)
+    return re.fullmatch(rf"e87n-display-{re.escape(encoded)}-[0-9]+-[0-9]+", tag) is not None
+
+
 def release_title(kind, *, build=BUILD, version=None):
     if kind == "image":
         return (f"E87N Image | {build['firmware_version']} | "
