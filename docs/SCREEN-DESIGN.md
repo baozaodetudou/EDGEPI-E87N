@@ -140,6 +140,11 @@ journalctl -u e87n-display.service -b --no-pager
 
 ## 2026-09-21 真实板卡验收
 
+随后发布并安装的 `e87n-display 1.3.2-1` 只更新包版本和随包操作文档，没有修改本页对应的
+渲染或遥测代码；设备升级后配置逐字段保留，服务保持 `active`、`NRestarts=0`、
+`ExecMainStatus=0`。因此下面的实体界面和 framebuffer 结果仍记录实际执行完整视觉验收的
+`1.3.1-1`，包升级证据见[真实板卡验收记录](FINAL-VALIDATION-20260921.md)。
+
 `e87n-display 1.3.1-1` 已安装到 `192.168.20.201`。实机快照中 `eth0` 在线，`eth1` 为
 `carrier=0` 且仍有 link-local IPv6 和历史计数；实际渲染只保留全宽 `网口1 / eth0`。
 风扇页不显示内部值 `kernel-thermal`。当前没有存储温度，因此 7 个可用页面在三主题下共

@@ -2,8 +2,10 @@
 
 本记录包含同一台真实 E87N 的连续验证：早先的基础 framebuffer 验收使用
 `e87n-display 1.1.5-1`，随后升级到 `1.2.0-1` 和 `1.3.0-1`；2026 年 9 月 21 日又升级到
-`1.3.1-1`，验证动态网口隐藏、单口全宽、缺失遥测过滤、固定页面回退和八页轮换配置。
-历史结果保留在下文，本文件的最新结论以 `1.3.1-1` 验收为准。
+`1.3.1-1`，验证动态网口隐藏、单口全宽、缺失遥测过滤、固定页面回退和八页轮换配置；随后
+升级到只更新包内操作文档的 `1.3.2-1`，验证 Release 附件、配置保留和服务重启状态。
+历史结果保留在下文，本文件的最新包安装结论以 `1.3.2-1` 为准，实体界面视觉结论仍来自
+渲染代码相同的 `1.3.1-1` 验收。
 
 ## 设备与软件
 
@@ -13,9 +15,29 @@
 | 系统 | Debian 13 Trixie / Armbian unofficial |
 | 内核 | `6.18.52-current-edgepi-e87n` |
 | framebuffer | `fb_nv3007`、`428×142`、16-bit RGB565 |
-| 显示包 | `e87n-display 1.3.1-1`（由 `1.3.0-1` 独立升级） |
+| 显示包 | `e87n-display 1.3.2-1`（由 `1.3.1-1` 独立升级） |
 | 中文字体 | `fonts-wqy-microhei 0.2.0-beta-4` |
 | 网口 | `eth0`、`eth1` |
+
+## `e87n-display 1.3.2-1` 包与升级验收
+
+- Display workflow [35614984795](https://github.com/baozaodetudou/EDGEPI-E87N/actions/runs/35614984795)
+  的 `validate`、`display`、`release` 三个 job 全部成功，绑定源码提交 `1886095` 和正式 tag
+  `e87n-display-v1.3.2-1`。
+- Display Release 只包含 `e87n-display_1.3.2-1_all.deb`，SHA-256 为
+  `78b88a25dc7eccade9f35f4c101a90c72ea71bb92a3ac6ec5c37931927d2cd05`；设备端再次核对摘要
+  一致，包元数据为 `Package: e87n-display`、`Version: 1.3.2-1`、`Architecture: all`。
+- 使用 APT 和 `--force-confdef --force-confold` 从 `1.3.1-1` 原地升级。升级前后的
+  `e87nctl display config` 输出逐字段一致：`aurora`、20% 亮度、2 秒刷新、八页轮换列表、
+  3 秒轮换、`overview` 起始页和 `enabled=true` 均保留。
+- 升级后包状态为 `install ok installed`，服务保持 `enabled`、`active`，等待 5 秒后仍为
+  `NRestarts=0`、`ExecMainStatus=0`，framebuffer 名称仍为 `fb_nv3007`；安装后的 journal
+  没有 warning 或更高等级记录。
+- 包内 `README.Debian` 已包含累计流量、配置热加载、`brightness 0` 与 `display off` 的区别、
+  固定页面和卸载前关屏说明，并指向完整在线用户指南。
+- `1.3.2-1` 没有修改 `board-support/e87n/display.py` 或硬件采集代码，因此不重复声明新的
+  光学或页面像素验收；下节 `1.3.1-1` 的实体面板和 framebuffer 结果继续适用于相同渲染代码。
+- 本轮只升级显示 deb，没有刷写 U-Boot、内核、DTB 或整机镜像。
 
 ## `e87n-display 1.3.1-1` 验收结果
 
