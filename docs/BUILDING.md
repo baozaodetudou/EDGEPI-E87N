@@ -30,7 +30,7 @@
 | 用户空间与固件 | `board-support/`、`packaging/e87n-display/`、`scripts/build-display-deb.sh`、`userpatches/customize-image.sh`、`firmware/`；PHY 固件安装前检查 SHA-256 与大小 |
 | 额外存储模块 | `E87N_EXTRA_STORAGE=no`；只有显式设为 `yes` 才请求额外 DM/RAID 等模块 |
 
-这些 pin 固定框架和内核源码，不构成逐字节可复现的整个系统快照。`customize-image.sh` 从 Debian 签名软件源更新软件包，安装 SSH/网络/时间与 locale 基础依赖，并构建、预装 `e87n-display`。独立 job 另外构建用于发布升级的 deb；CI 固定 `SOURCE_DATE_EPOCH=0` 并核对该包与 QEMU 实际测试包的 SHA-256。显示包依赖 `python3`、`python3-pil` 和 `fonts-dejavu-core`，独立版本与升级方法见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)。
+这些 pin 固定框架和内核源码，不构成逐字节可复现的整个系统快照。`customize-image.sh` 从 Debian 签名软件源更新软件包，安装 SSH/网络/时间与 locale 基础依赖，并构建、预装 `e87n-display`。独立 job 另外构建用于发布升级的 deb；CI 固定 `SOURCE_DATE_EPOCH=0` 并核对该包与 QEMU 实际测试包的 SHA-256。显示包依赖 `python3`、`python3-pil`、`fonts-dejavu-core` 和 `fonts-wqy-microhei`，独立版本与升级方法见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)。
 
 重建特定候选时，应保留该候选的仓库输入、框架兼容修补、最终内核配置、构建参数、主机/容器版本、包版本、日志和校验清单。候选记录中的冻结输入归档和 release 整理属于当次人工交付步骤，`build.sh` 不会自动生成同样的 release 目录或证明新镜像与旧镜像哈希相同。
 

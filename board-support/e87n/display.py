@@ -1,6 +1,7 @@
 """Debian-native, read-only telemetry renderer for the E87N NV3007 fbdev.
 
-Runtime dependencies: Python 3, python3-pil, fonts-dejavu-core. Install this
+Runtime dependencies: Python 3, python3-pil, fonts-dejavu-core and
+fonts-wqy-microhei. Install this
 module beside hardware.py in the e87n package (or put board-support on
 PYTHONPATH for a source checkout). The installed Debian package supports
 ``python3 -I -m e87n.display --daemon`` without PYTHONPATH. No OpenWrt
@@ -49,6 +50,7 @@ WIDTH, HEIGHT = 428, 142
 SCREENS = ("overview", "thermal", "network", "storage")
 COMPATIBLE_PATH = Path("/sys/firmware/devicetree/base/compatible")
 FONT_DIRECTORY = Path("/usr/share/fonts/truetype/dejavu")
+CJK_FONT_PATH = Path("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc")
 FBIOGET_VSCREENINFO = 0x4600
 FBIOGET_FSCREENINFO = 0x4602
 MAX_FB_BYTES = 16 * 1024 * 1024
@@ -315,10 +317,10 @@ def _items(snapshot, key):
 
 
 def _overview_address(snapshot):
-    """Prefer carrier-up interfaces, then primary IPv4, then global IPv6.
+    """Return one compatibility address for callers that still use this helper.
 
-    Link-local addresses are a last resort, with their interface shown above.
-    This is an assigned address, not a claim about routing/Internet access.
+    The renderer now shows two fixed LAN cards instead of selecting one global
+    address.  Keep this small helper for diagnostics and older integrations.
     """
     candidates = []
     for index, item in enumerate(_items(snapshot, "network")[:32]):
@@ -364,21 +366,107 @@ def _overview_address(snapshot):
     return "NO IP", "--"
 
 
+def _network_items(snapshot, limit=2):
+    """Select stable physical-looking interfaces for the fixed LAN cards.
+
+    Linux names are not guaranteed to be eth0/eth1 on every image.  Prefer
+    common physical names, sort them once, and never allow a bridge or loopback
+    interface to displace either physical port in the small-screen layout.
+    """
+    candidates = []
+    for item in _items(snapshot, "network")[:32]:
+        name = item.get("name")
+        if not isinstance(name, str) or not name or name in {"lo", "br-lan", "docker0"}:
+            continue
+        candidates.append(item)
+    physical = [item for item in candidates
+                if isinstance(item.get("name"), str)
+                and (item["name"].startswith(("eth", "end", "enx", "lan", "wan")))]
+    selected = physical or candidates
+    return sorted(selected, key=lambda item: _safe_text(item.get("name")))[:limit]
+
+
+def _network_ip(item):
+    """Prefer a valid IPv4 address, then the first valid global/link-local IPv6."""
+    value = item.get("ipv4")
+    if isinstance(value, str):
+        try:
+            address = ipaddress.IPv4Address(value)
+        except ValueError:
+            address = None
+        if address is not None and not (address.is_loopback or address.is_unspecified
+                                        or address.is_multicast):
+            return str(address)
+    values = item.get("ipv6")
+    if isinstance(values, (list, tuple)):
+        for value in values[:8]:
+            if not isinstance(value, str) or "%" in value:
+                continue
+            try:
+                address = ipaddress.IPv6Address(value)
+            except ValueError:
+                continue
+            if not (address.is_loopback or address.is_unspecified or address.is_multicast):
+                return str(address)
+    return "无IP"
+
+
+def _network_link(item):
+    carrier = item.get("carrier")
+    if type(carrier) in (bool, int) and carrier in (0, 1):
+        return ("在线", "#65d48f") if carrier else ("断开", MUTED)
+    return ("--", MUTED)
+
+
+def _fan_summary(fan):
+    """Return a short kernel-controller summary; intentionally never RPM."""
+    mode = "自动" if fan.get("mode") == "auto" or fan.get("control") == "kernel-thermal" else "--"
+    pwm = fan.get("pwm_percent")
+    if pwm is None and type(fan.get("pwm")) is int and 0 <= fan["pwm"] <= 255:
+        pwm = (fan["pwm"] * 100 + 127) // 255
+    if type(pwm) is int and 0 <= pwm <= 100:
+        return "{} {}%".format(mode, pwm)
+    return mode
+
+
 @lru_cache(maxsize=32)
 def _font(size, bold=False, font_directory=None):
     name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
     return ImageFont.truetype(str((font_directory or FONT_DIRECTORY) / name), size)
 
 
-BACKGROUND = "#101923"
+def _contains_cjk(value):
+    return any("\u3400" <= character <= "\u9fff" for character in str(value))
+
+
+@lru_cache(maxsize=32)
+def _cjk_font(size, font_directory=None):
+    candidate = ((font_directory / "wqy-microhei.ttc") if font_directory is not None
+                 else CJK_FONT_PATH)
+    try:
+        return ImageFont.truetype(str(candidate), size)
+    except OSError:
+        pass
+    # Preview fixtures may intentionally provide only DejaVu.  The target
+    # package installs fonts-wqy-microhei, while this fallback keeps offline
+    # layout tests deterministic on hosts without the optional font.
+    return _font(size, False, font_directory)
+
+
+BACKGROUND = "#08131d"
+PANEL = "#102535"
+PANEL_ALT = "#0d1e2b"
 FOREGROUND = "#f3f7fb"
-MUTED = "#acbaca"
-ACCENT = "#69ddce"
+MUTED = "#8ea3b7"
+ACCENT = "#2fe0cb"
+GOOD = "#65d48f"
+WARNING = "#f2b665"
+LINE = "#234052"
 
 
 def _text(draw, xy, text, size=16, color=FOREGROUND, width=None, bold=False, font_directory=None):
-    font = _font(size, bold, font_directory)
     text = str(text)
+    font = _cjk_font(size, font_directory) if _contains_cjk(text) else _font(size, bold, font_directory)
     if width is not None and draw.textbbox((0, 0), text, font=font)[2] > width:
         while text and draw.textbbox((0, 0), text + "...", font=font)[2] > width:
             text = text[:-1]
@@ -386,13 +474,26 @@ def _text(draw, xy, text, size=16, color=FOREGROUND, width=None, bold=False, fon
     draw.text(xy, text, font=font, fill=color, anchor="lt")
 
 
-def render(snapshot, screen="overview", *, font_directory=None):
-    """Pure 428x142 RGB renderer: snapshot data + packaged fonts only.
+def _panel(draw, box, *, fill=PANEL, outline=LINE, radius=7):
+    draw.rounded_rectangle(box, radius=radius, fill=fill, outline=outline, width=1)
 
-    CPU usage is a sampled percentage, not load average. IPs are assigned local
-    addresses. Temperatures are millidegrees C; memory KiB; network counters cumulative
-    bytes, NOT rates. Fan state, raw PWM (0..255) and actual RPM stay distinct.
-    Missing/invalid readings render as '--', including absent tachometer RPM.
+
+def _metric(draw, color, x, label, value, *, width=96, value_size=16, font_directory=None):
+    _text(draw, (x + 8, 102), label, 10, MUTED, width=width - 16, bold=True,
+          font_directory=font_directory)
+    _text(draw, (x + 8, 117), value, value_size, color, width=width - 16, bold=True,
+          font_directory=font_directory)
+
+
+def render(snapshot, screen="overview", *, font_directory=None):
+    """Pure 428x142 RGB renderer for the E87N low-resolution panel.
+
+    The layout is deliberately information-dense but not a desktop dashboard:
+    two fixed LAN cards occupy the middle band, and the bottom band contains
+    CPU/RAM/temperature/fan state.  The fan is represented by the kernel
+    thermal mode, cooling level and PWM percentage only.  The board has no
+    tachometer contract, so RPM is never rendered even if a stray hwmon value
+    exists in the snapshot.
     """
     if not isinstance(snapshot, Mapping):
         raise DisplayError("hardware.snapshot() must return a mapping")
@@ -401,101 +502,126 @@ def render(snapshot, screen="overview", *, font_directory=None):
     image = Image.new("RGB", (WIDTH, HEIGHT), BACKGROUND)
     draw = ImageDraw.Draw(image)
     text = partial(_text, font_directory=font_directory)
-    titles = {"overview": "SYSTEM OVERVIEW", "thermal": "THERMAL",
-              "network": "NETWORK TOTALS", "storage": "STORAGE TEMPERATURE"}
-    text(draw, (10, 7), titles[screen], 15, ACCENT, width=315, bold=True)
-    items = _items(snapshot, screen) if screen in ("network", "storage") else []
-    tag = "+{} more".format(len(items) - 3) if len(items) > 3 else "E87N"
-    if screen == "overview":
-        interface, address = _overview_address(snapshot)
-        text(draw, (292, 8), interface, 13, MUTED, width=126)
-    else:
-        text(draw, (340, 8), tag, 12, MUTED, width=78)
-    draw.line((10, 28, 417, 28), fill="#344354")
-    fan = snapshot.get("fan")
-    fan = fan if isinstance(fan, Mapping) else {}
+    fan = snapshot.get("fan") if isinstance(snapshot.get("fan"), Mapping) else {}
+    title = {
+        "overview": "E87N  /  系统",
+        "thermal": "温度  /  风扇",
+        "network": "网络  /  网口",
+        "storage": "存储  /  温度",
+    }[screen]
+
+    # A compact, shared header keeps the four screens visually related.
+    text(draw, (10, 8), title, 14, ACCENT, width=260, bold=True)
+    uptime = _uptime(snapshot.get("uptime_seconds"))
+    text(draw, (323, 10), "运行 " + uptime, 11, MUTED, width=95)
+    draw.line((10, 30, 418, 30), fill=LINE)
 
     if screen == "overview":
-        # Keep the complete address visible, including IPv6, without ellipsis.
-        address = "IP  " + address
-        size = 24
-        while size > 14 and draw.textbbox((0, 0), address, font=_font(size, True, font_directory))[2] > 408:
-            size -= 1
-        text(draw, (10, 36), address, size, ACCENT, bold=True)
+        text(draw, (10, 37), "设备状态", 10, MUTED, bold=True)
+        health = "在线" if _network_items(snapshot) else "无链路"
+        health_color = GOOD if health == "在线" else WARNING
+        draw.ellipse((104, 39, 111, 46), fill=health_color)
+        text(draw, (116, 36), health, 12, health_color, bold=True)
+        text(draw, (311, 36), "428 x 142", 10, MUTED, width=107)
+
+        # Fixed physical-port cards. The left/right position never follows the
+        # current carrier state, so LAN 1 and LAN 2 remain recognizable.
+        ports = _network_items(snapshot)
+        for index, x in enumerate((10, 214)):
+            item = ports[index] if index < len(ports) else {}
+            _panel(draw, (x, 52, x + 194, 94), fill=PANEL_ALT,
+                   outline=ACCENT if index == 0 else "#9b8cff")
+            label = "网口{}".format(index + 1)
+            name = _safe_text(item.get("name"))
+            link, link_color = _network_link(item)
+            text(draw, (x + 10, 58), label, 11, ACCENT, bold=True)
+            draw.ellipse((x + 125, 59, x + 131, 65), fill=link_color)
+            text(draw, (x + 136, 56), link, 11, link_color, width=48, bold=True)
+            text(draw, (x + 10, 72), _network_ip(item), 16, FOREGROUND, width=174, bold=True)
+            text(draw, (x + 10, 87), name, 10, MUTED, width=174)
+
         total, available = snapshot.get("mem_total_kib"), snapshot.get("mem_available_kib")
-        memory, memory_detail = "--", "RAM --"
+        memory = "--"
         if _nonnegative(total) and total > 0 and _nonnegative(available) and available <= total:
             memory = "{:.0f}%".format((total - available) * 100 / total)
-            memory_detail = "RAM " + _bytes((total - available) * 1024) + " / " + _bytes(total * 1024)
         usage = snapshot.get("cpu_usage_percent")
         usage = "{:.0f}%".format(usage) if _nonnegative(usage) and usage <= 100 else "--"
-        rpm = fan.get("rpm")
-        rpm = _integer(rpm) if type(rpm) is int and 0 <= rpm <= 200000 else "--"
-        for x, label, value in (
-            (10, "CPU USED", usage),
-            (114, "RAM USED", memory),
-            (218, "CPU TEMP", _temperature(snapshot.get("cpu_temp_mc"))),
-            (322, "FAN RPM", rpm),
+        temperature = _temperature(snapshot.get("cpu_temp_mc"))
+        fan_value = _fan_summary(fan)
+        metric_width = 99
+        for x, label, value, color in (
+            (10, "CPU", usage, ACCENT),
+            (109, "内存", memory, FOREGROUND),
+            (208, "温度", temperature, WARNING),
+            (307, "风扇", fan_value, GOOD),
         ):
-            text(draw, (x, 72), label, 13, MUTED)
-            value_size = 24
-            while value_size > 18 and draw.textbbox(
-                    (0, 0), value, font=_font(value_size, True, font_directory))[2] > 96:
-                value_size -= 1
-            text(draw, (x, 92), value, value_size, width=96, bold=True)
-        pwm, state, maximum = fan.get("pwm"), fan.get("state"), fan.get("max_state")
-        mode = "AUTO" if fan.get("mode") == "auto" or fan.get("control") == "kernel-thermal" else "FAN"
-        fan_detail = mode + " PWM --"
-        if type(pwm) is int and 0 <= pwm <= 255:
-            percent = fan.get("pwm_percent")
-            if type(percent) is not int or not 0 <= percent <= 100:
-                percent = (pwm * 100 + 127) // 255
-            fan_detail = "{} PWM {}%".format(mode, percent)
-        elif type(state) is int and type(maximum) is int and 0 <= state <= maximum <= 255:
-            fan_detail = "{} L{}/{}".format(mode, state, maximum)
-        text(draw, (10, 123), memory_detail, 12, MUTED, width=264)
-        text(draw, (282, 123), fan_detail, 12, MUTED, width=136)
-    elif screen == "thermal":
-        for x, label, value in (
-            (10, "CPU", snapshot.get("cpu_temp_mc")),
-            (145, "PHY", snapshot.get("phy_temp_mc")),
-        ):
-            text(draw, (x, 39), label, 13, MUTED)
-            text(draw, (x, 61), _temperature(value), 25, width=128, bold=True)
-        state = _integer(fan.get("state")) + "/" + _integer(fan.get("max_state"))
-        pwm = fan.get("pwm")
-        if type(pwm) is int and 0 <= pwm <= 255:
-            pwm = "{}%".format((pwm * 100 + 127) // 255)
-        else:
-            pwm = "--"
-        mode = "AUTO" if fan.get("mode") == "auto" or fan.get("control") == "kernel-thermal" else "--"
-        for y, label, value in ((31, "MODE", mode), (55, "LEVEL", state), (79, "PWM", pwm),
-                                (103, "RPM", _integer(fan.get("rpm")))):
-            text(draw, (280, y), label, 12, MUTED)
-            text(draw, (332, y), value, 14, width=86)
-        text(draw, (10, 119), "POLICY  " + _safe_text(fan.get("policy")), 14, MUTED, width=408)
-    elif screen == "network":
-        for x, label in ((10, "IFACE"), (121, "LINK"), (190, "RX TOTAL"), (308, "TX TOTAL")):
-            text(draw, (x, 37), label, 12, MUTED)
-        for index, item in enumerate((items or [{}])[:3]):
-            y = 58 + index * 28
-            carrier = item.get("carrier")
-            link = "--"
-            if type(carrier) in (bool, int) and carrier in (0, 1):
-                link = "UP" if carrier else "DOWN"
-            for x, value, width in (
-                (10, _safe_text(item.get("name")), 102), (121, link, 61),
-                (190, _bytes(item.get("rx_bytes")), 110),
-                (308, _bytes(item.get("tx_bytes")), 110),
-            ):
-                text(draw, (x, y), value, 15, width=width)
-    else:
-        for index, item in enumerate((items or [{}])[:3]):
-            y = 39 + index * 33
-            text(draw, (10, y + 3), _safe_text(item.get("name")), 17, width=234)
-            text(draw, (258, y), _temperature(item.get("temp_mc")), 25, width=160, bold=True)
-    return image
+            _panel(draw, (x, 100, x + metric_width - 4, 137), fill=PANEL, outline=color)
+            _metric(draw, color, x, label, value, width=metric_width - 4,
+                    # Keep mode, cooling level and PWM percentage visible in
+                    # the narrow fan slot instead of truncating the value.
+                    value_size=9 if label == "风扇" else 16,
+                    font_directory=font_directory)
 
+    elif screen == "thermal":
+        # Large temperature readouts on the left; controller facts on the right.
+        for x, label, value, color in (
+            (10, "CPU", snapshot.get("cpu_temp_mc"), WARNING),
+            (128, "PHY", snapshot.get("phy_temp_mc"), ACCENT),
+        ):
+            _panel(draw, (x, 43, x + 108, 100), fill=PANEL, outline=color)
+            text(draw, (x + 10, 50), label, 11, MUTED, bold=True)
+            text(draw, (x + 10, 68), _temperature(value), 21, color, width=92, bold=True)
+        _panel(draw, (250, 43, 418, 100), fill=PANEL_ALT, outline=GOOD)
+        mode = "自动" if fan.get("mode") == "auto" or fan.get("control") == "kernel-thermal" else "--"
+        state, maximum = fan.get("state"), fan.get("max_state")
+        level = ("L{}/{}".format(state, maximum)
+                 if type(state) is int and type(maximum) is int and 0 <= state <= maximum <= 255
+                 else "--")
+        pwm = fan.get("pwm_percent")
+        if pwm is None and type(fan.get("pwm")) is int and 0 <= fan["pwm"] <= 255:
+            pwm = (fan["pwm"] * 100 + 127) // 255
+        pwm_value = "{}%".format(pwm) if type(pwm) is int and 0 <= pwm <= 100 else "--"
+        for y, label, value, color in (
+            (49, "模式", mode, GOOD),
+            (67, "档位", level, FOREGROUND),
+            (85, "PWM", pwm_value, ACCENT),
+        ):
+            text(draw, (261, y), label, 10, MUTED, bold=True)
+            text(draw, (325, y - 2), value, 13, color, width=83, bold=True)
+        policy = _safe_text(fan.get("policy"))
+        text(draw, (10, 112), "内核策略", 10, MUTED, bold=True)
+        text(draw, (108, 109), policy, 13, FOREGROUND, width=126)
+        text(draw, (250, 109), "无测速", 11, MUTED, width=168, bold=True)
+
+    elif screen == "network":
+        ports = _network_items(snapshot)
+        for index, x in enumerate((10, 214)):
+            item = ports[index] if index < len(ports) else {}
+            _panel(draw, (x, 42, x + 194, 103), fill=PANEL_ALT,
+                   outline=ACCENT if index == 0 else "#9b8cff")
+            link, link_color = _network_link(item)
+            text(draw, (x + 10, 48), "网口{}".format(index + 1), 11, ACCENT, bold=True)
+            text(draw, (x + 142, 48), link, 11, link_color, width=42, bold=True)
+            text(draw, (x + 10, 65), _network_ip(item), 15, FOREGROUND, width=174, bold=True)
+            text(draw, (x + 10, 84), _safe_text(item.get("name")), 10, MUTED, width=60)
+            text(draw, (x + 69, 84), "RX " + _bytes(item.get("rx_bytes")), 10, MUTED, width=62)
+            text(draw, (x + 133, 84), "TX " + _bytes(item.get("tx_bytes")), 10, MUTED, width=58)
+        text(draw, (10, 116), "DHCP / IPv4", 10, MUTED, bold=True)
+        text(draw, (101, 113), "链路状态", 11, GOOD, bold=True)
+        text(draw, (250, 113), "双网口固定", 10, MUTED, width=168, bold=True)
+
+    else:
+        items = _items(snapshot, "storage")
+        for index, x in enumerate((10, 214)):
+            item = items[index] if index < len(items) else {}
+            _panel(draw, (x, 43, x + 194, 91), fill=PANEL_ALT,
+                   outline=ACCENT if index == 0 else "#9b8cff")
+            text(draw, (x + 10, 50), _safe_text(item.get("name")), 12, ACCENT, width=76, bold=True)
+            text(draw, (x + 10, 68), _temperature(item.get("temp_mc")), 20, WARNING, width=174, bold=True)
+        text(draw, (10, 105), "NVMe 温度", 11, MUTED, bold=True)
+        text(draw, (250, 105), "无虚构数据", 10, MUTED, width=168, bold=True)
+        text(draw, (10, 123), "存储传感器可选", 10, FOREGROUND, width=408)
+    return image
 
 def preview_snapshot():
     """Deterministic sample data, explicitly not measurements of a live board."""

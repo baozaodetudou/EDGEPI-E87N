@@ -20,7 +20,9 @@ ProtectControlGroups=yes
 ProtectKernelModules=yes
 LockPersonality=yes
 RestrictSUIDSGID=yes
-RestrictAddressFamilies=AF_UNIX
+# The daemon only performs a local SIOCGIFADDR ioctl to show IPv4 addresses;
+# it never connects, binds, sends packets, resolves DNS or opens AF_INET6.
+RestrictAddressFamilies=AF_UNIX AF_INET
 UMask=0077
 # Sysfs is normally writable even with ProtectSystem=strict. Restrict it to
 # the actual backlight target; the dashboard has no thermal/PWM write access.

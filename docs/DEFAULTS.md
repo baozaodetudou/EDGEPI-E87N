@@ -36,7 +36,9 @@ GitHub Actions 会对当前 main 重新构建预装显示配置，并把同一�
 
 不预装桌面、Web 管理后台、Docker、LuCI 或额外 RAID/LVM 管理套件；没有 DHCP 服务器、NAT、LAN/WAN 角色划分。根据用途再安装软件，避免镜像承担未使用的后台服务。内核仍保留正常 Linux 底层和板级驱动；额外存储模块为[可选构建项](OPTIONAL-STORAGE.md)。
 
-小屏独立升级见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)，云端构建见 [GITHUB-ACTIONS.md](GITHUB-ACTIONS.md)。显示 RPM 需要硬件测速反馈；原机未提供该反馈，所以显示不可用/PWM，不能虚构转速。
+小屏独立升级见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)，云端构建见 [GITHUB-ACTIONS.md](GITHUB-ACTIONS.md)。
+小屏不显示 RPM；风扇仅显示内核自动模式、cooling level 和 PWM 百分比。RPM 需要硬件测速反馈，
+原机未提供该反馈，不能把 PWM 或 cooling level 换算成转速。
 
 为防止通用 Filogic 包替换 E87N 移植，保留内核/DTB/BSP 等 Armbian hold。普通 Debian 软件正常更新；解除 hold 或更新内核前需要重新移植并验证。没有自动重启策略。
 

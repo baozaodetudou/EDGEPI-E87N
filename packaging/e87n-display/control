@@ -4,7 +4,7 @@ Section: admin
 Priority: optional
 Architecture: all
 Maintainer: E87N project contributors <e87n@localhost>
-Depends: python3, python3-pil, fonts-dejavu-core, init-system-helpers (>= 1.56)
+Depends: python3, python3-pil, fonts-dejavu-core, fonts-wqy-microhei, init-system-helpers (>= 1.56)
 Description: Debian-native E87N status display and diagnostics
  NV3007 framebuffer dashboard, validated backlight settings, read-only
  telemetry and the e87nctl command for the EdgePi E87N.

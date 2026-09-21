@@ -3,7 +3,8 @@
 This directory is installed by `userpatches/customize-image.sh` into the new
 Debian root filesystem. It is not an OpenWrt package or an on-device installer.
 
-Dependencies: Debian python3, python3-pil, fonts-dejavu-core. The `e87n` package
+Dependencies: Debian python3, python3-pil, fonts-dejavu-core and
+fonts-wqy-microhei. The `e87n` package
 is installed under `/usr/lib/python3/dist-packages/`; `e87nctl` invokes the
 system Python with `-I` so root invocations ignore caller PYTHONPATH/user-site.
 
@@ -35,11 +36,12 @@ with the display off. Configuration is `/etc/e87n/display.json`; service name
 is `e87n-display.service`. Unknown measurements are not successful hardware tests.
 
 The default overview is 428x142 pixels, enabled at 20% brightness and refreshed
-every 2 seconds. Its large IP row shows an assigned local IPv4 or IPv6 address;
-four columns show CPU usage, RAM used, CPU temperature and measured fan RPM.
-The footer shows used/total RAM and raw PWM (`0..255`), or the kernel cooling
-level if PWM is unavailable. Missing RPM stays `--`; neither PWM nor cooling
-level proves rotation. The kernel is the only fan writer.
+every 2 seconds. It has two fixed `LAN 1`/`LAN 2` cards with link state and an
+assigned local IPv4/IPv6 address, followed by CPU usage, RAM used, CPU
+temperature and kernel fan state. The fan card shows `AUTO`, cooling level and
+PWM percentage only; the screen deliberately does not display tachometer RPM.
+Missing values remain `--`, and neither PWM nor cooling level proves rotation.
+The kernel is the only fan writer.
 
 CPU usage comes from consecutive aggregate `/proc/stat` counters, excluding
 guest double-counting and treating idle/iowait as idle. The first sample,

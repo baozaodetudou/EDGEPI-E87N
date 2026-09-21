@@ -2,16 +2,16 @@
 
 当前交付格式为 [U-Boot 未压缩 USTAR 固件](UBOOT-FIRMWARE.md)，目标为原厂 Web 恢复页 plain firmware（类型 `fw`）。包内 `kernel` 是 LZMA 内核、原始 initrd 和 E87N DTB 组成的 FIT；`root` 是含 `/boot` 的 Debian ext4。完整 `.img` / `.img.xz` 仅是构建中间产物或历史证据，不能直接刷写，也不能用 LuCI sysupgrade 安装新 TAR。
 
-**用户要求完全准备好再刷。当前没有板卡重启、刷写、完整恢复备份、串口连接或板上 RAM 测试记录。** R4 本地已生成，独立最终审计 EXIT 0；factory 24 项、root adapter 24 项通过，完整 Linux `ci-regressions.sh` 已在磁盘临时目录运行并 EXIT 0。CI 85 项已再次通过；新增 runtime/root preparer 两个编译检查目标也已复验通过。主机导出与两文件摘要比对已完成；这不是硬件验收。R4 重新打包历史 Actions 34737922588 的原始 RAW，修正 DTB 的 1 GiB/保留区及 bootargs（含 902 等效修正），没有完整重编 Armbian 或内核。V3 已废弃，未来新源码工作流未 dispatch。这些结果不代替硬件和恢复准备，详见[阶段记录](SYSTEM-READINESS.md)。本文不提供刷写、修改环境或猜测 USB Type-C 针脚的步骤。
+**2026 年 9 月 21 日已在真实 E87N 上启动 Debian 13，并完成显示服务、中文字体、双网口采样、温度、PWM 风扇和基本显示控制命令验收。** 详细结果见[真实板卡验收记录](FINAL-VALIDATION-20260921.md)。但完整 eMMC 备份、板上 RAM 测试、断电恢复、长时间散热压力测试和本轮源码提交后的新正式 Release 仍未完成；这些条件不应被软件测试或已有测试包替代。本文不提供猜测 USB Type-C 针脚的步骤。
 
-[DEFAULTS.md](DEFAULTS.md) 定义新系统的 `root` / `doumao`、SSH 22 密码登录、networkd/netplan DHCP、`Asia/Shanghai`、`zh_CN.UTF-8` 和正常 APT。当前配方预装显示包，启用 NV3007/背光节点、模块自动加载配置与显示服务；独立 deb 用于升级和重新安装。没有首次创建用户向导或强制公钥门槛，串口需要正常认证。配置启用不代表屏幕或风扇已经实机验收，candidate3 的旧 headless 验收也不能代替当前显示配置的验证。
+[DEFAULTS.md](DEFAULTS.md) 定义新系统的 `root` / `doumao`、SSH 22 密码登录、networkd/netplan DHCP、`Asia/Shanghai`、`zh_CN.UTF-8` 和正常 APT。当前配方预装显示包，启用 NV3007/背光节点、模块自动加载配置与显示服务；独立 deb 用于升级和重新安装。没有首次创建用户向导或强制公钥门槛，串口需要正常认证。当前显示包的真实板卡验证见[2026-09-21 记录](FINAL-VALIDATION-20260921.md)，长期可靠性仍需单独验收。
 
 ## 1. 刷写前的准备条件
 
 以下各项必须先完成，再评估实际刷写：
 
 1. 将原 eMMC 用户区完整备份到独立存储，包含主/备 GPT、p1 环境、p2 factory、p3 FIP、现有 kernel/rootfs；另保存 boot0/boot1 等启动恢复所需内容。核对大小和摘要，并准备明确可执行的恢复方案。环境 CRC 校验或部分只读采集不能替代恢复备份。
-2. 确认**串口或已经实测可恢复的 U-Boot Web/网络控制通道**，核实本机 U-Boot 版本、命令能力、恢复入口及物理恢复路径。用户优先选择网络 U-Boot；串口不是唯一选项。当前没有任何控制通道实测结果，USB Type-C 是否承载 UART 以及针脚/电平也未确认，不能依据其他板卡套用。
+2. 确认**串口或已经实测可恢复的 U-Boot Web/网络控制通道**，核实本机 U-Boot 版本、命令能力、恢复入口及物理恢复路径。用户优先选择网络 U-Boot；串口不是唯一选项。此前已经实际使用 U-Boot Web 页面恢复/启动测试系统，但每次生产刷写前仍应确认页面可访问；USB Type-C 是否承载 UART 以及针脚/电平不能依据其他板卡套用。
 3. 完成板上 RAM 测试，核对 U-Boot 工作区、上传缓冲、FIT 加载与解压、initrd、DTB 和固件保留区。整个 TAR `<=768 MiB` 只是静态打包政策，不证明 Web 有足够空闲 RAM。
 4. 完成本次构建和最终 TAR 审计，确认分区契约、payload 大小、厂商解析器兼容性、同套内核/模块/DTB/initrd、root UUID、首启扩容限制和 MAC helper。保存退出码、日志与 SHA-256，不能只凭文件存在判定通过。
 

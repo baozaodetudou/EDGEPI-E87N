@@ -173,6 +173,11 @@ class ValidationTests(unittest.TestCase):
         self.assertEqual(layout.start, 1760)
         self.assertEqual(layout.memory_bytes, 876 * 144)
 
+    def test_e87n_fbtft_nonstd_marker_is_accepted(self):
+        fix, var = screen_info()
+        var.nonstd = 1
+        self.assertEqual(display.validate_framebuffer(fix, var).stride, 856)
+
     def test_reject_wrong_id_geometry_format_memory_and_overflow(self):
         cases = [
             ("fix", "id", b"simpledrm"), ("fix", "id", b"fb_nv3007-other"),
@@ -415,57 +420,59 @@ class RendererTests(unittest.TestCase):
                 images.add(image.tobytes())
         self.assertEqual(len(images), 4)
 
-    def test_missing_measurements_are_dashes_and_never_inferred_rpm(self):
+    def test_missing_measurements_are_dashes_and_rpm_is_not_rendered(self):
         for screen in display.SCREENS:
             with self.subTest(screen=screen):
                 _, texts, _ = self.capture_render({}, screen)
                 self.assertIn("--", texts)
                 self.assertNotIn("0", texts)
                 self.assertNotIn("0.0 C", texts)
+                self.assertFalse(any("RPM" in str(text) for text in texts))
         snapshot = display.preview_snapshot()
         _, texts, _ = self.capture_render(snapshot, "thermal")
-        self.assertIn("--", texts)
         self.assertIn("75%", texts)
-        self.assertIn("2/3", texts)
+        self.assertIn("L2/3", texts)
         self.assertNotIn("192", texts)
+        self.assertIn("无测速", texts)
         snapshot["fan"]["rpm"] = 1234
         _, texts, _ = self.capture_render(snapshot, "overview")
-        self.assertIn("1234", texts)
+        self.assertNotIn("1234", texts)
+        self.assertFalse(any("RPM" in str(text) for text in texts))
 
     def test_zero_values_are_real_and_absent_values_stay_missing(self):
         snapshot = {"cpu_usage_percent": 0, "cpu_temp_mc": 0, "phy_temp_mc": None, "loadavg": [0, 0, 0],
                     "fan": {"rpm": 0}, "mem_total_kib": 1024, "mem_available_kib": 1024,
                     "uptime_seconds": 0}
         _, texts, _ = self.capture_render(snapshot, "overview")
-        for text in ("0.0 C", "IP  --", "0", "0%", "FAN PWM --"):
+        for text in ("0.0 C", "无IP", "0%", "风扇"):
             self.assertIn(text, texts)
 
     def test_overview_shows_assigned_ip_usage_ram_temperature_and_fan(self):
         snapshot = display.preview_snapshot()
         _, texts, _ = self.capture_render(snapshot, "overview")
-        for text in ("end0", "IP  192.0.2.87", "CPU USED", "24%", "RAM USED", "38%",
-                     "CPU TEMP", "58.8 C", "FAN RPM", "--", "AUTO PWM 75%",
-                     "RAM 384.0 MiB / 1.0 GiB"):
+        for text in ("E87N  /  系统", "在线", "网口1", "192.0.2.87", "网口2",
+                     "无IP", "CPU", "24%", "内存", "38%", "温度", "58.8 C", "风扇",
+                     "自动 75%"):
             self.assertIn(text, texts)
         self.assertNotIn("0.42", texts)  # Load average is not CPU usage.
         snapshot.pop("cpu_usage_percent")
         _, texts, _ = self.capture_render(snapshot, "overview")
-        self.assertEqual(texts[texts.index("CPU USED") + 1], "--")
+        self.assertEqual(texts[texts.index("CPU") + 1], "--")
 
-    def test_overview_fan_tachometer_and_pwm_remain_distinct(self):
+    def test_overview_uses_fan_level_and_pwm_but_ignores_tachometer(self):
         snapshot = display.preview_snapshot()
-        for fan, rpm, detail in (
-            ({"rpm": 0, "pwm": 0}, "0", "FAN PWM 0%"),
-            ({"rpm": 1234, "pwm": 192}, "1234", "FAN PWM 75%"),
-            ({"state": 2, "max_state": 3}, "--", "FAN L2/3"),
-            ({"rpm": -1, "pwm": 256, "state": 4, "max_state": 3}, "--", "FAN PWM --"),
-            ({"rpm": True, "pwm": True}, "--", "FAN PWM --"),
+        for fan, detail in (
+            ({"rpm": 0, "pwm": 0}, "-- 0%"),
+            ({"rpm": 1234, "pwm": 192}, "-- 75%"),
+            ({"state": 2, "max_state": 3}, "--"),
+            ({"rpm": -1, "pwm": 256, "state": 4, "max_state": 3}, "--"),
+            ({"rpm": True, "pwm": True}, "--"),
         ):
             with self.subTest(fan=fan):
                 snapshot["fan"] = fan
                 _, texts, _ = self.capture_render(snapshot, "overview")
-                self.assertEqual(texts[texts.index("FAN RPM") + 1], rpm)
                 self.assertIn(detail, texts)
+                self.assertFalse(any("RPM" in str(text) for text in texts))
 
     def test_overview_prefers_up_ipv4_then_ipv6_and_marks_socket_free_fallback(self):
         data = {"network": [
@@ -496,7 +503,7 @@ class RendererTests(unittest.TestCase):
             self.assertEqual(display._overview_address(data), ("NO IP", "--"))
         for value in (None, -1, 101, float("nan"), float("inf"), True, "50"):
             _, texts, _ = self.capture_render({"cpu_usage_percent": value}, "overview")
-            self.assertEqual(texts[texts.index("CPU USED") + 1], "--")
+            self.assertEqual(texts[texts.index("CPU") + 1], "--")
 
     def test_overview_full_addresses_and_extreme_values_do_not_clip_or_overlap(self):
         snapshot = display.preview_snapshot()
@@ -507,8 +514,7 @@ class RendererTests(unittest.TestCase):
                                     "ipv4": address if "." in address else None,
                                     "ipv6": [address] if ":" in address else []}]
             _, texts, boxes = self.capture_render(snapshot, "overview")
-            self.assertIn("IP  " + address, texts)
-            self.assertIn("200000", texts)
+            self.assertNotIn("200000", texts)
             self.assertIn("200.0 C", texts)
             for index, (left, top, right, bottom) in enumerate(boxes):
                 self.assertTrue(0 <= left <= right <= 428 and 0 <= top <= bottom <= 142)
@@ -518,7 +524,7 @@ class RendererTests(unittest.TestCase):
 
     def test_network_is_totals_and_link_unknown_is_not_down(self):
         _, texts, _ = self.capture_render(display.preview_snapshot(), "network")
-        for text in ("NETWORK TOTALS", "RX TOTAL", "TX TOTAL", "UP", "DOWN", "--"):
+        for text in ("网络  /  网口", "网口1", "网口2", "RX 31.8 GiB", "TX 7.6 GiB", "在线", "断开"):
             self.assertIn(text, texts)
         self.assertFalse(any("/s" in text for text in texts))
 
@@ -536,7 +542,8 @@ class RendererTests(unittest.TestCase):
             self.assertTrue(all(0 <= left <= right <= 428 and 0 <= top <= bottom <= 142
                                 for left, top, right, bottom in boxes))
         _, texts, _ = self.capture_render(data, "network")
-        self.assertIn("+2 more", texts)
+        self.assertIn("网口1", texts)
+        self.assertIn("无IP", texts)
 
     def test_invalid_snapshot_root_or_screen_is_an_error(self):
         with self.assertRaises(display.DisplayError):

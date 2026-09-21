@@ -236,6 +236,7 @@ class DebianPackageTests(unittest.TestCase):
                 self.assertEqual(run(["dpkg-deb", "-f", deb, field]).stdout.strip(), expected)
             depends = run(["dpkg-deb", "-f", deb, "Depends"]).stdout.strip()
             self.assertEqual(set(depends.split(", ")), {"python3", "python3-pil", "fonts-dejavu-core",
+                                                        "fonts-wqy-microhei",
                                                         "init-system-helpers (>= 1.56)"})
 
     def test_exact_payload_bytes_ownership_and_permissions(self):

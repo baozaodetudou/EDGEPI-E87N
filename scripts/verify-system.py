@@ -22,7 +22,7 @@ REPO = Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location("display_audit", REPO / "scripts/verify-display-fan.py")
 audit = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(audit)
-PACKAGES = """python3 python3-pil fonts-dejavu-core e87n-display openssh-server
+PACKAGES = """python3 python3-pil fonts-dejavu-core fonts-wqy-microhei e87n-display openssh-server
 ca-certificates iproute2 netplan.io tzdata locales apt systemd-resolved systemd-timesyncd""".split()
 DISPLAY_SOURCES = {"e87nctl", "systemd/e87n-display.service",
                    "e87n/doctor.py", "e87n/__main__.py", "e87n/hardware.py",
@@ -166,7 +166,7 @@ def check(root, boot, headless=False):
             held.add(fields.get("Package"))
     required_packages = set(PACKAGES)
     if headless:
-        required_packages -= {"python3", "python3-pil", "fonts-dejavu-core", "e87n-display"}
+        required_packages -= {"python3", "python3-pil", "fonts-dejavu-core", "fonts-wqy-microhei", "e87n-display"}
         require("e87n-display" not in installed, "headless image has e87n-display installed")
     require(required_packages <= installed, "missing installed base packages: " + ", ".join(sorted(required_packages - installed)))
     require({"linux-image-current-edgepi-e87n", "linux-dtb-current-edgepi-e87n"} <= held,

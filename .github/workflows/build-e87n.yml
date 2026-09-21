@@ -59,7 +59,7 @@ jobs:
           {
             sudo -n apt-get update
             sudo -n apt-get install -y --no-install-recommends \
-              gcc shellcheck python3-yaml python3-pil fonts-dejavu-core device-tree-compiler \
+              gcc shellcheck python3-yaml python3-pil fonts-dejavu-core fonts-wqy-microhei device-tree-compiler \
               u-boot-tools e2fsprogs util-linux python3 initramfs-tools-core fdisk \
               patch kmod zstd xz-utils dpkg-dev init-system-helpers python3-minimal libcrypt1 cpio
             GOBIN="$RUNNER_TEMP/e87n-tools" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12

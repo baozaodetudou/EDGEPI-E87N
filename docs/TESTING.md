@@ -1,6 +1,6 @@
 # 测试与验证 E87N Armbian
 
-当前测试目标是 [DEFAULTS.md](DEFAULTS.md) 中预装显示包、启用 LCD/背光的 Debian 13 / Linux 6.18 LTS 最小配置。版本、pin 和 kernel release 来自 [e87n-build.json](../userpatches/config/e87n-build.json)。[旧云端构建](ci-keygen-fix-20260913.md)及 [candidate3 软件验收](FINAL-VALIDATION-20260920.md)各自对应冻结输入，不能作为当前显示配置通过的证据。诊断、网络与系统静态检查分别使用 `tests/test-doctor.py`、`tests/test-network-policy.py` 和 `tests/test-verify-system.py`；最后一项需要专用 Linux 构建环境的 root 身份来创建临时 root-owned 夹具，不挂载设备。网络测试要求 GNU patch，macOS 可用 `gpatch`，并会打印实际工具版本。
+当前测试目标是 [DEFAULTS.md](DEFAULTS.md) 中预装显示包、启用 LCD/背光的 Debian 13 / Linux 6.18 LTS 最小配置。版本、pin 和 kernel release 来自 [e87n-build.json](../userpatches/config/e87n-build.json)。[旧云端构建](ci-keygen-fix-20260913.md)及 [candidate3 软件验收](FINAL-VALIDATION-20260920.md)各自对应冻结输入；真实板卡的显示、中文、双网口和风扇短测结果见 [FINAL-VALIDATION-20260921.md](FINAL-VALIDATION-20260921.md)。诊断、网络与系统静态检查分别使用 `tests/test-doctor.py`、`tests/test-network-policy.py` 和 `tests/test-verify-system.py`；最后一项需要专用 Linux 构建环境的 root 身份来创建临时 root-owned 夹具，不挂载设备。网络测试要求 GNU patch，macOS 可用 `gpatch`，并会打印实际工具版本。
 
 当前镜像必须执行 `verify-image.sh --release trixie --require-usb-root --require-display-fan --require-system candidate.img`。`--require-system` 核对 `root` / `doumao` 密码登录配置、首次 SSH 前生成独立身份的服务依赖、无串口自动登录、无旧初始化服务、networkd/netplan DHCP、上海时区、中文 UTF-8、签名 APT 源和真实 DTB 的 GMAC aliases；`--require-display-fan` 同时检查显示/风扇配置及预装显示包。这些都是静态检查，不执行镜像程序，也不能证明 SSH 已能登录。`--headless` 仅保留用于相应旧配置，不能替代当前显示检查。
 
@@ -26,7 +26,7 @@
 
 ```sh
 sudo apt-get update
-sudo apt-get install -y bash python3 python3-pil fonts-dejavu-core \
+sudo apt-get install -y bash python3 python3-pil fonts-dejavu-core fonts-wqy-microhei \
   device-tree-compiler zstd xz-utils
 ```
 

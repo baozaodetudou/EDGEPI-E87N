@@ -83,9 +83,10 @@ journalctl -u e87n-display.service -b --no-pager
 旋转、PWM 背光和独立 Debian 服务。`e87n-display` 提供 overview、thermal、network、
 storage 四个页面；显示程序不会接管风扇，只读取内核暴露的状态。
 
-下一版界面按双网口设备重新设计：两个网口将分别显示 link、协商速率和 IP，右侧显示
-CPU、内存、温度和风扇，布局以小屏可读性为第一优先级。设计规范和当前实现边界见
-[屏幕设计与功能说明](docs/SCREEN-DESIGN.md)。
+当前界面已经按双网口设备重新设计：两个网口分别显示链路状态、接口名和 IP，底部显示
+CPU、内存、温度及内核风扇模式/PWM；中文字体、彩色状态卡片和四个页面均针对 428×142
+小屏优化。设计规范、实机验收结果和当前实现边界见[屏幕设计与功能说明](docs/SCREEN-DESIGN.md)
+及[真实板卡验收记录](docs/FINAL-VALIDATION-20260921.md)。
 
 ## 从源码构建
 

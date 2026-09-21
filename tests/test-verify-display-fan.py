@@ -42,6 +42,7 @@ Type=simple
 ExecStartPre=/usr/bin/e87nctl display apply
 ExecStart=/usr/bin/python3 -I -m e87n.display --daemon
 Restart=on-failure
+RestrictAddressFamilies=AF_UNIX AF_INET
 [Install]
 WantedBy=multi-user.target
 """
@@ -148,6 +149,7 @@ def make_rootfs(root):
         write(root, MODULES + name + ".ko", b"SYNTHETIC module presence fixture\n")
     write(root, "usr/lib/python3/dist-packages/PIL/Image.py", 'raise RuntimeError("PIL IMPORTED")\n')
     write(root, "usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", b"SYNTHETIC font presence fixture\n")
+    write(root, "usr/share/fonts/truetype/wqy/wqy-microhei.ttc", b"SYNTHETIC CJK font presence fixture\n")
 
 
 def snapshot(root):
@@ -337,7 +339,8 @@ class RootfsTests(unittest.TestCase):
         names += ["usr/bin/e87nctl", "etc/e87n/display.json", UNIT, ENABLE,
                   "etc/modules-load.d/e87n-display.conf", MODULES + "fb_nv3007.ko", MODULES + "fbtft.ko",
                   "usr/lib/python3/dist-packages/PIL/Image.py",
-                  "usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
+                  "usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                  "usr/share/fonts/truetype/wqy/wqy-microhei.ttc"]
         for name in names:
             with self.subTest(name=name):
                 path = self.root / name

@@ -14,7 +14,8 @@ done
 python3 -c 'import PIL, yaml'
 patch --version | head -n 1
 [[ -f /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf && \
-	-f /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf ]]
+	-f /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf && \
+	-f /usr/share/fonts/truetype/wqy/wqy-microhei.ttc ]]
 sudo -n true
 regression_tmp=$(mktemp -d "${RUNNER_TEMP:-/var/tmp}/e87n-regressions.XXXXXXXX")
 # Retained large fixtures must not fill a Debian RAM-backed /tmp.

@@ -1,14 +1,14 @@
 # E87N 最小系统范围与验证状态
 
-当前目标为 **Debian 13.7 Trixie / Linux 6.18.52 最小命令行系统**，版本以中央配置为准，包含正常 APT、有线 DHCP、SSH、预装小屏包和内核风扇温控。candidate3 的旧 headless 配置已通过完整构建、最终固件审计和同产物 Docker/QEMU 软件验收；当前启用 LCD/背光并预装显示包的配置需要重新构建与验收。这仍是实验性 E87N 移植，尚无 Debian 实机首启与完整硬件验收记录。
+当前目标为 **Debian 13.7 Trixie / Linux 6.18.52 最小命令行系统**，版本以中央配置为准，包含正常 APT、有线 DHCP、SSH、预装小屏包和内核风扇温控。2026 年 9 月 21 日，真实 E87N 已启动 Debian 13 并完成屏幕服务、中文字体、双网口采样、温度和风扇控制验收；实测记录见[真实板卡验收记录](FINAL-VALIDATION-20260921.md)。本次源码改动提交后仍需由手动 GitHub Actions 重新生成新的正式 Release，不能把此前 Release 当作包含本轮改动的镜像。
 
 现场 E87N 已验证 `pwm-fan` cooling device、`step_wise` policy 和 PWM 输出均存在；当前硬件没有 tachometer，因此 RPM 不可读。Linux CPUFreq 目录不存在，表示本镜像使用固件固定频率，尚未启用未经验证的 MT7987 DVFS。eth0/eth1 的 checksum、TSO/GSO/GRO 普通卸载已启用，但没有 WED/HNAT 注册证据；`e87nctl acceleration status` 只报告这些边界，不把 Kconfig 或普通卸载宣称为硬件转发加速。
 
-当前 candidate3 的正式摘要见[最终验收记录](FINAL-VALIDATION-20260920.md)。QEMU 报告为 `PASS`，但不模拟 MT7987 物理网口、eMMC、SPI 屏幕、PWM 风扇、factory MAC 或原厂 U-Boot，因此不能替代上板验证。
+当前 candidate3 的软件摘要见[最终验收记录](FINAL-VALIDATION-20260920.md)；真实板卡的显示与风扇验收见[2026-09-21 记录](FINAL-VALIDATION-20260921.md)。QEMU 报告为 `PASS`，但不模拟 MT7987 物理网口、eMMC、SPI 屏幕、PWM 风扇、factory MAC 或原厂 U-Boot，因此只能作为软件验收，不能替代上板验证。
 
 当前交付为 [U-Boot 未压缩 USTAR 固件](UBOOT-FIRMWARE.md)，包含 FIT kernel、含 `/boot` 的 Debian ext4 root 和 CONTROL。**R4 本地已生成，独立最终审计 EXIT 0**；R4 重新打包历史 Actions 34737922588 的原始 RAW，修正 DTB 的 1 GiB/保留区及 bootargs（含 902 等效修正），没有完整重编 Armbian 或内核。主机导出及 SHA-256 比对已完成，V3 已废弃。完整 `.img` / `.img.xz` 仅为中间或历史文件，不可刷写。
 
-旧最小配置曾在 [Actions 34737922588](https://github.com/baozaodetudou/EDGEPI-E87N/actions/runs/34737922588) 完成整盘镜像构建、静态审计和上传，源码 `2a60011`，见[历史记录](ci-keygen-fix-20260913.md)。旧[屏幕/风扇候选](candidate-display-fan-20260913.md)及其哈希不变；它们不证明新 TAR、902 或 factory 首启适配已完成。可丢弃 rootfs 副本集成与云端镜像构建也均不包含实体板卡启动。远端 Release 发布未确认。
+旧最小配置曾在 [Actions 34737922588](https://github.com/baozaodetudou/EDGEPI-E87N/actions/runs/34737922588) 完成整盘镜像构建、静态审计和上传，源码 `2a60011`，见[历史记录](ci-keygen-fix-20260913.md)。旧[屏幕/风扇候选](candidate-display-fan-20260913.md)及其哈希不变；它们不证明当前 TAR、902 或 factory 首启适配已完成。历史记录保留用于追溯，不得用历史附件刷写。
 
 ## 历史 R4 阶段结果
 
@@ -26,7 +26,7 @@
 | 完整 Linux regressions | `ci-regressions.sh` 全部套件通过，`regressions-disk.log` EXIT 0；原传输与 tmpfs 故障日志保留 |
 | 静态 CI | 85 项再次通过；新增 runtime/root preparer 两个编译检查目标也已复验通过 |
 | 导出与发布 | 主机导出及 SHA-256 比对已完成；未来新源码完整构建工作流未 dispatch，远端 Release 未确认 |
-| 实体设备 | 仅有原 OpenWrt 的只读证据；未重启、未刷写、未完成完整恢复备份、未连接串口，板上 RAM 测试未完成 |
+| 实体设备 | Debian 13 实机已启动；屏幕、中文、双网口、温度、PWM 风扇和显示命令通过。完整 eMMC 备份、板上 RAM 测试、断电恢复和长时间散热压力测试仍未完成 |
 
 R4 SHA-256：`b3587a5377edf7c95f0d620eb038e67643287ac75629f20cc1b071e5dfa47545`。源 RAW SHA-256：`289f766db8e0a74993e36a4a776abf39a1b380d56333b8875e1586864b05f5c9`，对应历史 Actions 34737922588；本轮未完整重编 Armbian/内核，DTB 内存/bootargs 包含 902 等效修正。实际 Image 头 `text_offset=0`、有效 `image_size=0x1690000`（23658496 字节）、`flags=0xa`；FIT load/entry `0x40000000`（2 MiB 对齐），DTB 为 1 GiB，已纳入 R4 独立审计。约束见 [Linux ARM64 booting](https://docs.kernel.org/arch/arm64/booting.html)与[固件记录](UBOOT-FIRMWARE.md)。第 4 次组装/复制比较成功后，首次审计遇 `/tmp` tmpfs ENOSPC；改用磁盘 `RUNNER_TEMP` / `/var/tmp` 对同一 TAR 复验全部通过，再以不覆盖已有文件方式暴露 R4。失败记录保留。用户要求完全准备好再刷：板上 RAM 测试、备份、串口或已经实测可恢复的 U-Boot Web/网络控制通道及物理恢复路径仍未完成，优先评估网络 U-Boot。
 
@@ -40,7 +40,7 @@ R4 SHA-256：`b3587a5377edf7c95f0d620eb038e67643287ac75629f20cc1b071e5dfa47545`�
 | 设备身份 | 镜像清除 SSH host keys；首次 SSH 前生成独立密钥；空 machine-id 留待首启生成 | 副本上的密钥生成与持久性已测；完整首启服务时序仍待验证 |
 | 网络与时间 | 两个有线网口使用 networkd/netplan DHCP；helper 在 DHCP 前只读 p2 `0x24`/`0x2a` 的 factory MAC；resolved/timesyncd；`Asia/Shanghai` | 原系统只读确认 eth0/eth1 的 of_node 为 mac0/mac1；新 helper 顺序、DHCP/DNS/NTP 与跨重启地址仍待测，无固定管理 IP 或 LAN/WAN/NAT 预设 |
 | 语言与软件管理 | `zh_CN.UTF-8`、`LANGUAGE=zh_CN:zh`；Debian 签名源，正常 `apt update` / `apt install` | UTF-8 与真实 APT 安装已在副本测试；包与 locale 不代表硬件验证 |
-| 小屏与风扇 | 内核自动温控；新镜像预装 `e87n-display`，启用 LCD/背光、模块加载配置和显示服务；同版本 deb 独立发布 | 原 OpenWrt 的风扇接口只读记录不等于 Debian 验收；当前显示、背光、校准精度和散热仍需实测 |
+| 小屏与风扇 | 内核自动温控；镜像预装 `e87n-display`，启用 LCD/背光、模块加载配置和显示服务；同版本 deb 独立发布 | 实机已验证 framebuffer、中文和彩色界面、背光命令、温度、cooling level、PWM 和短时风扇测试；无 tachometer，RPM 不可读，光学颜色/长期散热仍未量测 |
 | 额外存储 | `E87N_EXTRA_STORAGE=no`；DM/LUKS/LVM/RAID 等额外内核模块显式选择构建；管理套件按需安装 | 不预装 RAID/LVM 管理套件，不创建阵列、加密卷或格式化磁盘，不提供加密/LVM 根启动承诺 |
 | 诊断 | `e87nctl doctor` 检查身份、内存、根分区、网络、温控/屏幕注册和内核前提 | 始终报告 `hardware_validation=not-performed`，不会自动压力测试或写硬件 |
 | 更新 | Debian 签名仓库；保留内核/DTB/BSP hold；允许 apt update 和安装用户空间软件 | 不能解除内核 hold：单改 `/boot`/模块不会更新 p4 FIT；后续升级需成套重建 FIT/root/initrd/DTB/模块 |

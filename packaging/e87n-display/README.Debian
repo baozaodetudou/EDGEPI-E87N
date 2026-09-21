@@ -5,9 +5,9 @@ This architecture-independent Python package targets the EdgePi E87N and
 requires the board's NV3007 framebuffer and backlight kernel support.
 The kernel remains the default fan controller. `fan test LEVEL SECONDS` is a
 root-only, bounded diagnostic: it briefly requests a thermal cooling level and
-restores the previous level; it is not a persistent manual mode. The board has
-no tachometer input, so RPM is reported as `--`; PWM percentage and RPM are
-different measurements. No provisioning, account,
+restores the previous level; it is not a persistent manual mode. The 428x142
+screen shows kernel mode, cooling level and PWM percentage only; it deliberately
+does not display tachometer RPM. No provisioning, account,
 network, firmware or kernel installation is performed by this package.
 
 Commands:

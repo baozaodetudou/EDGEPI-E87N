@@ -280,6 +280,10 @@ def check_service(root):
                          ("ExecStart", "/usr/bin/python3 -I -m e87n.display --daemon")):
         values = [value for section, name, value in entries if section == "Service" and name == key]
         require(values == [command], "e87n-display.service %s must be exactly %s" % (key, command))
+    families = [value for section, name, value in entries
+                if section == "Service" and name == "RestrictAddressFamilies"]
+    require(families == ["AF_UNIX AF_INET"],
+            "e87n-display.service must allow AF_INET for local IPv4 telemetry only")
     require(any(section == "Install" and key == "WantedBy" and
                 "multi-user.target" in value.split() for section, key, value in entries),
             "e87n-display.service must have WantedBy=multi-user.target")
@@ -375,7 +379,8 @@ def check_rootfs(root):
         require(len(found) == 1, "need exactly one installed %s module for %s in kernel/drivers/staging/fbtft" %
                 (base, RELEASE))
     for dependency in ("/usr/lib/python3/dist-packages/PIL/Image.py",
-                       "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"):
+                       "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                       "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"):
         read_file(rooted(root, dependency), limit=16 * 1024 * 1024)
     check_conflicts(root)
 
