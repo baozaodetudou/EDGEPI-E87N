@@ -102,7 +102,7 @@ journalctl -u e87n-display.service -b --no-pager
 当前小屏的硬件链路已经按原始 E87N OpenWrt 项目适配：NV3007、428×142、RGB565、270°
 旋转、PWM 背光和独立 Debian 服务。`e87n-display` 提供 `overview`、`cpu`、`memory`、
 `thermal`、`fan`、`network`、`traffic`、`storage` 八个页面；显示程序不会接管风扇，
-只读取内核暴露的状态。当前独立显示包版本为 `1.3.1-1`。
+只读取内核暴露的状态。当前独立显示包版本为 `1.3.2-1`。
 
 三种主题是相同数据语义和可用性规则的配色皮肤：`dark` 深色工业、`aurora` 黑紫霓虹、
 `light` 明亮高对比；实时数据可用性会让布局自动收缩。网口 `carrier=0` 时即使残留地址或
@@ -137,7 +137,7 @@ e87nctl display config
 镜像构建输入和低频固件版本来自
 [`userpatches/config/e87n-build.json`](userpatches/config/e87n-build.json)，当前
 `firmware_version` 为 `2026.09.1`，目标为 Debian 13 / Linux 6.18.52。独立显示包版本来自
-[`packaging/e87n-display/VERSION`](packaging/e87n-display/VERSION)，当前为 `1.3.1-1`。构建入口：
+[`packaging/e87n-display/VERSION`](packaging/e87n-display/VERSION)，当前为 `1.3.2-1`。构建入口：
 
 ```sh
 python3 scripts/build_config.py

@@ -10,7 +10,7 @@
 `board-support/` 按仓库相对结构复制到 `/tmp/overlay/e87n-package/`，customize 在
 目标 chroot 中调用该脚本，再通过 APT 安装产物。当前源码已经接入预装流程，
 并启用 LCD/背光节点及显示服务；包版本以 `packaging/e87n-display/VERSION` 为准，当前为
-`1.3.1-1`。
+`1.3.2-1`。
 独立 deb 用于升级和重新安装，不表示基础镜像默认无屏幕。
 candidate3 属于此前的 headless 配置，其验收不能替代当前显示配置的重建与实机测试。
 
@@ -40,11 +40,11 @@ stride、偏移和 framebuffer 内存边界。
 
 ```sh
 ./scripts/build-display-deb.sh --output-dir ./output/debs
-./scripts/build-display-deb.sh --output-dir ./output/debs --version 1.3.1-1
+./scripts/build-display-deb.sh --output-dir ./output/debs --version 1.3.2-1
 ```
 
 产物严格命名为 `e87n-display_VERSION_all.deb`，例如
-`output/debs/e87n-display_1.3.1-1_all.deb`。标准输出包含构建进度，调用方应按版本
+`output/debs/e87n-display_1.3.2-1_all.deb`。标准输出包含构建进度，调用方应按版本
 构造文件名，不能将整个 stdout 当作路径。版本须为合法 Debian 版本，发布新内容时
 递增版本；可用 `dpkg --compare-versions` 检查先后。构建先写独立临时目录，成功后
 替换同名产物；失败不覆盖原产物。`dpkg-deb --root-owner-group` 固定包内 root:root
@@ -275,7 +275,7 @@ systemctl show e87n-display.service -p NRestarts -p ExecMainStatus
 在已启动的目标 Debian 系统安装或升级：
 
 ```sh
-sudo apt-get install ./e87n-display_1.3.1-1_all.deb
+sudo apt-get install ./e87n-display_1.3.2-1_all.deb
 dpkg-query -W -f='${Package} ${Version} ${Status}\n' e87n-display
 dpkg-query -L e87n-display
 systemctl status e87n-display.service
@@ -309,7 +309,7 @@ disable/mask 的选择，禁用且未运行的服务不会被升级启动。手�
 
 ```sh
 sudo apt-get -y -o Dpkg::Options::=--force-confdef \
-  -o Dpkg::Options::=--force-confold install ./e87n-display_1.3.1-1_all.deb
+  -o Dpkg::Options::=--force-confold install ./e87n-display_1.3.2-1_all.deb
 sudo e87nctl display off          # 卸载前明确关闭背光并停止显示采样
 sudo apt-get remove e87n-display  # 卸载服务；保留配置及服务启用状态记录
 sudo apt-get purge e87n-display   # 删除包的 conffile 与 helper 状态

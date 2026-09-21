@@ -16,10 +16,13 @@ Commands:
   e87nctl fan status
   e87nctl fan test 1 5
   e87nctl acceleration status
+  e87nctl display config
   e87nctl display brightness 20
   e87nctl display screen thermal
-  e87nctl display theme dark
+  e87nctl display theme aurora
+  e87nctl display refresh 2
   e87nctl display rotation on
+  e87nctl display rotation off
   e87nctl display rotation-seconds 3
   e87nctl display pages overview,cpu,memory,thermal,fan,network,traffic,storage
   e87nctl display off
@@ -29,6 +32,11 @@ Display settings: /etc/e87n/display.json
 Module configuration: /etc/modules-load.d/e87n-display.conf
 Both are dpkg conffiles. Use --force-confdef --force-confold with unattended
 dpkg upgrades when existing local settings must take precedence.
+Display write commands require root. The daemon reloads the validated config on
+every refresh cycle, so theme, page and rotation changes normally need no
+service restart. Brightness and logical on/off state are applied immediately.
+`brightness 0` keeps sampling and drawing with a dark backlight; `display off`
+also disables sampling and drawing while preserving the saved brightness.
 
 Themes are dark, aurora and light colour skins over the same data semantics and
 availability rules.
@@ -38,6 +46,9 @@ automatic-rotation page. An unavailable fixed page temporarily falls back to
 overview and returns to the configured page when telemetry recovers. The current
 device has no usable storage-temperature telemetry, so storage is configurable
 but skipped at runtime.
+The traffic page shows cumulative RX/TX totals, not an instantaneous rate. The
+fan page shows user-facing mode, cooling level and PWM percentage; internal
+control strings and unsupported RPM values are not displayed.
 
 Network cards are filtered before layout. `carrier=0` always hides a port,
 regardless of stale addresses or counters. With unknown carrier, a port is shown
@@ -45,6 +56,8 @@ only when it has a valid IPv4 or global IPv6 address; link-local IPv6 alone is
 not enough. A single visible port uses a full-width card.
 Automatic page rotation is disabled by default; enable it with `e87nctl display
 rotation on` and choose a 2-60 second interval with `rotation-seconds`.
+Set `rotation off` before `screen PAGE` when a fixed page is required. The pages
+command only saves the rotation list and order; it does not enable rotation.
 
 The service e87n-display.service is enabled at installation, respecting
 administrator disable/mask choices on upgrades. Image builds must supply
@@ -52,7 +65,14 @@ an executable /usr/sbin/policy-rc.d returning 101 to inhibit activation.
 An ordinary image chroot has no running systemd. The package neither starts
 hardware directly nor creates or replaces policy-rc.d.
 
-Removal stops the display and preserves conffiles; purge removes the package's
-conffiles and helper state. Other board data and administrator overrides
-are not recursively deleted. Service errors do not block package configuration;
-inspect systemctl status e87n-display.service and its journal after boot.
+Before removal, run `e87nctl display off` to switch off the backlight. Stopping
+the service or removing the package alone can leave the last framebuffer image
+and backlight visible. Removal stops the service and preserves conffiles; purge
+removes the package's conffiles and helper state. Other board data and
+administrator overrides are not recursively deleted. Service errors do not
+block package configuration; inspect systemctl status e87n-display.service and
+its journal after boot.
+
+The complete Chinese update, configuration, rollback and troubleshooting guide
+is maintained at:
+https://github.com/baozaodetudou/EDGEPI-E87N/blob/main/docs/DISPLAY-USER-GUIDE.md
