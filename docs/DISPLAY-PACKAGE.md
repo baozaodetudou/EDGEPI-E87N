@@ -10,6 +10,12 @@
 独立 deb 用于升级和重新安装，不表示基础镜像默认无屏幕。
 candidate3 属于此前的 headless 配置，其验收不能替代当前显示配置的重建与实机测试。
 
+显示包通过独立的 Display workflow / Release 发布。每个 Display Release 只公开一个
+`e87n-display_<version>_all.deb`，不包含 firmware TAR。固件构建仍会从同一份源码生成一个
+基线 deb、预装到 rootfs 并交给 QEMU 验证；这只绑定固件内的预装基线，不要求后续 Display
+Release 与 Firmware Release 使用相同 tag、run、版本或 SHA-256。兼容的显示更新可以独立
+高频发布，无需重建固件。
+
 ### NV3007 framebuffer 兼容性
 
 Linux fbtft 的 `fb_nv3007` 会在 `fb_var_screeninfo.nonstd` 中返回
@@ -33,7 +39,10 @@ stride、偏移和 framebuffer 内存边界。
 构造文件名，不能将整个 stdout 当作路径。版本须为合法 Debian 版本，发布新内容时
 递增版本；可用 `dpkg --compare-versions` 检查先后。构建先写独立临时目录，成功后
 替换同名产物；失败不覆盖原产物。`dpkg-deb --root-owner-group` 固定包内 root:root
-所有权；构建脚本默认 `SOURCE_DATE_EPOCH=0`，CI 明确固定为 0，以便独立 job 的 deb 与 QEMU 实际测试的 deb 精确比对 SHA-256。macOS 缺少 dpkg 时会明确报错，可在已有 Linux VM 中构建。
+所有权；构建脚本默认 `SOURCE_DATE_EPOCH=0`。Firmware workflow 固定该值，用于确认预装
+基线包与 QEMU 实际测试包来自同一构建输入；Display workflow 对自己发布的 deb 独立记录
+SHA-256。两个通道的 deb 不要求逐字节相同。macOS 缺少 dpkg 时会明确报错，可在已有 Linux
+VM 中构建。
 
 ## 包内容与边界
 
@@ -62,12 +71,13 @@ NOTICE 或 docs；许可证声明位于 packaging 内。没有风扇控制守护
 
 ## 普通用户安装与升级
 
-发布附件中的 `e87n-display_<版本>_all.deb` 是**已经启动的 Debian 系统的独立软件包**，
+Display Release 中的 `e87n-display_<version>_all.deb` 是**已经启动的 Debian 系统的独立软件包**，
 不是 U-Boot 固件，也不是整盘镜像。安装或升级它不会改写 U-Boot、内核、DTB、initrd、
 rootfs 分区或风扇控制器；屏幕硬件仍必须由 E87N 内核提供 `fb_nv3007` 和背光节点。
 
-先从同一个 GitHub Release 下载 `.deb`，在电脑上校验 SHA-256，然后上传到设备。设备默认
-通过 DHCP 获取地址，下面的 `<设备IP>` 替换成路由器租约中的地址：
+先从目标 Display Release 下载 `.deb`，按该 Release 正文校验 SHA-256，然后上传到设备。
+不要从 Firmware Release 寻找 deb，也不需要让 display 版本与固件版本相同。设备默认通过
+DHCP 获取地址，下面的 `<设备IP>` 替换成路由器租约中的地址：
 
 ```sh
 # macOS

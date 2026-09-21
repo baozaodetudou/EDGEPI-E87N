@@ -6,7 +6,7 @@
 > [REFACTOR-ACCEPTANCE.md](REFACTOR-ACCEPTANCE.md)。文中的 R4 打包记录是历史流程；
 > candidate3 也使用旧 headless 配置，不能作为当前预装显示配置已完成验收的依据。
 
-当前配方采用 [DEFAULTS.md](DEFAULTS.md) 定义的显示/风扇最小系统：`root` / `doumao`、SSH 22 密码登录、networkd/netplan DHCP、`Asia/Shanghai`、`zh_CN.UTF-8` 和正常 APT。新 rootfs 预装 `e87n-display`，启用 LCD/背光节点、模块自动加载配置及显示服务；同版本包也单独构建发布。没有首次创建用户向导或强制公钥门槛，额外存储模块默认 `E87N_EXTRA_STORAGE=no`。
+当前配方采用 [DEFAULTS.md](DEFAULTS.md) 定义的显示/风扇最小系统：`root` / `doumao`、SSH 22 密码登录、networkd/netplan DHCP、`Asia/Shanghai`、`zh_CN.UTF-8` 和正常 APT。新 rootfs 预装从同一源码生成的 `e87n-display` 基线包，启用 LCD/背光节点、模块自动加载配置及显示服务；Firmware Release 只发布固件 TAR，Display Release 另行发布可升级的 deb。没有首次创建用户向导或强制公钥门槛，额外存储模块默认 `E87N_EXTRA_STORAGE=no`。
 
 当前交付为[原厂 U-Boot 未压缩 USTAR 固件](UBOOT-FIRMWARE.md)，Armbian `.img` / `.img.xz` 只作中间产物或历史证据，不可刷写。R4 本地已生成并独立审计 EXIT 0；R4 重新打包历史 Actions 34737922588 的原始 RAW，修正 DTB 的 1 GiB/保留区及 bootargs（含 902 等效修正），没有完整重编 Armbian 或内核。V3 因内核地址修正已废弃，主机导出及 SHA-256 比对已完成。没有 E87N 重启、刷写、完整恢复备份、已实测控制通道或板上 RAM 测试记录。
 
@@ -30,7 +30,7 @@
 | 用户空间与固件 | `board-support/`、`packaging/e87n-display/`、`scripts/build-display-deb.sh`、`userpatches/customize-image.sh`、`firmware/`；PHY 固件安装前检查 SHA-256 与大小 |
 | 额外存储模块 | `E87N_EXTRA_STORAGE=no`；只有显式设为 `yes` 才请求额外 DM/RAID 等模块 |
 
-这些 pin 固定框架和内核源码，不构成逐字节可复现的整个系统快照。`customize-image.sh` 从 Debian 签名软件源更新软件包，安装 SSH/网络/时间与 locale 基础依赖，并构建、预装 `e87n-display`。独立 job 另外构建用于发布升级的 deb；CI 固定 `SOURCE_DATE_EPOCH=0` 并核对该包与 QEMU 实际测试包的 SHA-256。显示包依赖 `python3`、`python3-pil`、`fonts-dejavu-core` 和 `fonts-wqy-microhei`，独立版本与升级方法见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)。
+这些 pin 固定框架和内核源码，不构成逐字节可复现的整个系统快照。`customize-image.sh` 从 Debian 签名软件源更新软件包，安装 SSH/网络/时间与 locale 基础依赖，并构建、预装 `e87n-display`。Firmware workflow 固定 `SOURCE_DATE_EPOCH=0`，核对预装基线包与 QEMU 实际测试包的 SHA-256；该基线只属于固件验收，不作为 Firmware Release 的独立附件。Display workflow 另行构建、测试并发布可升级的 deb，版本和发布节奏独立。显示包依赖 `python3`、`python3-pil`、`fonts-dejavu-core` 和 `fonts-wqy-microhei`，独立版本与升级方法见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)。
 
 重建特定候选时，应保留该候选的仓库输入、框架兼容修补、最终内核配置、构建参数、主机/容器版本、包版本、日志和校验清单。候选记录中的冻结输入归档和 release 整理属于当次人工交付步骤，`build.sh` 不会自动生成同样的 release 目录或证明新镜像与旧镜像哈希相同。
 
@@ -197,7 +197,7 @@ sudo -n python3 scripts/verify-factory-firmware.py /path/to/candidate-uboot-firm
 
 当前默认显示配置不传 `--headless`，并在 raw 阶段使用 `verify-image.sh --release trixie --require-usb-root --require-display-fan --require-system`。保留的 headless 选项只用于与之匹配的旧配置，不能用来绕过当前显示检查。
 
-转换器处理主机私有文件副本，不连接板卡或修改输入镜像。需要 Linux root、loop/只读挂载工具、Python 3、e2fsprogs、device-tree-compiler、u-boot-tools、initramfs-tools-core、kmod、zstd 及主机 C 编译器等；完整依赖以脚本和 CI 准备步骤为准。`./build.sh` 生成中间镜像不等于已完成这两步。最终还需按 [CONTAINER-TESTING.md](CONTAINER-TESTING.md) 将同次构建的 TAR 和独立 deb 交给 Docker/QEMU，保留精确绑定产物的报告。
+转换器处理主机私有文件副本，不连接板卡或修改输入镜像。需要 Linux root、loop/只读挂载工具、Python 3、e2fsprogs、device-tree-compiler、u-boot-tools、initramfs-tools-core、kmod、zstd 及主机 C 编译器等；完整依赖以脚本和 CI 准备步骤为准。`./build.sh` 生成中间镜像不等于已完成这两步。最终还需按 [CONTAINER-TESTING.md](CONTAINER-TESTING.md) 将同次构建的 TAR 和同源基线 deb 交给 Docker/QEMU，保留固件与其预装 display 基线的精确绑定报告。Display workflow 后续发布的 deb 不需要与该报告绑定，也不要求重建 TAR。
 
 新实现把原 bootfs 复制到 root 内 `/boot`，移除旧独立 `/boot` 挂载，禁用通用 Armbian resize 并安装严格验证布局的 p5 专用 resize2fs 服务；factory MAC helper 在 DHCP 前只读 p2 的 `0x24`/`0x2a`。内核/DTB hold 必须保留。
 

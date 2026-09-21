@@ -198,6 +198,7 @@ def validate(root, kind, args, version):
         tested = [n for n in files if n.startswith("packages/simulation/")]
         require(tested == [f"packages/simulation/e87n-display_{version}_all.deb"],
                 "expected one versioned simulation display package")
+        require((root / tested[0]).stat().st_size > 0, "empty simulation display package")
         require("validation/qemu/result.json" in files, "missing simulation evidence")
         simulation.verify_report(
             simulation.load_report(root / "validation/qemu/result.json"),
@@ -219,61 +220,31 @@ def archive(output, members):
                 bundle.addfile(info, source)
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    for option in ("image-artifact", "display-artifact", "output", "source-commit", "run-id", "run-attempt", "tag", "repository"):
-        parser.add_argument("--" + option, required=True)
-    args = parser.parse_args()
-    for value, pattern in ((args.source_commit, r"[0-9a-fA-F]{40}"), (args.run_id, r"[0-9]+"),
-                           (args.run_attempt, r"[0-9]+"), (args.tag, r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}"),
-                           (args.repository, r"[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9][A-Za-z0-9._-]{0,99}")):
-        require(re.fullmatch(pattern, value) is not None, "invalid release argument: " + repr(value))
-    require(".." not in args.tag and not args.tag.endswith((".", ".lock")), "unsafe release tag")
-    output = checked_path(args.output)
-    require(not output.exists(), "output already exists; refusing to overwrite")
-    for artifact in (args.image_artifact, args.display_artifact):
-        require(not output.is_relative_to(checked_path(artifact)), "output overlaps input artifact")
-    version = small_text(REPO / "packaging/e87n-display/VERSION", 128).strip()
-    require(re.fullmatch(r"[0-9][A-Za-z0-9.+~\-]*", version) is not None, "invalid display VERSION")
-    image = validate(args.image_artifact, "image", args, version)
-    display = validate(args.display_artifact, "display", args, version)
-    # The independent package job must publish the exact bytes tested in QEMU.
-    simulation.verify_report(
-        simulation.load_report(image[0] / "validation/qemu/result.json"),
-        firmware_sha256=image[1][image[2][0]], display_sha256=display[1][display[3][0]],
-        source_commit=args.source_commit, run_id=args.run_id, run_attempt=args.run_attempt)
-    output.mkdir(parents=True, exist_ok=False)
-    for artifact, name, target in ((image, image[2][0], Path(image[2][0]).name),
-                                   (display, display[3][0], Path(display[3][0]).name),
-                                   (image, "build-metadata.json", "image-build-metadata.json"),
-                                   (image, "validation/qemu/result.json", "simulation-result.json"),
-                                   (display, "build-metadata.json", "display-build-metadata.json")):
-        with Reader(artifact[0] / name, artifact[1][name]) as source, (output / target).open("xb") as dest:
-            shutil.copyfileobj(source, dest, CHUNK)
-    archive(output / "kernel-packages.tar.xz", [(image[0] / n, n, image[1][n]) for n in image[3]])
-    archive(output / "build-evidence.tar.xz", [
-        (artifact[0] / n, kind + "/" + n, checksum)
-        for kind, artifact in (("image", image), ("display", display))
-        for n, checksum in sorted(artifact[1].items())
-        if n in ("SHA256SUMS", "build-metadata.json") or n.startswith(("logs/", "validation/"))])
-    base = "https://github.com/" + args.repository
-    image_name, display_name = Path(image[2][0]).name, Path(display[3][0]).name
-    download_base = base + "/releases/download/" + quote(args.tag, safe="")
-    notes = f"""# E87N {args.tag} — experimental release
+def copy_file(source, checksum, target):
+    with Reader(source, checksum) as reader, target.open("xb") as destination:
+        shutil.copyfileobj(reader, destination, CHUNK)
 
-## 下载 / Downloads
+
+def firmware_notes(args, artifact, version):
+    _, hashes, images, _ = artifact
+    image_name = Path(images[0]).name
+    tested_display = f"packages/simulation/e87n-display_{version}_all.deb"
+    base = "https://github.com/" + args.repository
+    download_base = base + "/releases/download/" + quote(args.tag, safe="")
+    return f"""# E87N firmware {args.tag} — experimental release
+
+## 下载 / Download
 
 - [实验性 U-Boot 系统固件（.tar）]({download_base}/{quote(image_name, safe='')})
-- [屏幕控制安装包（.deb）]({download_base}/{quote(display_name, safe='')})
 
-本 Release 仅有以上两个二进制附件：系统固件是稳定基础系统，屏幕程序作为独立安装包提供，待屏幕驱动完成实机验证后安装/升级。
-GitHub 自带的 Source code (zip/tar.gz) 是源码，不是可刷写固件。
+本 Firmware Release 只有以上一个二进制附件。GitHub 自带的 Source code
+(zip/tar.gz) 是源码，不是可刷写固件。屏幕安装包使用独立的 Display Release
+发布；升级屏幕程序不需要重新构建或刷写固件。
 
 ## SHA-256
 
 ```text
-{image[1][image[2][0]]}  {image_name}
-{display[1][display[3][0]]}  {display_name}
+{hashes[images[0]]}  {image_name}
 ```
 
 下载后运行 `sha256sum 文件名`（macOS：`shasum -a 256 文件名`），与上面的摘要比较。
@@ -286,14 +257,19 @@ Default login: root / doumao over SSH port 22. First connect only to a trusted
 LAN; change the public default password immediately after login with `passwd`.
 Wired interfaces request DHCP; locale zh_CN.UTF-8, timezone Asia/Shanghai.
 
-Experimental firmware: software validated by static checks and same-build Docker/QEMU acceptance, NOT hardware validated.
-The QEMU virt guest uses this firmware's kernel/initrd and a private copy of its
-production rootfs. Its emulated hardware does not validate MT7987 peripherals or
-the real U-Boot handoff. The tested display package matches the download SHA-256.
-No board has been validated: boot, networking, display and thermal behavior still
-require hardware testing. The uncompressed USTAR archive uses format
-`{FORMAT}` and contains `sysupgrade-edgepi-e87n/kernel` (FIT)
-and `sysupgrade-edgepi-e87n/root` (ext4).
+The firmware passed static checks and same-build Docker/QEMU acceptance. The
+QEMU guest used this firmware's kernel/initrd, a private copy of its production
+rootfs, and the embedded baseline display package `{Path(tested_display).name}`
+(SHA-256 `{hashes[tested_display]}`). That package is retained as Actions build
+evidence and is not a second Release download. Newer display packages may be
+published independently.
+
+The complete firmware path is not hardware validated: real U-Boot handoff,
+networking, storage, reboot/recovery and long-duration thermal behavior still
+require board testing. Separate real-board validation of a display package does
+not establish those whole-firmware properties. The uncompressed USTAR archive
+uses format `{FORMAT}` and contains `sysupgrade-edgepi-e87n/kernel` (FIT) and
+`sysupgrade-edgepi-e87n/root` (ext4).
 
 Use this .tar only in the original U-Boot recovery page's `firmware` field.
 Never use the SIMG, GPT or FIP fields; never use LuCI sysupgrade or the OpenWrt
@@ -303,20 +279,96 @@ eMMC GPT, boot chain and factory data) and a successful hardware RAM test boot
 of this candidate are required before any flash. This release does not establish
 either prerequisite and provides no whole-eMMC installer.
 
-此固件为实验版本，已通过软件静态校验及同构建 Docker/QEMU 验收，尚未经过硬件验证。仅可用于原厂 U-Boot
-恢复页面的 `firmware` 字段，禁止用于 SIMG/GPT/FIP 或 LuCI sysupgrade。
-刷写前必须完成并验证恢复备份，并通过本候选固件的硬件 RAM 启动测试。
+此固件为实验版本，已通过软件静态校验及同构建 Docker/QEMU 验收，但完整固件路径仍需实机验证。
+仅可用于原厂 U-Boot 恢复页面的 `firmware` 字段，禁止用于 SIMG/GPT/FIP 或 LuCI
+sysupgrade。刷写前必须完成并验证恢复备份，并通过本候选固件的硬件 RAM 启动测试。
 
-The standalone e87n-display .deb comes from the independent display job.
-Kernel packages, metadata, checksum manifests and full logs remain in the
-source build's Actions artifacts (14-day retention); they are not extra
-installation downloads on this Release. The source tag and commit remain
-available alongside these two binary downloads.
+Kernel packages, metadata, checksum manifests, the QEMU-tested baseline display
+package and full logs remain in the source build's Actions artifacts (14-day
+retention); they are not extra installation downloads on this Release.
 
 Source: {base}/commit/{args.source_commit}
 Build run: {base}/actions/runs/{args.run_id}
 Run attempt: {base}/actions/runs/{args.run_id}/attempts/{args.run_attempt}
 """
+
+
+def display_notes(args, artifact, version):
+    _, hashes, _, packages = artifact
+    package_name = Path(packages[0]).name
+    base = "https://github.com/" + args.repository
+    download_base = base + "/releases/download/" + quote(args.tag, safe="")
+    return f"""# E87N display {version}
+
+## 下载 / Download
+
+- [屏幕控制安装包（.deb）]({download_base}/{quote(package_name, safe='')})
+
+本 Display Release 只有以上一个二进制附件。它独立于 Firmware Release 发布，
+安装或升级屏幕包不需要重新构建、下载或刷写 ARM64 固件镜像。GitHub 自带的
+Source code (zip/tar.gz) 是源码，不是 Debian 安装包。
+
+## SHA-256
+
+```text
+{hashes[packages[0]]}  {package_name}
+```
+
+下载后运行 `sha256sum 文件名`（macOS：`shasum -a 256 文件名`），与上面的摘要比较。
+在目标 Debian 系统中可使用 `sudo apt-get install ./包名.deb` 安装；包管理器会独立
+记录 display 版本。固件镜像内的基线版本可能更旧，这是两个发布通道的预期行为。
+
+`e87n-display 1.2.0-1` 已有单独的实体设备验收记录；当前 Release 的具体版本、
+提交和设备适配状态仍应以本次构建及项目验收文档为准。显示包验收不代表完整固件、
+U-Boot 恢复、网络、存储或长期散热均已通过实机验证。
+
+Metadata, checksum manifests and full logs remain in the source build's Actions
+artifacts (14-day retention); they are not extra installation downloads on this Release.
+
+Source: {base}/commit/{args.source_commit}
+Build run: {base}/actions/runs/{args.run_id}
+Run attempt: {base}/actions/runs/{args.run_id}/attempts/{args.run_attempt}
+"""
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--kind", required=True, choices=("image", "display"))
+    for option in ("artifact", "output", "source-commit", "run-id", "run-attempt", "tag", "repository"):
+        parser.add_argument("--" + option, required=True)
+    args = parser.parse_args()
+    for value, pattern in ((args.source_commit, r"[0-9a-fA-F]{40}"), (args.run_id, r"[0-9]+"),
+                           (args.run_attempt, r"[0-9]+"), (args.tag, r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}"),
+                           (args.repository, r"[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9][A-Za-z0-9._-]{0,99}")):
+        require(re.fullmatch(pattern, value) is not None, "invalid release argument: " + repr(value))
+    require(".." not in args.tag and not args.tag.endswith((".", ".lock")), "unsafe release tag")
+    output = checked_path(args.output)
+    require(not output.exists(), "output already exists; refusing to overwrite")
+    artifact_root = checked_path(args.artifact)
+    require(not output.is_relative_to(artifact_root), "output overlaps input artifact")
+    version = small_text(REPO / "packaging/e87n-display/VERSION", 128).strip()
+    require(re.fullmatch(r"[0-9][A-Za-z0-9.+~\-]*", version) is not None, "invalid display VERSION")
+    artifact = validate(artifact_root, args.kind, args, version)
+    output.mkdir(parents=True, exist_ok=False)
+    root, hashes, images, packages = artifact
+    if args.kind == "image":
+        tested_display = f"packages/simulation/e87n-display_{version}_all.deb"
+        for name, target in ((images[0], Path(images[0]).name),
+                             (tested_display, Path(tested_display).name),
+                             ("build-metadata.json", "image-build-metadata.json"),
+                             ("validation/qemu/result.json", "simulation-result.json")):
+            copy_file(root / name, hashes[name], output / target)
+        archive(output / "kernel-packages.tar.xz", [(root / n, n, hashes[n]) for n in packages])
+        notes = firmware_notes(args, artifact, version)
+    else:
+        for name, target in ((packages[0], Path(packages[0]).name),
+                             ("build-metadata.json", "display-build-metadata.json")):
+            copy_file(root / name, hashes[name], output / target)
+        notes = display_notes(args, artifact, version)
+    archive(output / "build-evidence.tar.xz", [
+        (root / n, args.kind + "/" + n, checksum)
+        for n, checksum in sorted(hashes.items())
+        if n in ("SHA256SUMS", "build-metadata.json") or n.startswith(("logs/", "validation/"))])
     (output / "RELEASE-NOTES.md").write_text(notes, encoding="utf-8")
     with (output / "SHA256SUMS").open("x", encoding="utf-8") as checksums:
         for path in sorted(output.iterdir()):

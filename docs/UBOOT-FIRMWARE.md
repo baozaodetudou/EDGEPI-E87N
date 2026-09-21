@@ -2,6 +2,10 @@
 
 当前交付格式为 `<basename>-uboot-firmware.tar`：面向这台 E87N 原厂 U-Boot Web 恢复页 plain firmware（Web 类型 `fw`）的**未压缩 USTAR**。包内运行的是 Debian 13 Trixie / Armbian；`sysupgrade-` 目录名只是厂商解析器约定，不表示采用 OpenWrt rootfs，也不表示可用 LuCI sysupgrade 安装。
 
+Firmware Release 只公开这一个 TAR。固件 rootfs 内预装构建时同源生成、并随固件完成 QEMU
+验证的 `e87n-display` 基线包，但不会在 Firmware Release 中额外发布 deb。后续显示程序由
+独立 Display Release 发布，可以在兼容固件上升级，无需重建或重新刷写 TAR。
+
 ## 冻结 candidate3（旧 headless 配置）
 
 当前源码默认预装显示包并启用 LCD/背光。candidate3 的下列哈希及验收结果保留为旧配置证据，不能视为当前显示配置已经重新构建或验收。

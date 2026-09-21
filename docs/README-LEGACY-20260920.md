@@ -1,5 +1,9 @@
 # Historical README: before the maintained MT7987 refactor
 
+> 历史发布范围：下文保留当时“单一 workflow 同时发布 firmware + display”的原始说明，
+> 不应用于当前下载或发布操作。当前两个独立通道见
+> [GITHUB-ACTIONS.md](GITHUB-ACTIONS.md) 和 [DOWNLOADS.md](DOWNLOADS.md)。
+
 This file preserves the previous 6.18.51 description. It is not the current
 build, download or acceptance status. Follow the repository README instead.
 

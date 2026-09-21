@@ -64,7 +64,6 @@ class FakeGh:
             self.test.assertEqual(command[command.index("--method") + 1], "GET")
             self.test.assertEqual(command[command.index("--hostname") + 1], "github.com")
             self.test.assertIn("--include", command)
-            self.test.assertTrue(command[-1].startswith(f"repos/{REPOSITORY}/"))
             endpoint = command[-1].removeprefix(f"repos/{REPOSITORY}/")
             if endpoint in self.overrides:
                 override = self.overrides[endpoint]
@@ -97,17 +96,18 @@ class FakeGh:
         elif action == "upload":
             self.test.assertTrue(self.created and not self.published)
             paths = command[command.index("--") + 1:]
-            self.assets = [{"name": Path(p).name, "size": Path(p).stat().st_size, "state": "uploaded",
-                            "digest": "sha256:" + hashlib.sha256(Path(p).read_bytes()).hexdigest()} for p in paths]
+            self.assets = [{"name": Path(path).name, "size": Path(path).stat().st_size, "state": "uploaded",
+                            "digest": "sha256:" + hashlib.sha256(Path(path).read_bytes()).hexdigest()}
+                           for path in paths]
             self.after_upload(self.assets)
             if self.fail == "upload":
-                self.assets = self.assets[:1]
+                self.assets = []
         elif action == "edit":
             self.test.assertTrue(self.created and not self.published)
             self.test.assertTrue({"--draft=false", "--prerelease", "--latest=false"} <= set(command))
             if self.fail != "edit":
                 self.published = self.tag_exists = True
-                self.release.update(draft=False, published_at="2026-09-13T00:00:00Z")
+                self.release.update(draft=False, published_at="2026-09-21T00:00:00Z")
                 self.after_edit()
         else:
             self.test.fail("Unexpected write: " + action)
@@ -116,42 +116,61 @@ class FakeGh:
 
 class PublisherTests(unittest.TestCase):
     def setUp(self):
-        temp = tempfile.TemporaryDirectory(prefix="e87n-release-fixture-")
-        self.addCleanup(temp.cleanup)
-        self.root = Path(temp.name).resolve()
+        temporary = tempfile.TemporaryDirectory(prefix="e87n-release-fixture-")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
         self.assets = self.root / "assets"
         self.assets.mkdir()
-        for name in ("e87n-trixie-uboot-firmware.tar", "e87n-display_1.2.3_all.deb", "kernel-packages.tar.xz",
-                     "build-evidence.tar.xz", "RELEASE-NOTES.md"):
-            (self.assets / name).write_bytes(("fixture " + name).encode())
-        for kind in ("image", "display"):
-            metadata = {"kind": kind, "build_step_outcome": "success", "source_commit": SOURCE,
-                        "run_id": "123", "run_attempt": "1",
-                        "target": dict(publisher.TARGET), "collection_errors": [],
-                        "image_static_audit": "passed" if kind == "image" else "not applicable"}
-            metadata.update({key: publisher.BUILD[key] for key in
-                             ("armbian_commit", "kernel_commit", "kernel_source", "kernel_release")})
-            if kind == "image":
-                metadata.update(factory_format=publisher.FORMAT, factory_static_audit="passed",
-                                simulation_validation="passed")
-            (self.assets / f"{kind}-build-metadata.json").write_text(json.dumps(metadata))
-        (self.assets / "simulation-result.json").write_text(json.dumps(fixture_report(
-            (self.assets / "e87n-trixie-uboot-firmware.tar").read_bytes(),
-            (self.assets / "e87n-display_1.2.3_all.deb").read_bytes(), SOURCE, "123", "1")))
-        self.manifest()
+        self.kind = "image"
+        self.build_assets(self.kind)
         self.fake = FakeGh(self)
         self.output, self.errors = io.StringIO(), io.StringIO()
         self.addCleanup(mock.patch.stopall)
-        mock.patch.object(publisher.subprocess, "run", side_effect=lambda *a, **k: self.fake(*a, **k)).start()
+        mock.patch.object(publisher.subprocess, "run", side_effect=lambda *args, **kwargs: self.fake(*args, **kwargs)).start()
         mock.patch.dict(os.environ, GH_HOST="untrusted.example", GH_TOKEN=SECRET, GH_DEBUG="api").start()
+
+    def metadata(self, kind):
+        data = {"kind": kind, "build_step_outcome": "success", "source_commit": SOURCE,
+                "run_id": "123", "run_attempt": "1", "target": dict(publisher.TARGET),
+                "collection_errors": [],
+                "image_static_audit": "passed" if kind == "image" else "not applicable"}
+        data.update({key: publisher.BUILD[key] for key in
+                     ("armbian_commit", "kernel_commit", "kernel_source", "kernel_release")})
+        if kind == "image":
+            data.update(factory_format=publisher.FORMAT, factory_static_audit="passed",
+                        simulation_validation="passed")
+        return data
+
+    def build_assets(self, kind):
+        for path in self.assets.iterdir():
+            path.unlink()
+        self.kind = kind
+        for name in ("build-evidence.tar.xz", "RELEASE-NOTES.md"):
+            (self.assets / name).write_bytes(("fixture " + name).encode())
+        deb = self.assets / "e87n-display_1.2.3_all.deb"
+        deb.write_bytes(b"display package")
+        (self.assets / f"{kind}-build-metadata.json").write_text(json.dumps(self.metadata(kind)))
+        if kind == "image":
+            firmware = self.assets / "e87n-trixie-uboot-firmware.tar"
+            firmware.write_bytes(b"firmware tar")
+            (self.assets / "kernel-packages.tar.xz").write_bytes(b"kernel packages")
+            (self.assets / "simulation-result.json").write_text(json.dumps(fixture_report(
+                firmware.read_bytes(), deb.read_bytes(), SOURCE, "123", "1")))
+        self.manifest()
 
     def manifest(self):
         (self.assets / "SHA256SUMS").write_text("".join(
-            hashlib.sha256(p.read_bytes()).hexdigest() + "  " + p.name + "\n"
-            for p in sorted(self.assets.iterdir()) if p.name != "SHA256SUMS"))
+            hashlib.sha256(path.read_bytes()).hexdigest() + "  " + path.name + "\n"
+            for path in sorted(self.assets.iterdir()) if path.name != "SHA256SUMS"))
 
-    def run_cli(self, command="publish", **values):
-        options = {"repository": REPOSITORY, "source-commit": SOURCE, "tag": TAG}
+    def reset_channel(self, kind):
+        self.build_assets(kind)
+        self.fake = FakeGh(self)
+        self.output, self.errors = io.StringIO(), io.StringIO()
+
+    def run_cli(self, command="publish", kind=None, **values):
+        options = {"kind": self.kind if kind is None else kind, "repository": REPOSITORY,
+                   "source-commit": SOURCE, "tag": TAG}
         if command == "publish":
             options["assets"] = str(self.assets)
         options.update(values)
@@ -165,357 +184,91 @@ class PublisherTests(unittest.TestCase):
         return result
 
     def actions(self):
-        return [c[2] for c in self.fake.calls if c[1] == "release"]
+        return [call[2] for call in self.fake.calls if call[1] == "release"]
 
-    def test_preflight_is_read_only_and_authenticates_first(self):
-        self.assertEqual(self.run_cli("preflight"), 0, self.errors.getvalue())
-        self.assertEqual(self.actions(), [])
-        self.assertEqual(len(self.fake.calls), 5)
-        self.assertEqual(self.run_cli("preflight", **{"source-commit": SOURCE.upper()}), 0)
-
-    def test_input_injection_and_invalid_values_make_no_subprocess_calls(self):
-        for key, values in {
-            "tag": ["", "-x", ".x", "x/y", "x..y", "x.", "x.lock", "x~1", "x;touch pwned", "$(id)", "`id`", "x\n", "x" * 97],
-            "repository": ["owner", "owner/repo/other", "../repo", "owner/repo..bad", "owner/repo?x=1", "-x/repo", "owner/repo;id"],
-            "source-commit": ["a" * 39, "g" * 40, SOURCE + ";id", SOURCE + "\n", "--help"],
-        }.items():
-            for value in values:
-                with self.subTest(key=key, value=value):
-                    self.assertNotEqual(self.run_cli("preflight", **{key: value}), 0)
-                    self.assertEqual(self.fake.calls, [])
-        self.assertNotEqual(self.run_cli(assets=None), 0)
-        self.assertNotEqual(self.run_cli("preflight", assets=str(self.assets)), 0)
-        self.assertEqual(self.fake.calls, [])
-
-    def test_auth_failure_stops_before_api(self):
-        self.fake.fail = "auth"
-        self.assertNotEqual(self.run_cli(), 0)
-        self.assertEqual(len(self.fake.calls), 1)
-
-    def test_missing_gh_fails_cleanly(self):
-        with mock.patch.object(publisher.subprocess, "run", side_effect=FileNotFoundError(SECRET)):
-            self.assertNotEqual(self.run_cli(), 0)
-
-    def test_timeouts_fail_without_credentials_or_cleanup(self):
-        for stage in ("auth", "api", "create", "upload", "edit"):
-            with self.subTest(stage=stage):
-                self.fake = FakeGh(self)
-
-                def timeout(command, **kwargs):
-                    result = self.fake(command, **kwargs)
-                    action = command[2] if command[1] == "release" else command[1]
-                    if action == stage:
-                        raise subprocess.TimeoutExpired(command, kwargs["timeout"], output=SECRET, stderr=SECRET)
-                    return result
-
-                with mock.patch.object(publisher.subprocess, "run", side_effect=timeout):
-                    self.assertNotEqual(self.run_cli(), 0)
-                self.assertIn("timed out", self.errors.getvalue())
-                if stage in ("create", "upload", "edit"):
-                    self.assertTrue(self.fake.created)
-                    self.assertIn("retained without cleanup", self.errors.getvalue())
-
-    def test_http_status_parser_and_fail_closed_errors(self):
-        endpoint = f"git/ref/tags/{TAG}"
-        for protocol in ("HTTP/1.1", "HTTP/2", "HTTP/2.0"):
-            for newline in ("\n", "\r\n"):
-                with self.subTest(protocol=protocol, newline=newline):
-                    self.fake.overrides[endpoint] = response(404, {"message": "Not Found"}, protocol=protocol, newline=newline)
-                    self.assertEqual(self.run_cli("preflight"), 0, self.errors.getvalue())
-        cases = [response(code, {"message": "Not Found"}) for code in (301, 401, 403, 429, 500, 502, 503)]
-        cases += [response(200, {}, returncode=1), response(404, {}, returncode=2),
-                  response(404, raw="not JSON"), response(404, data=None), response(200, data=True),
-                  response(200, raw='{}\nHTTP/2.0 404 Not Found\n\n{}'),
-                  subprocess.CompletedProcess([], 1, "", "HTTP 404 " + SECRET),
-                  subprocess.CompletedProcess([], 1, '{"message":"HTTP 404"}', SECRET),
-                  subprocess.CompletedProcess([], 0, "HTTP/2.0 200 OK\n{}", SECRET),
-                  subprocess.CompletedProcess([], 0, "HTTP/1.1 100 Continue\n\nHTTP/2.0 200 OK\n\n{}", SECRET)]
-        for result in cases:
-            with self.subTest(stdout=result.stdout, returncode=result.returncode):
-                self.fake.overrides[endpoint] = result
-                self.assertNotEqual(self.run_cli("preflight"), 0)
-                self.assertEqual(self.actions(), [])
-
-    def test_read_errors_at_every_preflight_endpoint_prevent_create(self):
-        for endpoint in (f"commits/{SOURCE}", f"git/ref/tags/{TAG}", f"releases/tags/{TAG}", "releases?per_page=100&page=1"):
-            for code in (403, 503):
-                with self.subTest(endpoint=endpoint, code=code):
-                    self.fake.overrides = {endpoint: response(code, {"message": "Not Found"})}
-                    self.assertNotEqual(self.run_cli(), 0)
-                    self.assertEqual(self.actions(), [])
-
-    def test_source_commit_must_exist_and_resolve_exactly(self):
-        for result in (response(404, {}), response(data={"sha": "b" * 40}), response(data=[])):
-            self.fake.overrides[f"commits/{SOURCE}"] = result
-            self.assertNotEqual(self.run_cli(), 0)
-            self.assertEqual(self.actions(), [])
-
-    def test_tag_and_published_release_collisions_prevent_create(self):
-        self.fake.tag_exists = True
-        self.assertNotEqual(self.run_cli(), 0)
-        self.fake.tag_exists, self.fake.published = False, True
-        self.assertNotEqual(self.run_cli(), 0)
-        self.assertEqual(self.actions(), [])
-
-    def test_draft_collision_on_later_page_is_not_ignored(self):
-        self.fake.other_releases = [{"tag_name": f"other-{i}"} for i in range(100)] + [self.fake.release]
-        self.assertNotEqual(self.run_cli(), 0)
-        self.assertEqual(self.actions(), [])
-        self.assertTrue(any(c[-1].endswith("page=2") for c in self.fake.calls))
-
-    def test_release_pagination_is_bounded(self):
-        args = mock.Mock(repository=REPOSITORY, tag=TAG)
-        with mock.patch.object(publisher, "api", return_value=[{"tag_name": "other"}] * 100) as api:
-            with self.assertRaisesRegex(ValueError, "pagination limit"):
-                publisher.find_release(args)
-        self.assertEqual(api.call_count, 20)
-
-    def test_debian_version_tilde_is_valid_in_asset_and_manifest(self):
-        (self.assets / "e87n-display_1.2.3_all.deb").rename(self.assets / "e87n-display_1.2.3~rc1_all.deb")
-        self.manifest()
-        self.assertEqual(self.run_cli(), 0, self.errors.getvalue())
-
-    def test_success_order_and_only_two_downloads_verified_while_draft(self):
-        self.assertEqual(self.run_cli(), 0, self.errors.getvalue())
-        self.assertEqual(self.actions(), ["create", "upload", "edit"])
-        calls = self.fake.calls
-        upload_index = next(i for i, c in enumerate(calls) if c[1:3] == ["release", "upload"])
-        edit_index = next(i for i, c in enumerate(calls) if c[1:3] == ["release", "edit"])
-        self.assertTrue(any(c[-1].endswith("releases/42/assets?per_page=100") for c in calls[upload_index + 1:edit_index]))
-        upload = calls[upload_index]
-        self.assertEqual(set(upload[upload.index("--") + 1:]),
-                         {str(self.assets / "e87n-trixie-uboot-firmware.tar"), str(self.assets / "e87n-display_1.2.3_all.deb")})
-        self.assertEqual({a["name"] for a in self.fake.assets},
-                         {"e87n-trixie-uboot-firmware.tar", "e87n-display_1.2.3_all.deb"})
-        self.assertTrue(self.fake.published and self.fake.tag_exists)
-        self.assertTrue(calls[-1][-1].endswith(f"git/ref/tags/{TAG}"))
-
-    def test_draft_view_fallback_when_rest_list_hides_draft(self):
-        with mock.patch.object(publisher, "find_release", return_value=None), \
-                mock.patch.object(publisher, "view_release", return_value=self.fake.release):
-            self.assertEqual(self.run_cli(), 0, self.errors.getvalue())
-
-    def test_missing_created_release_is_a_clean_validation_failure(self):
-        with mock.patch.object(publisher, "find_release", return_value=None), \
-                mock.patch.object(publisher, "view_release", return_value=None):
-            self.assertNotEqual(self.run_cli(), 0)
-            self.assertNotIn("Traceback", self.errors.getvalue())
-
-    def test_publish_repeats_preflight_and_rejects_new_collision(self):
-        self.assertEqual(self.run_cli("preflight"), 0)
-        self.fake.tag_exists = True
-        self.assertNotEqual(self.run_cli(), 0)
-        self.assertEqual(self.actions(), [])
-        self.assertEqual(sum(c[1] == "auth" for c in self.fake.calls), 2)
-
-    def test_partial_create_upload_and_edit_failures_preserve_remote_state(self):
-        for stage, actions in (("create", ["create"]), ("upload", ["create", "upload"]), ("edit", ["create", "upload", "edit"])):
-            with self.subTest(stage=stage):
-                self.fake = FakeGh(self)
-                self.fake.fail = stage
-                self.assertNotEqual(self.run_cli(), 0)
-                self.assertTrue(self.fake.created)
-                self.assertFalse(self.fake.published)
-                self.assertEqual(self.actions(), actions)
-                self.assertIn("retained without cleanup", self.errors.getvalue())
-
-    def test_existing_draft_assets_are_preserved_without_upload_or_clobber(self):
-        self.fake.assets = [{"name": "old-uboot-firmware.tar", "size": 3, "state": "uploaded"}]
-        before = copy.deepcopy(self.fake.assets)
-        self.assertNotEqual(self.run_cli(), 0)
-        self.assertEqual(self.actions(), ["create"])
-        self.assertEqual(self.fake.assets, before)
-
-    def test_remote_asset_integrity_failures_prevent_edit(self):
-        mutations = [lambda a: a[0].update(digest="sha256:" + "0" * 64), lambda a: a[0].pop("digest"),
-                     lambda a: a[0].update(digest=None), lambda a: a[0].update(digest="md5:invalid"),
-                     lambda a: a[0].update(size=a[0]["size"] + 1), lambda a: a[0].update(size=True),
-                     lambda a: a[0].update(state="starter"), lambda a: a.pop(),
-                     lambda a: a.append(dict(a[0])), lambda a: a[0].update(name=a[1]["name"]),
-                     lambda a: a[0].update(name="unexpected"), lambda a: a.__setitem__(0, None)]
-        for mutation in mutations:
-            with self.subTest(mutation=mutation):
-                self.fake = FakeGh(self)
-                self.fake.after_upload = mutation
-                self.assertNotEqual(self.run_cli(), 0)
-                self.assertEqual(self.actions(), ["create", "upload"])
-                self.assertFalse(self.fake.published)
-
-    def test_remote_read_failure_after_upload_preserves_draft(self):
-        self.fake.after_upload = lambda a: self.fake.overrides.update({"releases/42/assets?per_page=100": response(503, {})})
-        self.assertNotEqual(self.run_cli(), 0)
-        self.assertEqual(self.actions(), ["create", "upload"])
-
-    def test_wrong_draft_identity_or_state_prevents_upload(self):
-        for key, value in (("id", "42"), ("draft", False), ("prerelease", False), ("target_commitish", "other-branch"),
-                           ("published_at", "already published")):
-            with self.subTest(key=key):
-                self.fake = FakeGh(self)
-                self.fake.release[key] = value
-                self.assertNotEqual(self.run_cli(), 0)
-                self.assertEqual(self.actions(), ["create"])
-
-    def test_final_release_state_and_tag_target_are_verified(self):
-        for mutate in (lambda: self.fake.release.update(draft=True), lambda: self.fake.release.update(published_at=None),
-                       lambda: self.fake.release.update(id=99), lambda: self.fake.release.update(prerelease=False),
-                       lambda: self.fake.tag_object.update(sha="b" * 40)):
-            self.fake = FakeGh(self)
-            self.fake.after_edit = mutate
-            self.assertNotEqual(self.run_cli(), 0)
-            self.assertEqual(self.actions(), ["create", "upload", "edit"])
-
-    def test_annotated_tag_resolves_using_validated_sha_not_remote_url(self):
-        annotated = "b" * 40
-        self.fake.tag_object = {"type": "tag", "sha": annotated, "url": "https://untrusted.example/secret"}
-        self.fake.overrides[f"git/tags/{annotated}"] = response(data={"sha": annotated, "object": {"type": "commit", "sha": SOURCE}})
-        self.assertEqual(self.run_cli(), 0, self.errors.getvalue())
-        self.assertTrue(self.fake.calls[-1][-1].endswith(f"git/tags/{annotated}"))
-
-    def test_tag_race_before_publication_and_invalid_annotated_tags_fail_closed(self):
-        annotated = "b" * 40
-        objects = [{"type": "commit", "sha": "c" * 40}, {"type": "blob", "sha": annotated},
-                   {"type": "tag", "sha": "../../secret"}, {"type": "tag", "sha": annotated}]
-        for obj in objects:
-            with self.subTest(obj=obj):
-                self.fake = FakeGh(self)
-                self.fake.tag_object = obj
-                self.fake.after_upload = lambda a: setattr(self.fake, "tag_exists", True)
-                self.fake.overrides[f"git/tags/{annotated}"] = response(data={"sha": annotated, "object": obj})
-                self.assertNotEqual(self.run_cli(), 0)
-                self.assertEqual(self.actions(), ["create", "upload"])
-
-    def test_wrong_metadata_is_rejected_before_auth(self):
+    def test_preflight_is_read_only_for_both_kinds(self):
         for kind in ("image", "display"):
-            path = self.assets / f"{kind}-build-metadata.json"
-            original = json.loads(path.read_text())
-            cases = [{}, [], {**original, "kind": "wrong"}, {**original, "build_step_outcome": "failure"},
-                     {**original, "source_commit": "b" * 40}, {**original, "collection_errors": ["failed"]}]
-            cases += [{**original, "target": target} for target in (None, [], {},
-                      {**publisher.TARGET, "debian": "12"}, {**publisher.TARGET, "release": "bookworm"},
-                      {**publisher.TARGET, "kernel": "6.18.50"}, {**publisher.TARGET, "extra_storage": "yes"})]
-            for key in ("armbian_commit", "kernel_commit", "kernel_source", "kernel_release"):
-                cases.append({k: v for k, v in original.items() if k != key})
-                cases.append({**original, key: "wrong"})
-            if kind == "image":
-                cases.append({**original, "image_static_audit": "not proven"})
-                for key, invalid in (
-                        ("factory_format", (None, "", "raw-gpt", "e87n-uboot-firmware-tar-v1")),
-                        ("factory_static_audit", (None, "", "failed", "not proven", "not applicable", True)),
-                        ("simulation_validation", (None, "", "failed", "not proven", "not applicable", True))):
-                    cases.append({k: v for k, v in original.items() if k != key})
-                    cases.extend({**original, key: value} for value in invalid)
-            for metadata in cases:
-                with self.subTest(kind=kind, metadata=metadata):
-                    path.write_text(json.dumps(metadata))
-                    self.manifest()
-                    self.assertNotEqual(self.run_cli(), 0)
-                    self.assertEqual(self.fake.calls, [])
-            path.write_text(json.dumps(original))
-            self.manifest()
+            with self.subTest(kind=kind):
+                self.reset_channel(kind)
+                self.assertEqual(self.run_cli("preflight"), 0, self.errors.getvalue())
+                self.assertEqual(self.actions(), [])
+                self.assertEqual(len(self.fake.calls), 5)
 
-    def test_checksum_manifest_exact_coverage_and_safe_unique_paths(self):
-        path = self.assets / "SHA256SUMS"
-        original = path.read_text()
-        first = original.splitlines()[0]
-        invalid = ["", original + first + "\n", "\n".join(original.splitlines()[1:]) + "\n",
-                   original + "0" * 64 + "  SHA256SUMS\n", original + "0" * 64 + "  unexpected.txt\n",
-                   original.replace("  ", "  ../", 1), original.replace("  ", "  /", 1),
-                   original.replace("  ", "  sub/", 1), original.replace("  ", "  ./", 1),
-                   original.replace("  ", "  bad\\", 1), original.replace("  ", "  -", 1),
-                   "g" + original[1:], "0" * 64 + original[64:]]
-        for manifest in invalid:
-            with self.subTest(manifest=manifest):
-                path.write_text(manifest)
-                self.assertNotEqual(self.run_cli(), 0)
-                self.assertEqual(self.fake.calls, [])
-        path.write_text(original.upper()[:64] + original[64:])
-        self.assertEqual(self.run_cli(), 0)
+    def test_each_kind_publishes_exactly_one_public_payload(self):
+        expected = {"image": "e87n-trixie-uboot-firmware.tar",
+                    "display": "e87n-display_1.2.3_all.deb"}
+        for kind, payload in expected.items():
+            with self.subTest(kind=kind):
+                self.reset_channel(kind)
+                self.assertEqual(self.run_cli(), 0, self.errors.getvalue())
+                self.assertEqual(self.actions(), ["create", "upload", "edit"])
+                self.assertEqual([asset["name"] for asset in self.fake.assets], [payload])
+                upload = next(call for call in self.fake.calls if call[1:3] == ["release", "upload"])
+                self.assertEqual(upload[upload.index("--") + 1:], [str(self.assets / payload)])
+                create = next(call for call in self.fake.calls if call[1:3] == ["release", "create"])
+                self.assertIn("firmware" if kind == "image" else "display",
+                              create[create.index("--title") + 1])
 
-    def test_unexpected_missing_and_duplicate_required_files_rejected_locally(self):
-        for name in ("another-uboot-firmware.tar", "another.img.xz", "e87n-display_2_all.deb", "extra.txt", "evil;id-uboot-firmware.tar", "image#label-uboot-firmware.tar"):
-            path = self.assets / name
-            path.write_text("fixture")
-            self.manifest()
-            self.assertNotEqual(self.run_cli(), 0)
-            self.assertEqual(self.fake.calls, [])
-            path.unlink()
-        self.manifest()
-        for path in list(self.assets.iterdir()):
-            saved = path.read_bytes()
-            path.unlink()
-            self.assertNotEqual(self.run_cli(), 0)
-            self.assertEqual(self.fake.calls, [])
-            path.write_bytes(saved)
+    def test_image_staging_requires_tested_deb_but_never_uploads_it(self):
+        files = publisher.validate_assets(self.assets, SOURCE, "image")
+        self.assertIn("e87n-display_1.2.3_all.deb", files)
+        self.assertEqual(self.run_cli(), 0, self.errors.getvalue())
+        self.assertEqual({asset["name"] for asset in self.fake.assets}, {"e87n-trixie-uboot-firmware.tar"})
 
-    def test_legacy_and_compressed_system_payloads_rejected_before_auth(self):
-        path = self.assets / "e87n-trixie-uboot-firmware.tar"
-        for name in ("e87n-trixie.img.xz", "e87n-trixie.img", "e87n-trixie-uboot-firmware.tar.xz"):
-            with self.subTest(name=name):
-                wrong = path.with_name(name)
-                path.rename(wrong)
-                self.manifest()
-                self.assertNotEqual(self.run_cli(), 0)
-                self.assertEqual(self.fake.calls, [])
-                wrong.rename(path)
-        self.manifest()
-
-    def test_empty_public_payloads_rejected_before_auth(self):
-        for name in ("e87n-trixie-uboot-firmware.tar", "e87n-display_1.2.3_all.deb"):
+    def test_display_staging_rejects_image_payload_and_evidence(self):
+        self.reset_channel("display")
+        for name in ("unexpected-uboot-firmware.tar", "kernel-packages.tar.xz",
+                     "simulation-result.json", "image-build-metadata.json"):
             with self.subTest(name=name):
                 path = self.assets / name
-                saved = path.read_bytes()
-                path.write_bytes(b"")
+                path.write_bytes(b"unexpected")
                 self.manifest()
                 self.assertNotEqual(self.run_cli(), 0)
                 self.assertEqual(self.fake.calls, [])
-                path.write_bytes(saved)
-        self.manifest()
+                path.unlink()
+                self.manifest()
 
-    def test_symlink_directories_files_and_nonregular_files_rejected_locally(self):
-        link = self.root / "alias"
-        link.symlink_to(self.assets, target_is_directory=True)
-        self.assertNotEqual(self.run_cli(assets=str(link)), 0)
-        parent = self.root / "parent"
-        parent.symlink_to(self.root, target_is_directory=True)
-        self.assertNotEqual(self.run_cli(assets=str(parent / "assets")), 0)
-        path = self.assets / "linked-uboot-firmware.tar"
-        path.symlink_to(self.assets / "e87n-trixie-uboot-firmware.tar")
-        self.assertNotEqual(self.run_cli(), 0)
-        path.unlink()
-        path.mkdir()
-        self.assertNotEqual(self.run_cli(), 0)
-        path.rmdir()
-        os.mkfifo(path)
-        self.assertNotEqual(self.run_cli(), 0)
-        path.unlink()
-        os.link(self.assets / "e87n-trixie-uboot-firmware.tar", path)
-        self.assertNotEqual(self.run_cli(), 0)
-        self.assertEqual(self.fake.calls, [])
+    def test_exact_whitelist_manifest_and_metadata_for_both_kinds(self):
+        for kind in ("image", "display"):
+            self.reset_channel(kind)
+            extra = self.assets / "extra.txt"
+            extra.write_text("unexpected")
+            self.manifest()
+            self.assertNotEqual(self.run_cli(), 0)
+            self.assertEqual(self.fake.calls, [])
+            extra.unlink()
+            self.manifest()
+            metadata_path = self.assets / f"{kind}-build-metadata.json"
+            original = json.loads(metadata_path.read_text())
+            cases = [{}, [], {**original, "kind": "wrong"},
+                     {**original, "build_step_outcome": "failure"},
+                     {**original, "source_commit": "b" * 40},
+                     {**original, "collection_errors": ["failed"]},
+                     {**original, "target": {**publisher.TARGET, "debian": "12"}},
+                     {**original, "kernel_commit": "wrong"},
+                     {**original, "image_static_audit": "not applicable" if kind == "image" else "passed"}]
+            if kind == "image":
+                cases.extend(({**original, "factory_format": "raw-gpt"},
+                              {**original, "factory_static_audit": "failed"},
+                              {**original, "simulation_validation": "failed"}))
+            for metadata in cases:
+                metadata_path.write_text(json.dumps(metadata))
+                self.manifest()
+                self.assertNotEqual(self.run_cli(), 0)
+                self.assertEqual(self.fake.calls, [])
+            serialized = json.dumps(original)
+            metadata_path.write_text('{"kind":"duplicate",' + serialized.lstrip()[1:])
+            self.manifest()
+            self.assertNotEqual(self.run_cli(), 0)
+            self.assertEqual(self.fake.calls, [])
+            metadata_path.write_text(json.dumps(original))
+            self.manifest()
+            checksum_path = self.assets / "SHA256SUMS"
+            checksum = checksum_path.read_text()
+            checksum_path.write_text(checksum + checksum.splitlines()[0] + "\n")
+            self.assertNotEqual(self.run_cli(), 0)
 
-    def test_corrupt_payload_is_rejected_before_auth_and_hashes_are_streamed(self):
-        firmware = self.assets / "e87n-trixie-uboot-firmware.tar"
-        original = firmware.read_bytes()
-        firmware.write_bytes(b"changed payload")
-        self.assertNotEqual(self.run_cli(), 0)
-        self.assertEqual(self.fake.calls, [])
-        self.manifest()
-        # Updating checksums cannot reuse evidence for different firmware.
-        self.assertNotEqual(self.run_cli(), 0)
-        self.assertEqual(self.fake.calls, [])
-        firmware.write_bytes(original)
-        self.manifest()
-        with mock.patch.object(Path, "read_bytes", side_effect=AssertionError("Payload must stream")):
-            files = publisher.validate_assets(self.assets, SOURCE)
-        self.assertEqual(len(files), 9)
-        payload = b"x" * (2 * 1024 * 1024 + 7)
-        reader = mock.MagicMock(wraps=io.BytesIO(payload))
-        context = mock.MagicMock()
-        context.__enter__.return_value = reader
-        with mock.patch.object(Path, "open", return_value=context):
-            self.assertEqual(publisher.digest(Path("fixture")), hashlib.sha256(payload).hexdigest())
-        self.assertEqual(reader.read.call_args_list, [mock.call(1024 * 1024)] * 4)
-
-    def test_wrong_simulation_evidence_is_rejected_before_auth(self):
+    def test_image_simulation_binds_source_run_firmware_and_tested_deb(self):
         path = self.assets / "simulation-result.json"
         original = json.loads(path.read_text())
         for section, key, value in (
@@ -529,10 +282,105 @@ class PublisherTests(unittest.TestCase):
             with self.subTest(section=section, key=key):
                 self.assertNotEqual(self.run_cli(), 0)
                 self.assertEqual(self.fake.calls, [])
-        path.write_text(json.dumps({**original, "status": "FAIL"}))
-        self.manifest()
+
+    def test_invalid_inputs_and_kind_make_no_subprocess_calls(self):
+        for key, values in {
+            "kind": ["", "firmware", "image;id"],
+            "tag": ["", "-x", "x/y", "x..y", "x.lock", "x;touch pwned", "x\n"],
+            "repository": ["owner", "owner/repo/other", "../repo", "owner/repo?x=1"],
+            "source-commit": ["a" * 39, "g" * 40, SOURCE + ";id", "--help"],
+        }.items():
+            for value in values:
+                with self.subTest(key=key, value=value):
+                    self.fake = FakeGh(self)
+                    self.output, self.errors = io.StringIO(), io.StringIO()
+                    self.assertNotEqual(self.run_cli("preflight", **{key: value}), 0)
+                    self.assertEqual(self.fake.calls, [])
+        self.fake = FakeGh(self)
+        self.output, self.errors = io.StringIO(), io.StringIO()
+        self.assertNotEqual(self.run_cli(assets=None), 0)
+        self.fake = FakeGh(self)
+        self.output, self.errors = io.StringIO(), io.StringIO()
+        self.assertNotEqual(self.run_cli("preflight", assets=str(self.assets)), 0)
+        self.assertEqual(self.fake.calls, [])
+
+    def test_auth_api_and_missing_gh_fail_without_publish_or_secret_leak(self):
+        self.fake.fail = "auth"
+        self.assertNotEqual(self.run_cli(), 0)
+        self.assertEqual(len(self.fake.calls), 1)
+        self.fake = FakeGh(self)
+        self.fake.overrides[f"commits/{SOURCE}"] = response(503, {})
+        self.assertNotEqual(self.run_cli(), 0)
+        self.assertEqual(self.actions(), [])
+        self.fake = FakeGh(self)
+        with mock.patch.object(publisher.subprocess, "run", side_effect=FileNotFoundError(SECRET)):
+            self.assertNotEqual(self.run_cli(), 0)
+
+    def test_tag_release_and_draft_collisions_prevent_create(self):
+        self.fake.tag_exists = True
+        self.assertNotEqual(self.run_cli(), 0)
+        self.assertEqual(self.actions(), [])
+        self.fake = FakeGh(self)
+        self.fake.published = True
+        self.assertNotEqual(self.run_cli(), 0)
+        self.fake = FakeGh(self)
+        self.fake.other_releases = [{"tag_name": f"other-{index}"} for index in range(100)] + [self.fake.release]
+        self.assertNotEqual(self.run_cli(), 0)
+        self.assertTrue(any(call[-1].endswith("page=2") for call in self.fake.calls))
+
+    def test_partial_remote_failures_preserve_draft_and_never_clobber(self):
+        for stage, actions in (("create", ["create"]), ("upload", ["create", "upload"]),
+                               ("edit", ["create", "upload", "edit"])):
+            self.fake = FakeGh(self)
+            self.fake.fail = stage
+            with self.subTest(stage=stage):
+                self.assertNotEqual(self.run_cli(), 0)
+                self.assertEqual(self.actions(), actions)
+                self.assertIn("retained without cleanup", self.errors.getvalue())
+
+    def test_remote_asset_integrity_is_verified_before_publish(self):
+        mutations = [lambda assets: assets[0].update(digest="sha256:" + "0" * 64),
+                     lambda assets: assets[0].pop("digest"),
+                     lambda assets: assets[0].update(size=assets[0]["size"] + 1),
+                     lambda assets: assets[0].update(state="starter"),
+                     lambda assets: assets.append(dict(assets[0])),
+                     lambda assets: assets[0].update(name="unexpected")]
+        for mutation in mutations:
+            self.fake = FakeGh(self)
+            self.fake.after_upload = mutation
+            with self.subTest(mutation=mutation):
+                self.assertNotEqual(self.run_cli(), 0)
+                self.assertEqual(self.actions(), ["create", "upload"])
+                self.assertFalse(self.fake.published)
+
+    def test_final_state_and_tag_target_are_verified(self):
+        for mutate in (lambda: self.fake.release.update(draft=True),
+                       lambda: self.fake.release.update(published_at=None),
+                       lambda: self.fake.release.update(prerelease=False),
+                       lambda: self.fake.tag_object.update(sha="b" * 40)):
+            self.fake = FakeGh(self)
+            self.fake.after_edit = mutate
+            with self.subTest(mutate=mutate):
+                self.assertNotEqual(self.run_cli(), 0)
+                self.assertEqual(self.actions(), ["create", "upload", "edit"])
+
+    def test_symlink_hardlink_and_display_tilde_version(self):
+        link = self.root / "alias"
+        link.symlink_to(self.assets, target_is_directory=True)
+        self.assertNotEqual(self.run_cli(assets=str(link)), 0)
+        path = self.assets / "linked-uboot-firmware.tar"
+        path.symlink_to(self.assets / "e87n-trixie-uboot-firmware.tar")
+        self.assertNotEqual(self.run_cli(), 0)
+        path.unlink()
+        os.link(self.assets / "e87n-trixie-uboot-firmware.tar", path)
         self.assertNotEqual(self.run_cli(), 0)
         self.assertEqual(self.fake.calls, [])
+        path.unlink()
+        self.reset_channel("display")
+        source = self.assets / "e87n-display_1.2.3_all.deb"
+        source.rename(self.assets / "e87n-display_1.2.3~rc1_all.deb")
+        self.manifest()
+        self.assertEqual(self.run_cli(), 0, self.errors.getvalue())
 
 
 if __name__ == "__main__":

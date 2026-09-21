@@ -1,5 +1,9 @@
 # E87N 最终软件验收记录（2026-09-20）
 
+> 历史发布范围：本文记录 2026-09-20 当时的单 workflow、两个正式附件及同 run 绑定流程。
+> 这些描述是冻结事实，不代表当前发布模型；当前使用独立 Firmware 与 Display workflow / Release，
+> 见 [GITHUB-ACTIONS.md](GITHUB-ACTIONS.md)。
+
 本记录对应源码提交 `679b7d5fa8ca650b9a3db43b3605df0966a96ac5` 的 candidate3。
 该冻结候选使用当时的 headless 基础镜像，显示包单独接受生命周期测试。2026-09-21
 源码默认已切换为预装显示包并启用 LCD/背光；下列产物、哈希和通过结果只属于

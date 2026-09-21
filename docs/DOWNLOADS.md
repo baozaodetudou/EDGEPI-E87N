@@ -3,41 +3,49 @@
 ## 从哪里下载
 
 正式用户产物只从仓库 [Releases](https://github.com/baozaodetudou/EDGEPI-E87N/releases) 下载。
-每个成功 Release 是一个 Pre-release，包含：
+发布分为两个独立通道，每个 Release 只上传一个项目二进制附件：
 
-```text
-<版本>-uboot-firmware.tar
-e87n-display_<版本>_all.deb
-```
+| Release 通道 | 下载文件 | 使用场景 |
+| --- | --- | --- |
+| Firmware Release | `*-uboot-firmware.tar` | 新装或升级整个 Debian 系统 |
+| Display Release | `e87n-display_<version>_all.deb` | 已运行 Debian 上单独升级小屏程序 |
+
+Firmware 与 Display Release 不要求 tag、版本号或发布日期一致。固件内已经预装并经过 QEMU
+验证构建时的同源 display 基线包；之后可以从更新的 Display Release 单独升级，不需要重新
+构建或刷写固件。
 
 不要从源码页下载 `Source code (zip)` / `Source code (tar.gz)` 当作系统镜像，也不要把
 Actions 的中间 artifact 当作最终 Release 附件。
 
 ## 下载后先校验
 
-Linux：
+下载 Firmware Release 后，Linux 使用：
 
 ```sh
 sha256sum <固件文件>
-sha256sum <e87n-display deb>
 ```
 
-macOS：
+macOS 使用：
 
 ```sh
 shasum -a 256 <固件文件>
-shasum -a 256 <e87n-display deb>
 ```
 
-将结果与 Release 正文中的 SHA-256 比较。若 Release 附带 `SHA256SUMS`，也可以执行：
+只升级显示包时，在对应 Display Release 中对 deb 独立执行：
 
 ```sh
-sha256sum --check SHA256SUMS
-# macOS:
-shasum -a 256 -c SHA256SUMS
+# Linux
+sha256sum e87n-display_<version>_all.deb
+# macOS
+shasum -a 256 e87n-display_<version>_all.deb
 ```
 
-摘要不匹配、附件大小为 0、文件名与 Release 正文不一致时，停止操作，不要上传 U-Boot。
+将结果与当前文件所属 Release 正文中的 SHA-256 比较。不要拿 Firmware Release 的摘要校验
+Display 附件，反之亦然。`SHA256SUMS`、元数据和完整日志只保留在对应 Actions artifact，
+不是 Release 的额外下载附件。
+
+摘要不匹配、附件大小为 0、文件名与所属 Release 正文不一致时，停止操作。不要上传固件，
+也不要安装未经对应 Display Release 校验的 deb。
 
 ## 哪个文件用于什么
 
@@ -94,12 +102,13 @@ journalctl -u e87n-display.service -b --no-pager
 
 ## 单独升级屏幕包
 
-在已经启动的 Debian 系统上：
+从 Display Release 下载并校验 `e87n-display_<version>_all.deb`，然后在已经启动的 Debian
+系统上：
 
 ```sh
-scp e87n-display_<版本>_all.deb root@<设备IP>:/tmp/
+scp e87n-display_<version>_all.deb root@<设备IP>:/tmp/
 ssh root@<设备IP>
-apt install /tmp/e87n-display_<版本>_all.deb
+apt install /tmp/e87n-display_<version>_all.deb
 systemctl restart e87n-display.service
 systemctl status e87n-display.service --no-pager
 ```

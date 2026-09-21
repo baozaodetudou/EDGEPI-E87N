@@ -1,0 +1,183 @@
+name: E87N 显示 deb 快速构建与发布
+
+run-name: "E87N display release · 手动构建 #${{ github.run_number }}"
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e87n-display-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  GIT_TERMINAL_PROMPT: '0'
+  DEBIAN_FRONTEND: noninteractive
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      release_tag: ${{ steps.release_tag.outputs.release_tag }}
+      display_artifact: ${{ steps.release_tag.outputs.display_artifact }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          clean: false
+      - name: Generate display release tag and check manual main-branch build
+        id: release_tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "$GITHUB_REF" == refs/heads/main ]]; then
+            printf 'Only manual main-branch builds may publish.\n' >&2
+            exit 1
+          fi
+          display_version=$(< packaging/e87n-display/VERSION)
+          if ! [[ "$display_version" =~ ^[0-9][A-Za-z0-9.+~-]*$ ]]; then
+            printf 'Invalid display package version: %s\n' "$display_version" >&2
+            exit 1
+          fi
+          # Debian '+' and '~' are not accepted by the release tag allowlist.
+          safe_version=${display_version//+/.plus.}
+          safe_version=${safe_version//\~/.tilde.}
+          if (( ${#safe_version} > 48 )) || ! [[ "$safe_version" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+            printf 'Display package version cannot be represented safely in a release tag.\n' >&2
+            exit 1
+          fi
+          release_tag="e87n-display-${safe_version}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          display_artifact="e87n-display-${safe_version}-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          python3 scripts/ci-publish-release.py preflight --kind display \
+            --repository "$GITHUB_REPOSITORY" --source-commit "$GITHUB_SHA" --tag "$release_tag"
+          printf 'release_tag=%s\n' "$release_tag" >> "$GITHUB_OUTPUT"
+          printf 'display_artifact=%s\n' "$display_artifact" >> "$GITHUB_OUTPUT"
+      - name: Install display validation tools
+        run: |
+          mkdir -p output/ci/logs
+          set -o pipefail
+          {
+            sudo -n apt-get update
+            sudo -n apt-get install -y --no-install-recommends \
+              shellcheck python3 python3-yaml python3-pil fonts-dejavu-core fonts-wqy-microhei \
+              device-tree-compiler dpkg-dev init-system-helpers python3-minimal xz-utils
+            GOBIN="$RUNNER_TEMP/e87n-tools" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+            echo "$RUNNER_TEMP/e87n-tools" >> "$GITHUB_PATH"
+          } 2>&1 | tee output/ci/logs/display-validation-tools.log
+      - name: Validate display workflow and CI helpers
+        run: |
+          mkdir -p output/ci/logs
+          bash scripts/ci-validate.sh display 2>&1 | tee output/ci/logs/display-validation.log
+      - name: Run focused display regressions
+        timeout-minutes: 10
+        run: bash scripts/ci-display-regressions.sh
+      - name: Capture validation failure evidence
+        if: ${{ always() }}
+        env:
+          BUILD_OUTCOME: ${{ job.status }}
+        run: bash scripts/ci-capture-failure-evidence.sh validate "$BUILD_OUTCOME"
+      - name: Upload display validation logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e87n-display-validation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            output/ci/logs/
+            output/ci/failure-evidence/
+          if-no-files-found: warn
+          retention-days: 14
+
+  display:
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          clean: false
+      - name: Prepare package tools
+        run: |
+          mkdir -p output/ci/logs
+          sudo -n apt-get update
+          sudo -n apt-get install -y --no-install-recommends dpkg-dev xz-utils
+      - name: Build versioned e87n-display package
+        id: build
+        timeout-minutes: 10
+        run: bash scripts/ci-build.sh display
+      - name: Capture display failure evidence
+        if: ${{ always() }}
+        env:
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+        run: bash scripts/ci-capture-failure-evidence.sh display "$BUILD_OUTCOME"
+      - name: Collect package, checksums and logs
+        if: ${{ always() }}
+        env:
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+        run: python3 scripts/ci-collect-artifacts.py --kind display --status "$BUILD_OUTCOME"
+      - name: Upload display candidate
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ needs.validate.outputs.display_artifact }}
+          path: output/ci/artifacts/
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 14
+      - name: Upload package build logs independently
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e87n-display-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            output/ci/logs/
+            output/ci/failure-evidence/
+          if-no-files-found: warn
+          retention-days: 14
+
+  release:
+    needs: [validate, display]
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && needs.validate.result == 'success' && needs.display.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          clean: false
+      - name: Download this run's display artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DISPLAY_ARTIFACT: ${{ needs.validate.outputs.display_artifact }}
+        run: |
+          gh auth status --hostname github.com >/dev/null 2>&1
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "$DISPLAY_ARTIFACT" \
+            --dir output/release-input/display
+      - name: Verify and prepare display release assets
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.release_tag }}
+        run: |
+          python3 scripts/ci-prepare-release.py \
+            --kind display --artifact output/release-input/display \
+            --output output/release-assets --source-commit "$GITHUB_SHA" \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --tag "$RELEASE_TAG" --repository "$GITHUB_REPOSITORY"
+      - name: Publish verified display package as a tagged prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.validate.outputs.release_tag }}
+        run: |
+          python3 scripts/ci-publish-release.py publish --kind display \
+            --repository "$GITHUB_REPOSITORY" --source-commit "$GITHUB_SHA" \
+            --tag "$RELEASE_TAG" --assets output/release-assets

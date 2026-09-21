@@ -31,7 +31,7 @@ scripts/ramdiag/receive-udp.py
 
 ## 从当前已存在的历史 FIT 重建
 
-每次成功的 Actions image job 还会在同一个候选 artifact 的 `diagnostics/` 目录放入一套新的诊断 FIT。它们不会进入 Release 的两个正式下载附件，也不能写入 eMMC。若要本地重建，先从镜像的 boot/root 分区生成网络诊断 initrd，再运行 FIT 生成器；CI 使用的完整入口是：
+每次成功的 Firmware image job 还会在同一个候选 artifact 的 `diagnostics/` 目录放入一套新的诊断 FIT。它们不会进入 Firmware Release；该 Release 只公开 `*-uboot-firmware.tar`。诊断 FIT 也不能写入 eMMC，且与独立 Display Release 无关。若要本地重建，先从镜像的 boot/root 分区生成网络诊断 initrd，再运行 FIT 生成器；CI 使用的完整入口是：
 
 ```sh
 sudo bash scripts/ci-build-ramdiag.sh \

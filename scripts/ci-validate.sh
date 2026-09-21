@@ -1,8 +1,17 @@
 #!/usr/bin/env bash
-# Static checks and isolated fixtures only: no package/image build or sudo.
+# Static checks and profile-specific isolated fixtures; no package/image build or sudo.
 set -Eeuo pipefail
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_dir"
+[[ $# -le 1 ]] || {
+	printf 'Usage: bash scripts/ci-validate.sh [all|image|display]\n' >&2
+	exit 2
+}
+profile=${1:-all}
+[[ $profile == all || $profile == image || $profile == display ]] || {
+	printf 'Unknown validation profile: %s\n' "$profile" >&2
+	exit 2
+}
 for tool in actionlint shellcheck python3; do
 	command -v "$tool" >/dev/null || { printf 'Missing validation tool: %s\n' "$tool" >&2; exit 1; }
 done
@@ -26,4 +35,7 @@ python3 tests/test-ci-workflow.py
 python3 tests/test-ci-prepare-release.py
 python3 tests/test-ci-publish-release.py
 python3 -B tests/test-build-config.py
-python3 -B tests/test-ci-simulation.py
+if [[ $profile != display ]]; then
+	python3 -B tests/test-ci-simulation.py
+fi
+printf 'PASS: %s static validation profile\n' "$profile"

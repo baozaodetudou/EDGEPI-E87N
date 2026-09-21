@@ -2,7 +2,7 @@
 # CI adapter only; the board recipe and display package builder own their policy.
 set -Eeuo pipefail
 export GIT_TERMINAL_PROMPT=0 DEBIAN_FRONTEND=noninteractive
-# Both jobs must produce byte-identical display packages for the QEMU binding.
+# Keep each package build deterministic; Firmware and Display releases run independently.
 export SOURCE_DATE_EPOCH=0
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_dir"
@@ -100,8 +100,8 @@ sudo -n python3 scripts/build-factory-firmware.py \
 # shellcheck disable=SC2024
 sudo -n python3 scripts/verify-factory-firmware.py "$firmware_output" \
 	> output/ci/logs/factory-firmware-audit-1.log 2>&1
-# Build the same VERSION source locally for the final-firmware guest's package
-# lifecycle test. The independent display job still owns the release download.
+# Build the current source locally for the final-firmware guest's package
+# lifecycle test. The independent Display workflow owns public deb releases.
 bash scripts/build-display-deb.sh --output-dir "$repo_dir/output/ci/simulation-display-debs"
 packages=(output/ci/simulation-display-debs/e87n-display_*.deb)
 [[ ${#packages[@]} == 1 && -s ${packages[0]} && ! -L ${packages[0]} ]] || {

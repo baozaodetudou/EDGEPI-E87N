@@ -75,7 +75,7 @@ install -m 0644 "$packaging_dir/copyright" "$packaging_dir/README.Debian" "$doc_
 sed "s/@VERSION@/$version/" "$packaging_dir/control" > "$package_root/DEBIAN/control"
 # Estimate payload KiB from logical entries, not filesystem allocation. The
 # latter differs between Docker bind mounts and native ext4, changing otherwise
-# identical .deb files built by the independent image/display jobs.
+# deterministic .deb bytes for the same source and build inputs.
 installed_kib=$(find "$package_root/etc" "$package_root/usr" -printf '%y %s\n' |
   awk '$1 == "f" { n += int(($2 + 1023) / 1024); next } { n += 1 } END { print n }')
 printf 'Installed-Size: %s\n' "$installed_kib" >> "$package_root/DEBIAN/control"

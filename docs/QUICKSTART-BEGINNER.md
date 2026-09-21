@@ -9,9 +9,9 @@
 - 一台电脑，最好使用有线网卡；关闭电脑上的 VPN、代理和其他会抢路由的网络工具。
 - E87N 电源和一根能传输网络数据的网线。
 - 一个普通路由器或交换机，用于刷完后给 Debian 分配 DHCP 地址。
-- GitHub Releases 中的两个文件：
-  - `*-uboot-firmware.tar`：刷入系统用；
-  - `e87n-display_*.deb`：系统启动后单独升级小屏用。
+- Firmware Release 中的 `*-uboot-firmware.tar`：刷入系统必须使用的唯一项目附件。
+- 可选：Display Release 中的 `e87n-display_<version>_all.deb`。固件已经预装显示基线包，
+  只有需要独立升级小屏程序时才下载 deb。
 
 不要下载 `Source code.zip`，不要把 `.deb` 当固件，也不要把 `.img`、`.img.xz` 或
 `*-uboot-firmware.tar` 上传到 LuCI 的 OpenWrt `sysupgrade` 页面。本项目发布的 TAR 是给
@@ -19,21 +19,19 @@
 
 ## 第一步：下载并校验固件
 
-从仓库的 [Releases](https://github.com/baozaodetudou/EDGEPI-E87N/releases) 打开同一个
-Release，下载固件和屏幕包。Release 正文会列出 SHA-256：
+从仓库的 [Releases](https://github.com/baozaodetudou/EDGEPI-E87N/releases) 打开目标
+Firmware Release，只下载 `*-uboot-firmware.tar`。该 Release 正文会列出固件 SHA-256：
 
 Linux：
 
 ```sh
 sha256sum <固件文件>.tar
-sha256sum e87n-display_<版本>_all.deb
 ```
 
 macOS：
 
 ```sh
 shasum -a 256 <固件文件>.tar
-shasum -a 256 e87n-display_<版本>_all.deb
 ```
 
 摘要不一致、文件大小为 0 或下载未完成时，停止操作，不要上传。
@@ -182,21 +180,24 @@ systemctl restart e87n-display.service
 
 ## 单独升级小屏包
 
-不想重新刷整机时，只升级 `.deb` 即可：
+不想重新刷整机时，从目标 Display Release 下载并按该 Release 正文校验
+`e87n-display_<version>_all.deb`，然后只升级 `.deb`：
 
 ```sh
-scp e87n-display_<版本>_all.deb root@<设备IP>:/tmp/
+sha256sum e87n-display_<version>_all.deb
+scp e87n-display_<version>_all.deb root@<设备IP>:/tmp/
 ssh root@<设备IP>
-dpkg-deb -f /tmp/e87n-display_<版本>_all.deb Package Version Architecture
-apt-get install -y /tmp/e87n-display_<版本>_all.deb
+dpkg-deb -f /tmp/e87n-display_<version>_all.deb Package Version Architecture
+apt-get install -y /tmp/e87n-display_<version>_all.deb
 systemctl daemon-reload
 systemctl restart e87n-display.service
 dpkg-query -W -f='${Package} ${Version} ${Status}\n' e87n-display
 systemctl is-active e87n-display.service
 ```
 
-升级屏幕包不会替换内核、DTB、U-Boot 或 Debian rootfs；dpkg 可能询问是否保留你改过的
-`/etc/e87n/display.json`，通常选择保留本地配置即可。
+升级屏幕包不会替换内核、DTB、U-Boot 或 Debian rootfs，也不要求 display 的版本、tag 或
+发布日期与当前 firmware 相同；dpkg 可能询问是否保留你改过的 `/etc/e87n/display.json`，
+通常选择保留本地配置即可。
 
 安装包的完整说明、校验、依赖修复、卸载、配置字段和真实设备验收见
 [独立屏幕包说明](DISPLAY-PACKAGE.md)。不要把 `.deb` 上传到 U-Boot 页面；它只能在已经
@@ -238,7 +239,7 @@ systemctl show e87n-display.service -p NRestarts -p ExecMainStatus
 
 1. 不要连续重复上传未知文件，也不要把 `.img` 写进 U-Boot 的错误入口。
 2. 断电，按住 RESET，再上电，重新打开 `http://192.168.1.1/`。
-3. 只用同一个 Release 的 `*-uboot-firmware.tar` 重试，并再次校验 SHA-256。
+3. 只用原 Firmware Release 的 `*-uboot-firmware.tar` 重试，并再次校验该 Release 的 SHA-256。
 4. 记录 U-Boot 页面上的错误文字、上传阶段、设备 LED 和连接的网口。
 5. 如果 U-Boot 也进不去，停止操作，保留串口/网络日志，按[详细恢复边界](first-boot.md)
    处理；不要自行擦除 GPT、FIP、boot0/boot1 或 U-Boot 环境。

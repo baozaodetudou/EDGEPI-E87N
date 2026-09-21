@@ -18,14 +18,26 @@ simulation = import_module("ci-simulation")
 
 SAFE = r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}"
 SHA = r"[0-9a-fA-F]{40}"
-FIXED = {"image-build-metadata.json", "display-build-metadata.json",
-         "kernel-packages.tar.xz", "build-evidence.tar.xz", "RELEASE-NOTES.md", "SHA256SUMS",
-         "simulation-result.json"}
+FIXED = {
+    "image": {"image-build-metadata.json", "kernel-packages.tar.xz",
+              "build-evidence.tar.xz", "RELEASE-NOTES.md", "SHA256SUMS",
+              "simulation-result.json"},
+    "display": {"display-build-metadata.json", "build-evidence.tar.xz",
+                "RELEASE-NOTES.md", "SHA256SUMS"},
+}
 
 
 def require(condition, message):
     if not condition:
         raise ValueError(message)
+
+
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        require(key not in result, "Duplicate metadata key: " + key)
+        result[key] = value
+    return result
 
 
 def safe(value):
@@ -97,7 +109,8 @@ def digest(path):
     return checksum.hexdigest()
 
 
-def validate_assets(directory, source_commit):
+def validate_assets(directory, source_commit, kind):
+    require(kind in FIXED, "Invalid release kind")
     root = Path(directory).absolute()
     require(not any(p.is_symlink() for p in (root, *root.parents)), "Asset directory contains a symlink")
     require(root.is_dir() and not any(c in str(root) for c in "#\r\n*?[]"), "Invalid asset directory")
@@ -111,9 +124,14 @@ def validate_assets(directory, source_commit):
         files[path.name] = (path, info.st_size, digest(path))
     images = {name for name in files if name.endswith(".tar")}
     debs = {name for name in files if re.fullmatch(r"e87n-display_.+_all\.deb", name)}
-    require(len(images) == len(debs) == 1 and set(files) == FIXED | images | debs,
+    expected_payloads = images | debs
+    if kind == "image":
+        require(len(images) == len(debs) == 1, "Image staging requires one firmware tar and one tested display package")
+    else:
+        require(not images and len(debs) == 1, "Display staging requires exactly one display package")
+    require(set(files) == FIXED[kind] | expected_payloads,
             "Missing, duplicate, or unexpected release assets")
-    require(all(files[name][1] > 0 for name in images | debs), "Empty release payload")
+    require(all(files[name][1] > 0 for name in expected_payloads), "Empty release payload")
     manifest = {}
     for line in files["SHA256SUMS"][0].read_text(encoding="utf-8").splitlines():
         match = re.fullmatch(r"([0-9a-fA-F]{64}) [ *]([A-Za-z0-9][A-Za-z0-9._+~-]*)", line)
@@ -122,33 +140,31 @@ def validate_assets(directory, source_commit):
         manifest[match[2]] = match[1].lower()
     require(set(manifest) == set(files) - {"SHA256SUMS"}, "Checksum manifest coverage mismatch")
     require(all(files[name][2] == sha for name, sha in manifest.items()), "Asset checksum mismatch")
-    metadata_by_kind = {}
-    for kind in ("image", "display"):
-        metadata = json.loads(files[f"{kind}-build-metadata.json"][0].read_text(encoding="utf-8"))
-        require(isinstance(metadata, dict) and metadata.get("kind") == kind and
-                metadata.get("build_step_outcome") == "success" and metadata.get("source_commit") == source_commit
-                and isinstance(metadata.get("target"), dict) and
-                all(metadata["target"].get(k) == v for k, v in TARGET.items()) and
-                metadata.get("collection_errors") == [], "Build metadata is not a successful current-source target")
-        require(kind != "image" or metadata.get("image_static_audit") == "passed", "Image audit has not passed")
-        require(all(metadata.get(key) == BUILD[key] for key in
-                    ("armbian_commit", "kernel_commit", "kernel_source", "kernel_release")),
-                "Build source configuration mismatch")
-        require(kind != "image" or metadata.get("factory_format") == FORMAT,
-                "Factory firmware format mismatch")
-        require(kind != "image" or metadata.get("factory_static_audit") == "passed",
-                "Factory firmware audit has not passed")
-        require(kind != "image" or metadata.get("simulation_validation") == "passed",
-                "Same-build simulation has not passed")
-        metadata_by_kind[kind] = metadata
-    image_metadata = metadata_by_kind["image"]
-    require(all(metadata_by_kind["display"].get(key) == image_metadata.get(key)
-                for key in ("run_id", "run_attempt")), "Build run identity mismatch")
-    simulation.verify_report(
-        simulation.load_report(files["simulation-result.json"][0]),
-        firmware_sha256=files[next(iter(images))][2], display_sha256=files[next(iter(debs))][2],
-        source_commit=source_commit, run_id=image_metadata.get("run_id"),
-        run_attempt=image_metadata.get("run_attempt"))
+    metadata = json.loads(files[f"{kind}-build-metadata.json"][0].read_text(encoding="utf-8"),
+                          object_pairs_hook=unique_object)
+    require(isinstance(metadata, dict) and metadata.get("kind") == kind and
+            metadata.get("build_step_outcome") == "success" and metadata.get("source_commit") == source_commit
+            and isinstance(metadata.get("target"), dict) and
+            all(metadata["target"].get(k) == v for k, v in TARGET.items()) and
+            metadata.get("collection_errors") == [], "Build metadata is not a successful current-source target")
+    require(kind != "image" or metadata.get("image_static_audit") == "passed", "Image audit has not passed")
+    require(kind != "display" or metadata.get("image_static_audit") == "not applicable",
+            "Display metadata has an invalid image audit state")
+    require(all(metadata.get(key) == BUILD[key] for key in
+                ("armbian_commit", "kernel_commit", "kernel_source", "kernel_release")),
+            "Build source configuration mismatch")
+    require(kind != "image" or metadata.get("factory_format") == FORMAT,
+            "Factory firmware format mismatch")
+    require(kind != "image" or metadata.get("factory_static_audit") == "passed",
+            "Factory firmware audit has not passed")
+    require(kind != "image" or metadata.get("simulation_validation") == "passed",
+            "Same-build simulation has not passed")
+    if kind == "image":
+        simulation.verify_report(
+            simulation.load_report(files["simulation-result.json"][0]),
+            firmware_sha256=files[next(iter(images))][2], display_sha256=files[next(iter(debs))][2],
+            source_commit=source_commit, run_id=metadata.get("run_id"),
+            run_attempt=metadata.get("run_attempt"))
     return files
 
 
@@ -224,14 +240,16 @@ def check_tag(args, pending=False):
 
 
 def publish(args, files):
-    # Only the two end-user downloads belong on Releases. The other validated
-    # files are staging/evidence, not extra installation packages for users.
-    downloads = {name: value for name, value in files.items()
-                 if name.endswith(".tar") or re.fullmatch(r"e87n-display_.+_all\.deb", name)}
-    require(len(downloads) == 2, "Release must contain one factory firmware tar and one display package")
+    # Staging includes validation evidence, but each release channel exposes
+    # exactly one end-user download.
+    downloads = {name: value for name, value in files.items() if
+                 (args.kind == "image" and name.endswith(".tar")) or
+                 (args.kind == "display" and re.fullmatch(r"e87n-display_.+_all\.deb", name))}
+    require(len(downloads) == 1, "Release must contain exactly one public payload")
+    title_kind = "firmware" if args.kind == "image" else "display"
     try:
         gh("release", "create", args.tag, "--repo", args.repository, "--target", args.source_commit,
-           "--title", f"E87N {args.tag}", "--notes-file", files["RELEASE-NOTES.md"][0],
+           "--title", f"E87N {title_kind} {args.tag}", "--notes-file", files["RELEASE-NOTES.md"][0],
            "--draft", "--prerelease", "--latest=false")
         release_id = check_release(find_created_release(args), args, True)
         check_remote_assets(args, release_id, {})  # Never adopt or overwrite preexisting assets.
@@ -251,6 +269,7 @@ def publish(args, files):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("command", choices=("preflight", "publish"))
+    parser.add_argument("--kind", required=True, choices=("image", "display"))
     for option in ("repository", "source-commit", "tag"):
         parser.add_argument("--" + option, required=True)
     parser.add_argument("--assets")
@@ -261,7 +280,7 @@ def main(argv=None):
         require(re.fullmatch(SHA, args.source_commit), "Invalid source commit")
         args.source_commit = args.source_commit.lower()
         require(bool(args.assets) == (args.command == "publish"), "--assets is required only for publish")
-        files = validate_assets(args.assets, args.source_commit) if args.command == "publish" else None
+        files = validate_assets(args.assets, args.source_commit, args.kind) if args.command == "publish" else None
         preflight(args)
         if files is not None:
             publish(args, files)

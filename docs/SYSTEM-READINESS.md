@@ -1,6 +1,6 @@
 # E87N 最小系统范围与验证状态
 
-当前目标为 **Debian 13.7 Trixie / Linux 6.18.52 最小命令行系统**，版本以中央配置为准，包含正常 APT、有线 DHCP、SSH、预装小屏包和内核风扇温控。2026 年 9 月 21 日，真实 E87N 已启动 Debian 13 并完成屏幕服务、中文字体、双网口采样、温度和风扇控制验收；实测记录见[真实板卡验收记录](FINAL-VALIDATION-20260921.md)。本次源码改动提交后仍需由手动 GitHub Actions 重新生成新的正式 Release，不能把此前 Release 当作包含本轮改动的镜像。
+当前目标为 **Debian 13.7 Trixie / Linux 6.18.52 最小命令行系统**，版本以中央配置为准，包含正常 APT、有线 DHCP、SSH、预装小屏包和内核风扇温控。2026 年 9 月 21 日，真实 E87N 已启动 Debian 13 并完成屏幕服务、中文字体、双网口采样、温度和风扇控制验收；实测记录见[真实板卡验收记录](FINAL-VALIDATION-20260921.md)。本次固件源码改动提交后仍需由 Firmware workflow 生成新的 Firmware Release，不能把此前 Release 当作包含本轮改动的镜像；只涉及 display 用户空间的后续更新可以走独立 Display Release，无需重建固件。
 
 现场 E87N 已验证 `pwm-fan` cooling device、`step_wise` policy 和 PWM 输出均存在；当前硬件没有 tachometer，因此 RPM 不可读。Linux CPUFreq 目录不存在，表示本镜像使用固件固定频率，尚未启用未经验证的 MT7987 DVFS。eth0/eth1 的 checksum、TSO/GSO/GRO 普通卸载已启用，但没有 WED/HNAT 注册证据；`e87nctl acceleration status` 只报告这些边界，不把 Kconfig 或普通卸载宣称为硬件转发加速。
 
@@ -40,7 +40,7 @@ R4 SHA-256：`b3587a5377edf7c95f0d620eb038e67643287ac75629f20cc1b071e5dfa47545`�
 | 设备身份 | 镜像清除 SSH host keys；首次 SSH 前生成独立密钥；空 machine-id 留待首启生成 | 副本上的密钥生成与持久性已测；完整首启服务时序仍待验证 |
 | 网络与时间 | 两个有线网口使用 networkd/netplan DHCP；helper 在 DHCP 前只读 p2 `0x24`/`0x2a` 的 factory MAC；resolved/timesyncd；`Asia/Shanghai` | 原系统只读确认 eth0/eth1 的 of_node 为 mac0/mac1；新 helper 顺序、DHCP/DNS/NTP 与跨重启地址仍待测，无固定管理 IP 或 LAN/WAN/NAT 预设 |
 | 语言与软件管理 | `zh_CN.UTF-8`、`LANGUAGE=zh_CN:zh`；Debian 签名源，正常 `apt update` / `apt install` | UTF-8 与真实 APT 安装已在副本测试；包与 locale 不代表硬件验证 |
-| 小屏与风扇 | 内核自动温控；镜像预装 `e87n-display`，启用 LCD/背光、模块加载配置和显示服务；同版本 deb 独立发布 | 实机已验证 framebuffer、中文和彩色界面、背光命令、温度、cooling level、PWM 和短时风扇测试；无 tachometer，RPM 不可读，光学颜色/长期散热仍未量测 |
+| 小屏与风扇 | 内核自动温控；镜像预装并由 QEMU 验证同源 `e87n-display` 基线；后续 deb 由独立 Display Release 发布，不要求与 firmware 同版本 | 实机已验证 framebuffer、中文和彩色界面、背光命令、温度、cooling level、PWM 和短时风扇测试；无 tachometer，RPM 不可读，光学颜色/长期散热仍未量测 |
 | 额外存储 | `E87N_EXTRA_STORAGE=no`；DM/LUKS/LVM/RAID 等额外内核模块显式选择构建；管理套件按需安装 | 不预装 RAID/LVM 管理套件，不创建阵列、加密卷或格式化磁盘，不提供加密/LVM 根启动承诺 |
 | 诊断 | `e87nctl doctor` 检查身份、内存、根分区、网络、温控/屏幕注册和内核前提 | 始终报告 `hardware_validation=not-performed`，不会自动压力测试或写硬件 |
 | 更新 | Debian 签名仓库；保留内核/DTB/BSP hold；允许 apt update 和安装用户空间软件 | 不能解除内核 hold：单改 `/boot`/模块不会更新 p4 FIT；后续升级需成套重建 FIT/root/initrd/DTB/模块 |

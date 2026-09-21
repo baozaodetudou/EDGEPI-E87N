@@ -1,86 +1,114 @@
-# GitHub Actions：手动构建并发布
+# GitHub Actions：独立 Firmware 与 Display 发布
 
-本仓库只有一个生产工作流：
+本仓库使用两个互相独立的生产发布通道。它们都只响应 `workflow_dispatch`；push、Pull
+Request、tag push 和定时任务不会自动发布，也不会自动刷写设备。
 
-[E87N Debian 13 手动构建与发布](https://github.com/baozaodetudou/EDGEPI-E87N/actions/workflows/build-e87n.yml)
+- [**Firmware workflow / Release**](https://github.com/baozaodetudou/EDGEPI-E87N/actions/workflows/build-e87n.yml)：
+  构建和验证完整 Debian 固件，只发布
+  `*-uboot-firmware.tar`。
+- [**Display workflow / Release**](https://github.com/baozaodetudou/EDGEPI-E87N/actions/workflows/build-display.yml)：
+  构建和验证显示软件包，只发布
+  `e87n-display_<version>_all.deb`。
 
-它只响应 `workflow_dispatch`。push、Pull Request、tag push 和定时任务都不会自动消耗
-构建资源，也不会自动刷写或发布。
+两个 workflow 使用独立的 run、tag、Release、版本和 SHA-256。Display 发布失败不会阻止
+已经验证的 Firmware Release；发布新版 display 也不要求重建 firmware。
 
-## 一键操作
+## 触发 Firmware 发布
 
-1. 打开上面的 Actions 页面。
-2. 选择左侧工作流 **E87N Debian 13 手动构建与发布**。
-3. 点击右上角 **Run workflow**。
-4. 分支保持 `main`，不填写任何输入，点击绿色 **Run workflow**。
-5. 等待 `validate`、`display`、`image` 全部成功，再查看 `release`。
-6. 打开 [Releases](https://github.com/baozaodetudou/EDGEPI-E87N/releases)，下载最新的 Pre-release。
+1. 打开 [E87N Debian 13 ARM64 固件构建与发布](https://github.com/baozaodetudou/EDGEPI-E87N/actions/workflows/build-e87n.yml)。
+2. 点击 **Run workflow**。
+3. 分支保持 `main`，按工作流页面要求确认并启动。
+4. 等待固件检查、镜像构建、静态审计、QEMU 验收和 release 阶段全部成功。
+5. 打开 [Releases](https://github.com/baozaodetudou/EDGEPI-E87N/releases)，进入对应的
+   Firmware Release，下载唯一的项目二进制附件 `*-uboot-firmware.tar`。
 
-工作流没有输入框。版本、Debian 版本、内核版本、Armbian 提交和独立显示包版本都从
-仓库固定配置读取；每次点击都会构建当时 `main` 的实际提交。
-
-## 工作流做什么
+Firmware workflow 的逻辑边界为：
 
 ```text
 validate
-  ├─ CI/YAML/Bash/Python 契约检查
-  ├─ 用户空间、显示、固件、rootfs、网络和包生命周期回归
-  └─ 生成本次运行唯一 tag，拒绝已存在 tag/Release
+  └─ CI/YAML/Bash/Python、固件、rootfs、网络和用户空间回归
 
-display ── 构建并收集 e87n-display_<版本>_all.deb
+image
+  ├─ 从当前源码生成基线 e87n-display 包并预装到 rootfs
+  ├─ 原生 ARM64 构建 Debian 镜像
+  ├─ 静态镜像审计
+  ├─ U-Boot firmware TAR 转换与审计
+  ├─ RAM 诊断产物
+  └─ 使用同源基线 display 包完成 Docker/QEMU 验收
 
-image ─── 原生 ARM64 构建 Debian 镜像
-           ├─ 静态镜像审计
-           ├─ U-Boot firmware TAR 转换与审计
-           ├─ RAM 诊断产物
-           └─ 同一 firmware + 同一 display deb 的 Docker/QEMU 验收
-
-release ─ 只在以上三条都成功后
-           ├─ 下载本次 run 的精确 artifact
-           ├─ 校验源码提交、run ID、attempt、SHA-256 和审计结果
-           └─ 创建并发布 Pre-release
+release
+  ├─ 校验源码提交、run、SHA-256 和审计结果
+  └─ 创建 Firmware Release，只上传 *-uboot-firmware.tar
 ```
 
-发布 tag 形如：
+这里的 display 包是固件构建输入和 QEMU 验收基线，用于证明固件内预装版本可安装、可启动
+并满足包生命周期要求。它不是 Firmware Release 的第二个下载附件，也不要求与以后由
+Display workflow 发布的 deb 保持同一 run、tag 或 SHA-256。
+
+## 触发 Display 发布
+
+1. 打开 [E87N 显示 deb 快速构建与发布](https://github.com/baozaodetudou/EDGEPI-E87N/actions/workflows/build-display.yml)，点击 **Run workflow**。
+2. 等待源码检查、软件包构建和安装/升级/重装/卸载生命周期测试全部成功。
+3. 打开对应的 Display Release，下载唯一的项目二进制附件
+   `e87n-display_<version>_all.deb`。
+
+Display workflow 的逻辑边界为：
 
 ```text
-e87n-trixie-6.18.52-<run_id>-<run_attempt>
+validate
+  └─ 显示源码、配置、打包和版本检查
+
+package
+  ├─ 构建 e87n-display_<version>_all.deb
+  └─ 验证安装、升级、重装、配置保留、卸载和重新安装
+
+release
+  ├─ 校验包版本、源码提交和 SHA-256
+  └─ 创建 Display Release，只上传 e87n-display_<version>_all.deb
 ```
 
-run ID 和 attempt 让每次手动运行都能得到新 tag。失败重试建议重新点击 **Run workflow**，
-而不是重跑旧 run 的 release job；这样会重新编译并生成全新的产物绑定关系。
+Display 可以在兼容的已运行固件上高频升级。只有显示功能开始依赖新的内核、DTB 或其他
+固件能力时，才需要在 Release 正文明确最低兼容 Firmware 版本；普通用户空间更新不需要
+重新构建或刷写固件。
+
+两个通道的 tag 也明确分开：Firmware 使用
+`e87n-<debian>-<kernel>-<run_id>-<run_attempt>`，Display 使用
+`e87n-display-<display_version>-<run_id>-<run_attempt>`。下载时先按 tag 前缀确认通道，再核对
+Release 正文和附件 SHA-256。
 
 ## Release 中的文件
 
-每个成功 Release 只发布两个面向用户的二进制附件。主题、页面轮换和默认配置会随本次
-`main` 提交一起进入固件，并同步进入独立的 deb：
+| Release 通道 | 唯一的项目二进制附件 | 用途 |
+| --- | --- | --- |
+| Firmware | `*-uboot-firmware.tar` | 上传到原厂 U-Boot Web 的 plain firmware / `firmware` 入口 |
+| Display | `e87n-display_<version>_all.deb` | 在已经启动的 Debian 中安装或升级屏幕服务 |
 
-| 文件 | 用途 |
-| --- | --- |
-| `*-uboot-firmware.tar` | 上传到原厂 U-Boot Web 的 plain firmware / `firmware` 入口 |
-| `e87n-display_<版本>_all.deb` | 已启动 Debian 系统中的屏幕服务安装/升级 |
-
-Release 正文包含两个文件的 SHA-256、系统版本、内核 release、源码提交和硬件验收边界。
-内核包、构建日志、RAM 诊断和 QEMU 结果保留在 Actions artifact 中，供排查使用；它们
-不是额外的刷写文件。
+每个 Release 正文只为本通道附件提供 SHA-256、源码提交、版本和验收边界。GitHub 自动显示
+的 Source code zip/tar.gz 不是项目发布的固件或 deb。内核包、构建日志、RAM 诊断和 QEMU
+结果保留在对应 Actions artifact 中，供排查使用。
 
 ## 成功标准
 
-只有同时满足下列条件才会出现已发布 Release：
+Firmware Release 需要同时满足：
 
-- `validate` 成功；
-- 显示包构建成功，版本来自 `packaging/e87n-display/VERSION`；
-- 镜像 job 在原生 ARM64 runner 上成功；
+- 固件相关检查和原生 ARM64 镜像构建成功；
 - firmware TAR 静态审计通过；
-- 同一 firmware 和同一显示包完成 QEMU/systemd/SSH/DHCP/APT 生命周期验证；
-- 发布脚本重新核对 artifact 的 SHA-256、源码提交、run ID 和 attempt。
+- 固件内预装的同源基线 display 包完成 QEMU/systemd/SSH/DHCP/APT 验证；
+- 发布阶段重新核对 TAR 的 SHA-256、源码提交和本次 run 证据。
 
-GitHub 页面上的 workflow “运行成功”与 Release “已发布”是两个阶段；如果 release 失败，
-先下载失败 job 的日志和 failure evidence，不要拿部分 artifact 刷机。
+Display Release 需要同时满足：
+
+- 版本来自 `packaging/e87n-display/VERSION`，包名和元数据正确；
+- 显示源码、配置及软件包测试通过；
+- 安装、升级、重装、配置保留、卸载和重新安装生命周期通过；
+- 发布阶段重新核对 deb 的 SHA-256、版本、源码提交和本次 run 证据。
+
+workflow “运行成功”与 Release “已发布”仍是两个阶段。某一通道发布失败时，只排查该通道
+的日志和 failure evidence，不要从失败 run 中取部分 artifact 作为正式下载。
 
 ## 权限与安全
 
-- 普通 job 只有 `contents: read`；只有最后的 `release` job 拥有 `contents: write`。
+- 普通 job 只有 `contents: read`；每个通道只有自己的 `release` job 拥有 `contents: write`。
 - checkout 和 upload-artifact 使用固定提交 SHA，而不是可变 tag。
 - 不读取 SSH 私钥、设备密码或工作区外敏感文件。
 - 构建明确禁用写卡、外部服务器推送和自动刷写。
@@ -91,8 +119,10 @@ GitHub 页面上的 workflow “运行成功”与 Release “已发布”是两
 Linux 环境可执行：
 
 ```sh
-bash scripts/ci-validate.sh
+bash scripts/ci-validate.sh image
 bash scripts/ci-regressions.sh
+bash scripts/ci-validate.sh display
+bash scripts/ci-display-regressions.sh
 ```
 
 macOS 可先执行 YAML、Python 和便携脚本检查；完整镜像、loop 挂载、root-owned dpkg

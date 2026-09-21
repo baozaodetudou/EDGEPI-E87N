@@ -5,6 +5,12 @@ container, loop devices, physical E87N or LAN SSH target is used by this runner.
 The container is built independently from Debian 13.7 slim pinned by digest;
 it does not require the local firmware builder image.
 
+The `--display-deb` input is the same-source baseline package produced for and
+embedded in this firmware build. QEMU uses it to validate the firmware's
+preinstalled display baseline and package lifecycle. It is not a requirement
+that a later independently published Display Release use the same run, tag,
+version or SHA-256; Display updates do not require rebuilding the firmware.
+
 ```bash
 bash testing/run-container.sh \
   --firmware /absolute/path/final-uboot-firmware.tar \
@@ -76,7 +82,7 @@ prompt. The acceptance script checks:
 * Signed-source `apt-get update` with any update error fatal, installation and
   execution of `hello`, kernel/DTB holds and `upgrade`/`dist-upgrade` simulations
   that must not install/remove those held packages.
-* Exact supplied display deb SHA, install, same-version reinstall, remove,
+* Exact supplied firmware-baseline display deb SHA, install, same-version reinstall, remove,
   install after remove, and final remove. Locally edited registered conffiles
   must remain byte-identical through the lifecycle and reboots. QEMU does not
   validate the physical display/fan or require the display daemon to work on
@@ -91,7 +97,8 @@ prompt. The acceptance script checks:
 
 `OUTPUTDIR/result.json` begins as FAIL and becomes PASS only after all phases,
 input rehashing, `validate_artifact_binding` and the shared CI `validate_report`
-pass. It binds TAR, embedded FIT/root, display deb SHA-256 and source/run/attempt.
+pass. It binds TAR, embedded FIT/root, firmware-baseline display deb SHA-256 and
+the firmware source/run/attempt. It does not bind future Display Releases.
 Failures return a nonzero exit status and retain FAIL plus partial evidence;
 the release validator intentionally rejects incomplete or failed results.
 Container setup failures also produce a minimal FAIL report.

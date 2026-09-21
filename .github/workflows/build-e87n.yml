@@ -1,6 +1,6 @@
-name: E87N Debian 13 手动构建与发布
+name: E87N Debian 13 ARM64 固件构建与发布
 
-run-name: "E87N release · 手动构建 #${{ github.run_number }}"
+run-name: "E87N image release · 手动构建 #${{ github.run_number }}"
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: e87n-candidate-${{ github.workflow }}-${{ github.ref }}
+  group: e87n-image-${{ github.ref }}
   # Let the current image finish and upload its evidence.
   cancel-in-progress: false
 
@@ -33,7 +33,7 @@ jobs:
         with:
           persist-credentials: false
           clean: false
-      - name: Generate release tag and check manual main-branch build
+      - name: Generate image release tag and check manual main-branch build
         id: release_tag
         env:
           GH_TOKEN: ${{ github.token }}
@@ -48,7 +48,7 @@ jobs:
           kernel_version=$(python3 scripts/build_config.py kernel_version)
           release_tag="e87n-${release}-${kernel_version}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           image_artifact="e87n-${release}-${kernel_version}-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          python3 scripts/ci-publish-release.py preflight \
+          python3 scripts/ci-publish-release.py preflight --kind image \
             --repository "$GITHUB_REPOSITORY" --source-commit "$GITHUB_SHA" --tag "$release_tag"
           printf 'release_tag=%s\n' "$release_tag" >> "$GITHUB_OUTPUT"
           printf 'image_artifact=%s\n' "$image_artifact" >> "$GITHUB_OUTPUT"
@@ -65,11 +65,11 @@ jobs:
             GOBIN="$RUNNER_TEMP/e87n-tools" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
             echo "$RUNNER_TEMP/e87n-tools" >> "$GITHUB_PATH"
           } 2>&1 | tee output/ci/logs/validation-tools.log
-      - name: Validate workflow and CI helpers without building
+      - name: Validate image workflow and CI helpers without building
         run: |
           mkdir -p output/ci/logs
-          bash scripts/ci-validate.sh 2>&1 | tee output/ci/logs/validation.log
-      - name: Run userspace, auditor and isolated package regressions
+          bash scripts/ci-validate.sh image 2>&1 | tee output/ci/logs/validation.log
+      - name: Run full userspace, image and package regressions
         timeout-minutes: 10
         run: bash scripts/ci-regressions.sh
       - name: Capture validation failure evidence
@@ -81,101 +81,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: e87n-validation-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            output/ci/logs/
-            output/ci/failure-evidence/
-          if-no-files-found: warn
-          retention-days: 14
-
-  release:
-    # The image job must pass same-build Docker/QEMU acceptance of the final
-    # firmware TAR; collection, preparation and publication each recheck its
-    # evidence against the TAR/deb hashes and source/run/attempt identity.
-    needs: [validate, display, image]
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && needs.validate.result == 'success' && needs.display.result == 'success' && needs.image.result == 'success' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    permissions:
-      contents: write
-      actions: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          clean: false
-      - name: Download this run's successful artifacts
-        env:
-          GH_TOKEN: ${{ github.token }}
-          IMAGE_ARTIFACT: ${{ needs.validate.outputs.image_artifact }}
-        run: |
-          gh auth status --hostname github.com >/dev/null 2>&1
-          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
-            --name "$IMAGE_ARTIFACT" \
-            --dir output/release-input/image
-          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
-            --name "e87n-display-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
-            --dir output/release-input/display
-      - name: Verify and prepare release assets
-        env:
-          RELEASE_TAG: ${{ needs.validate.outputs.release_tag }}
-        run: |
-          python3 scripts/ci-prepare-release.py \
-            --image-artifact output/release-input/image --display-artifact output/release-input/display \
-            --output output/release-assets --source-commit "$GITHUB_SHA" \
-            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
-            --tag "$RELEASE_TAG" --repository "$GITHUB_REPOSITORY"
-      - name: Publish verified assets as a tagged experimental release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ needs.validate.outputs.release_tag }}
-        run: |
-          python3 scripts/ci-publish-release.py publish \
-            --repository "$GITHUB_REPOSITORY" --source-commit "$GITHUB_SHA" \
-            --tag "$RELEASE_TAG" --assets output/release-assets
-
-  display:
-    needs: validate
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          clean: false
-      - name: Prepare package tools
-        run: |
-          mkdir -p output/ci/logs
-          sudo -n apt-get update
-          sudo -n apt-get install -y --no-install-recommends dpkg-dev xz-utils
-      - name: Build versioned e87n-display package
-        id: build
-        timeout-minutes: 10
-        run: bash scripts/ci-build.sh display
-      - name: Capture display failure evidence
-        if: ${{ always() }}
-        env:
-          BUILD_OUTCOME: ${{ steps.build.outcome }}
-        run: bash scripts/ci-capture-failure-evidence.sh display "$BUILD_OUTCOME"
-      - name: Collect package, checksums and logs
-        if: ${{ always() }}
-        env:
-          BUILD_OUTCOME: ${{ steps.build.outcome }}
-        run: python3 scripts/ci-collect-artifacts.py --kind display --status "$BUILD_OUTCOME"
-      - name: Upload display candidate
-        if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: e87n-display-candidate-${{ github.run_id }}-${{ github.run_attempt }}
-          path: output/ci/artifacts/
-          if-no-files-found: warn
-          compression-level: 0
-          retention-days: 14
-      - name: Upload package build logs independently
-        if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: e87n-display-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          name: e87n-image-validation-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             output/ci/logs/
             output/ci/failure-evidence/
@@ -243,3 +149,45 @@ jobs:
             source/armbian-build/output/logs/
           if-no-files-found: warn
           retention-days: 14
+
+  release:
+    # Collection and publication recheck the final firmware and same-build
+    # QEMU evidence against the source/run/attempt identity.
+    needs: [validate, image]
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && needs.validate.result == 'success' && needs.image.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          clean: false
+      - name: Download this run's image artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_ARTIFACT: ${{ needs.validate.outputs.image_artifact }}
+        run: |
+          gh auth status --hostname github.com >/dev/null 2>&1
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "$IMAGE_ARTIFACT" \
+            --dir output/release-input/image
+      - name: Verify and prepare image release assets
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.release_tag }}
+        run: |
+          python3 scripts/ci-prepare-release.py \
+            --kind image --artifact output/release-input/image \
+            --output output/release-assets --source-commit "$GITHUB_SHA" \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --tag "$RELEASE_TAG" --repository "$GITHUB_REPOSITORY"
+      - name: Publish verified firmware as a tagged experimental release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.validate.outputs.release_tag }}
+        run: |
+          python3 scripts/ci-publish-release.py publish --kind image \
+            --repository "$GITHUB_REPOSITORY" --source-commit "$GITHUB_SHA" \
+            --tag "$RELEASE_TAG" --assets output/release-assets

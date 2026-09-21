@@ -27,19 +27,29 @@
 
 ### 获取产物
 
-维护者在 GitHub Actions 中手动点击一次 **Run workflow**，流程会自动完成检查、编译、
-镜像审计、U-Boot 固件转换、同产物 QEMU 验收，并发布一个新的 GitHub Pre-release。
-不需要填写版本号、tag 或其他参数。
+发布分为两个互不阻塞的手动通道：
 
-- [Actions 手动构建入口](https://github.com/baozaodetudou/EDGEPI-E87N/actions/workflows/build-e87n.yml)
+- **Firmware workflow / Release**：完成检查、镜像编译、U-Boot 固件转换与审计，并用
+  固件构建时同源生成的基线 `e87n-display` 包执行 QEMU 验收；成功后只公开一个
+  `*-uboot-firmware.tar`。
+- **Display workflow / Release**：独立构建并验证显示包的安装、升级和卸载生命周期；成功后
+  只公开一个 `e87n-display_<version>_all.deb`。
+
+固件仍预装并验证构建时的 display 基线版本，但后续 display 可以按自己的版本和节奏高频
+发布，无需重建或重新刷写固件。两个通道不要求使用相同 tag、版本号、run 或发布日期。
+
+- [Firmware workflow](https://github.com/baozaodetudou/EDGEPI-E87N/actions/workflows/build-e87n.yml)
+- [Display workflow](https://github.com/baozaodetudou/EDGEPI-E87N/actions/workflows/build-display.yml)
 - [Releases 下载入口](https://github.com/baozaodetudou/EDGEPI-E87N/releases)
 - [完整 Actions 说明](docs/GITHUB-ACTIONS.md)
 - [下载、校验与刷写边界](docs/DOWNLOADS.md)
 
-每个成功 Release 默认只有两个用户需要下载的附件：
+选择与任务对应的 Release：
 
-1. `*-uboot-firmware.tar`：原厂 U-Boot Web 页面使用的 Debian 系统固件。
-2. `e87n-display_<版本>_all.deb`：可在已经启动的 Debian 上独立安装/升级的屏幕控制包。
+1. 新装或升级整个系统时，进入 **Firmware Release**，只下载
+   `*-uboot-firmware.tar`。
+2. 已运行 Debian、只升级屏幕程序时，进入 **Display Release**，只下载
+   `e87n-display_<version>_all.deb`。
 
 源码压缩包、GPT `.img`、`.img.xz`、Actions artifact 和内核调试包不是同一种交付物，
 请按[下载说明](docs/DOWNLOADS.md)区分。
@@ -49,7 +59,8 @@
 固件面向 E87N 原厂 U-Boot Web 恢复页的 `firmware` / plain firmware 入口。刷写前必须：
 
 - 确认设备可以稳定进入 U-Boot Web 页面；
-- 下载后执行 `sha256sum --check SHA256SUMS` 或按 Release 正文核对摘要；
+- 下载后执行 `sha256sum <固件文件>`（macOS：`shasum -a 256 <固件文件>`），并按
+  Firmware Release 正文核对摘要；
 - 保持设备有明确的断电和恢复路径；
 - 不要把固件 TAR 上传到 LuCI、OpenWrt `sysupgrade`、SIMG、GPT 或 FIP 输入框。
 
@@ -127,7 +138,7 @@ userpatches/                   Armbian 配置、内核配置和 E87N 内核补�
 scripts/                       构建、审计、固件转换、发布和校验工具
 tests/                         单元、静态审计、包生命周期和 CI 契约测试
 docs/                          构建、刷写、网络、屏幕、验证和发布文档
-.github/workflows/             唯一的手动构建与 Release 工作流
+.github/workflows/             Firmware 与 Display 的独立手动构建/发布工作流
 ```
 
 ## 重要边界

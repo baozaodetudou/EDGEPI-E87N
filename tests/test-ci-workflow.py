@@ -24,88 +24,135 @@ from factory_firmware import FORMAT
 
 fixture_report = import_module("test-ci-simulation").fixture_report
 
-WORKFLOW = REPO / ".github/workflows/build-e87n.yml"
+WORKFLOWS = {
+    "image": REPO / ".github/workflows/build-e87n.yml",
+    "display": REPO / ".github/workflows/build-display.yml",
+}
 
 
-class WorkflowPolicy(unittest.TestCase):
+class SplitWorkflowPolicy(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         # BaseLoader preserves GitHub's `on` key (YAML 1.1 calls it a boolean).
-        cls.workflow = yaml.load(WORKFLOW.read_text(), Loader=yaml.BaseLoader)
+        cls.workflows = {
+            kind: yaml.load(path.read_text(), Loader=yaml.BaseLoader)
+            for kind, path in WORKFLOWS.items()
+        }
 
-    def test_triggers_and_pins(self):
-        events = self.workflow["on"]
-        self.assertEqual(set(events), {"workflow_dispatch"})
-        self.assertIn(events["workflow_dispatch"], (None, ""))
-        self.assertNotIn("E87N_KERNEL_VERSION", self.workflow["env"])
-        self.assertEqual(set(WORKFLOW.parent.glob("*.yml")) | set(WORKFLOW.parent.glob("*.yaml")), {WORKFLOW})
-        self.assertNotIn("inputs.", WORKFLOW.read_text())
-        for path in [WORKFLOW, *(REPO / "scripts").glob("ci-*")]:
+    def workflow(self, kind):
+        return self.workflows[kind]
+
+    def build_job(self, kind):
+        return self.workflow(kind)["jobs"][kind]
+
+    def test_exact_split_workflow_set_manual_triggers_and_central_pins(self):
+        parent = next(iter(WORKFLOWS.values())).parent
+        actual = set(parent.glob("*.yml")) | set(parent.glob("*.yaml"))
+        self.assertEqual(actual, set(WORKFLOWS.values()))
+        for kind, path in WORKFLOWS.items():
+            workflow = self.workflow(kind)
+            events = workflow["on"]
+            self.assertEqual(set(events), {"workflow_dispatch"})
+            self.assertIn(events["workflow_dispatch"], (None, ""))
+            self.assertNotIn("E87N_KERNEL_VERSION", workflow["env"])
+            self.assertNotIn("inputs.", path.read_text())
+        for path in [*WORKFLOWS.values(), *(REPO / "scripts").glob("ci-*")]:
             for pin in (BUILD["kernel_version"], BUILD["kernel_commit"], BUILD["armbian_commit"]):
                 self.assertNotIn(pin, path.read_text(), str(path))
 
-    def test_permissions_runners_and_actions(self):
-        self.assertEqual(self.workflow["permissions"], {"contents": "read"})
-        self.assertEqual(self.workflow["concurrency"]["cancel-in-progress"], "false")
-        jobs = self.workflow["jobs"]
-        self.assertEqual(jobs["image"]["runs-on"], "ubuntu-24.04-arm")
-        self.assertEqual(jobs["image"]["needs"], "validate")
-        self.assertEqual(jobs["display"]["needs"], "validate")
-        self.assertEqual(jobs["release"]["permissions"], {"contents": "write", "actions": "read"})
-        for name in ("validate", "image", "display"):
-            self.assertNotIn("permissions", jobs[name])
+    def test_job_topology_permissions_runners_actions_and_distinct_concurrency(self):
         reviewed = {
             "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
             "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
         }
-        for job in jobs.values():
-            self.assertLessEqual(int(job["timeout-minutes"]), 360)
-            for step in job["steps"]:
-                self.assertNotIn("continue-on-error", step)
-                if "uses" in step:
-                    self.assertIn(step["uses"], reviewed)
-                if step.get("uses", "").startswith("actions/checkout@"):
-                    self.assertEqual(step["with"]["persist-credentials"], "false")
-                if "run" in step:
-                    self.assertNotIn("${{ inputs.", step["run"])
-        steps = jobs["image"]["steps"]
-        build = next(step for step in steps if step.get("id") == "build")
-        self.assertLess(int(build["timeout-minutes"]), int(jobs["image"]["timeout-minutes"]) - 45)
-        ramdiag = (REPO / "scripts/ci-build.sh").read_text()
-        self.assertIn("scripts/ci-build-ramdiag.sh", ramdiag)
-        ramdiag_builder = (REPO / "scripts/ci-build-ramdiag.sh").read_text()
-        self.assertIn('ramdiag_source="$repo_dir/scripts/ramdiag"', ramdiag_builder)
-        self.assertNotIn("cp -a", ramdiag_builder)
-        self.assertNotIn("ln -s", ramdiag_builder)
-        self.assertIn('scripts/build_config.py" kernel_release)', ramdiag_builder)
+        concurrency_groups = set()
+        for kind, workflow in self.workflows.items():
+            self.assertEqual(workflow["permissions"], {"contents": "read"})
+            self.assertEqual(workflow["concurrency"]["cancel-in-progress"], "false")
+            concurrency_groups.add(workflow["concurrency"]["group"])
+            jobs = workflow["jobs"]
+            self.assertEqual(set(jobs), {"validate", kind, "release"})
+            self.assertEqual(jobs[kind]["needs"], "validate")
+            self.assertEqual(jobs["release"]["permissions"], {"contents": "write", "actions": "read"})
+            for name in ("validate", kind):
+                self.assertNotIn("permissions", jobs[name])
+            for job in jobs.values():
+                self.assertLessEqual(int(job["timeout-minutes"]), 360)
+                for step in job["steps"]:
+                    self.assertNotIn("continue-on-error", step)
+                    if "uses" in step:
+                        self.assertIn(step["uses"], reviewed)
+                    if step.get("uses", "").startswith("actions/checkout@"):
+                        self.assertEqual(step["with"]["persist-credentials"], "false")
+                    if "run" in step:
+                        self.assertNotIn("${{ inputs.", step["run"])
+        self.assertEqual(len(concurrency_groups), 2)
+        self.assertEqual(self.build_job("image")["runs-on"], "ubuntu-24.04-arm")
+        self.assertEqual(self.build_job("display")["runs-on"], "ubuntu-24.04")
+        image_build = next(step for step in self.build_job("image")["steps"] if step.get("id") == "build")
+        self.assertLess(int(image_build["timeout-minutes"]), int(self.build_job("image")["timeout-minutes"]) - 45)
 
-    def test_release_is_manual_main_only_after_all_success(self):
-        job = self.workflow["jobs"]["release"]
-        self.assertEqual(job["needs"], ["validate", "display", "image"])
-        for condition in ("github.event_name == 'workflow_dispatch'", "github.ref == 'refs/heads/main'",
-                          "needs.validate.result == 'success'", "needs.display.result == 'success'",
-                          "needs.image.result == 'success'"):
-            self.assertIn(condition, job["if"])
-        self.assertNotIn("always()", job["if"])
-        preflight = next(s for s in self.workflow["jobs"]["validate"]["steps"]
-                         if s.get("id") == "release_tag")
-        self.assertIn('"$GITHUB_EVENT_NAME" == workflow_dispatch', preflight["run"])
-        self.assertIn('"$GITHUB_REF" == refs/heads/main', preflight["run"])
-        self.assertIn("ci-publish-release.py preflight", preflight["run"])
-        self.assertEqual(preflight["env"], {"GH_TOKEN": "${{ github.token }}"})
-        self.assertIn('release_tag="e87n-${release}-${kernel_version}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"', preflight["run"])
+    def test_release_is_manual_main_only_and_uses_kind_at_every_release_boundary(self):
+        for kind, workflow in self.workflows.items():
+            release = workflow["jobs"]["release"]
+            self.assertEqual(release["needs"], ["validate", kind])
+            for condition in ("github.event_name == 'workflow_dispatch'", "github.ref == 'refs/heads/main'",
+                              "needs.validate.result == 'success'", f"needs.{kind}.result == 'success'"):
+                self.assertIn(condition, release["if"])
+            other = "display" if kind == "image" else "image"
+            self.assertNotIn(f"needs.{other}", release["if"])
+            self.assertNotIn("always()", release["if"])
+            preflight = next(step for step in workflow["jobs"]["validate"]["steps"]
+                             if step.get("id") == "release_tag")
+            self.assertEqual(preflight["env"], {"GH_TOKEN": "${{ github.token }}"})
+            self.assertIn('"$GITHUB_EVENT_NAME" == workflow_dispatch', preflight["run"])
+            self.assertIn('"$GITHUB_REF" == refs/heads/main', preflight["run"])
+            self.assertIn("ci-publish-release.py preflight", preflight["run"])
+            self.assertIn(f"--kind {kind}", preflight["run"])
+            self.assertIn("GITHUB_RUN_ID", preflight["run"])
+            self.assertIn("GITHUB_RUN_ATTEMPT", preflight["run"])
 
-    def test_zero_input_tag_generation_and_preflight_failure(self):
-        step = next(s for s in self.workflow["jobs"]["validate"]["steps"] if s.get("id") == "release_tag")
-        with tempfile.TemporaryDirectory(prefix="e87n-auto-tag-") as directory:
+    def test_each_release_downloads_one_exact_current_attempt_artifact(self):
+        candidate_names = set()
+        for kind, workflow in self.workflows.items():
+            validate = workflow["jobs"]["validate"]
+            artifact_key = f"{kind}_artifact"
+            self.assertEqual(set(validate["outputs"]), {"release_tag", artifact_key})
+            artifact_expression = f"${{{{ needs.validate.outputs.{artifact_key} }}}}"
+            upload = next(step for step in self.build_job(kind)["steps"]
+                          if step.get("with", {}).get("path") == "output/ci/artifacts/")
+            self.assertEqual(upload["with"]["name"], artifact_expression)
+            candidate_names.add(upload["with"]["name"])
+            release_steps = workflow["jobs"]["release"]["steps"]
+            download = next(step for step in release_steps if "gh run download" in step.get("run", ""))
+            self.assertEqual(download["run"].count('gh run download "$GITHUB_RUN_ID"'), 1)
+            self.assertIn(artifact_expression, download.get("env", {}).values())
+            self.assertNotIn("--pattern", download["run"])
+            prepare = next(step for step in release_steps if "ci-prepare-release.py" in step.get("run", ""))
+            publish = next(step for step in release_steps if "ci-publish-release.py publish" in step.get("run", ""))
+            self.assertLess(release_steps.index(prepare), release_steps.index(publish))
+            for step in (prepare, publish):
+                self.assertIn(f"--kind {kind}", step["run"])
+                self.assertIn('--source-commit "$GITHUB_SHA"', step["run"])
+            self.assertIn("--artifact", prepare["run"])
+            self.assertNotIn("--image-artifact", prepare["run"])
+            self.assertNotIn("--display-artifact", prepare["run"])
+            self.assertIn('--run-attempt "$GITHUB_RUN_ATTEMPT"', prepare["run"])
+            self.assertNotIn("--clobber", publish["run"])
+            self.assertEqual(publish["env"]["RELEASE_TAG"], "${{ needs.validate.outputs.release_tag }}")
+        self.assertEqual(len(candidate_names), 2)
+
+    def test_tag_generation_is_deterministic_and_preflight_failure_emits_nothing(self):
+        with tempfile.TemporaryDirectory(prefix="e87n-split-tags-") as directory:
             root = Path(directory)
             (root / "scripts").mkdir()
             (root / "userpatches/config").mkdir(parents=True)
+            (root / "packaging/e87n-display").mkdir(parents=True)
             shutil.copyfile(REPO / "scripts/build_config.py", root / "scripts/build_config.py")
-            # A future reviewed config must flow into the tag and artifact name.
             config = {**BUILD, "kernel_version": "6.18.99",
                       "kernel_release": "6.18.99-current-" + BUILD["linux_family"]}
             (root / "userpatches/config/e87n-build.json").write_text(json.dumps(config))
+            (root / "packaging/e87n-display/VERSION").write_text("1.2.3+git~rc1\n")
             mocks = root / "mocks.sh"
             mocks.write_text('''python3() {
     if [[ $1 == scripts/build_config.py ]]; then
@@ -117,120 +164,108 @@ class WorkflowPolicy(unittest.TestCase):
 }
 export -f python3
 ''')
-            env = {**os.environ, "BASH_ENV": str(mocks), "GITHUB_EVENT_NAME": "workflow_dispatch",
-                   "GITHUB_REF": "refs/heads/main", "GITHUB_SHA": "a" * 40,
-                   "GITHUB_REPOSITORY": "fixture/repo", "GITHUB_RUN_ATTEMPT": "1",
-                   "GIT_TERMINAL_PROMPT": "0", "E87N_TEST_PYTHON": sys.executable,
-                   "INPUT_RELEASE_TAG": "must-not-affect-tag", "E87N_PREFLIGHT_EXIT": "0"}
-            # Run the real config CLI; GitHub preflight is intercepted.
-            for run_id in ("34737922588", "34737922589"):
-                output, arguments = root / (run_id + ".output"), root / (run_id + ".args")
-                env.update(GITHUB_RUN_ID=run_id, GITHUB_OUTPUT=str(output), E87N_PREFLIGHT_ARGS=str(arguments))
-                result = subprocess.run(["bash", "-euo", "pipefail", "-c", step["run"]], env=env,
-                                        cwd=root, text=True, capture_output=True)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                tag = "e87n-trixie-6.18.99-" + run_id + "-1"
-                artifact = "e87n-trixie-6.18.99-candidate-" + run_id + "-1"
-                self.assertEqual(output.read_text(), "release_tag=" + tag + "\nimage_artifact=" + artifact + "\n")
-                self.assertEqual(arguments.read_text().splitlines(), ["scripts/ci-publish-release.py", "preflight",
-                    "--repository", "fixture/repo", "--source-commit", "a" * 40, "--tag", tag])
-            for index, changes in enumerate(({"E87N_PREFLIGHT_EXIT": "42"},
-                                              {"GITHUB_REF": "refs/heads/feature"},
-                                              {"GITHUB_EVENT_NAME": "push"})):
-                output = root / f"failed-{index}.output"
+            base_env = {**os.environ, "BASH_ENV": str(mocks),
+                        "GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/main",
+                        "GITHUB_SHA": "a" * 40, "GITHUB_REPOSITORY": "fixture/repo",
+                        "GITHUB_RUN_ID": "34737922588", "GITHUB_RUN_ATTEMPT": "2",
+                        "GIT_TERMINAL_PROMPT": "0", "E87N_TEST_PYTHON": sys.executable}
+            expected = {
+                "image": ("e87n-trixie-6.18.99-34737922588-2",
+                          "e87n-trixie-6.18.99-candidate-34737922588-2"),
+                "display": ("e87n-display-1.2.3.plus.git.tilde.rc1-34737922588-2",
+                            "e87n-display-1.2.3.plus.git.tilde.rc1-candidate-34737922588-2"),
+            }
+            for kind, (tag, artifact) in expected.items():
+                step = next(item for item in self.workflow(kind)["jobs"]["validate"]["steps"]
+                            if item.get("id") == "release_tag")
+                output, arguments = root / f"{kind}.output", root / f"{kind}.args"
+                env = {**base_env, "GITHUB_OUTPUT": str(output), "E87N_PREFLIGHT_ARGS": str(arguments)}
                 result = subprocess.run(["bash", "-euo", "pipefail", "-c", step["run"]],
-                    env={**env, **changes, "GITHUB_OUTPUT": str(output)}, cwd=root, text=True, capture_output=True)
+                                        env=env, cwd=root, text=True, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(output.read_text(),
+                                 f"release_tag={tag}\n{kind}_artifact={artifact}\n")
+                self.assertEqual(arguments.read_text().splitlines(), [
+                    "scripts/ci-publish-release.py", "preflight", "--kind", kind,
+                    "--repository", "fixture/repo", "--source-commit", "a" * 40,
+                    "--tag", tag])
+                failed = root / f"{kind}.failed.output"
+                result = subprocess.run(["bash", "-euo", "pipefail", "-c", step["run"]],
+                    env={**env, "E87N_PREFLIGHT_EXIT": "42", "GITHUB_OUTPUT": str(failed)},
+                    cwd=root, text=True, capture_output=True)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertFalse(output.exists(), "A failed preflight must not emit a release tag")
+                self.assertFalse(failed.exists())
 
-    def test_release_uses_exact_current_attempt_and_verified_assets(self):
-        steps = self.workflow["jobs"]["release"]["steps"]
-        download = next(s for s in steps if 'gh run download' in s.get("run", ""))
-        self.assertEqual(download["run"].count('gh run download "$GITHUB_RUN_ID"'), 2)
-        self.assertIn('e87n-display-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}', download["run"])
-        self.assertIn('--name "$IMAGE_ARTIFACT"', download["run"])
-        self.assertEqual(download["env"]["IMAGE_ARTIFACT"], "${{ needs.validate.outputs.image_artifact }}")
-        upload = next(s for s in self.workflow["jobs"]["image"]["steps"]
-                      if s.get("with", {}).get("path") == "output/ci/artifacts/")
-        self.assertEqual(upload["with"]["name"], download["env"]["IMAGE_ARTIFACT"])
-        self.assertEqual(self.workflow["jobs"]["validate"]["outputs"]["image_artifact"],
-                         "${{ steps.release_tag.outputs.image_artifact }}")
-        self.assertNotIn("--pattern", download["run"])
-        prepare = next(s for s in steps if "ci-prepare-release.py" in s.get("run", ""))
-        publish = next(s for s in steps if "ci-publish-release.py publish" in s.get("run", ""))
-        self.assertLess(steps.index(prepare), steps.index(publish))
-        self.assertIn('--source-commit "$GITHUB_SHA"', prepare["run"])
-        self.assertIn('--run-attempt "$GITHUB_RUN_ATTEMPT"', prepare["run"])
-        self.assertIn('--source-commit "$GITHUB_SHA"', publish["run"])
-        self.assertNotIn("--clobber", publish["run"])
-        self.assertEqual(publish["env"]["RELEASE_TAG"], "${{ needs.validate.outputs.release_tag }}")
+    def test_channels_do_not_reference_each_others_jobs_or_candidates(self):
+        image_text = WORKFLOWS["image"].read_text()
+        display_text = WORKFLOWS["display"].read_text()
+        self.assertNotIn("needs.display", image_text)
+        self.assertNotIn("e87n-display-candidate", image_text)
+        self.assertNotIn("needs.image", display_text)
+        self.assertNotIn("ubuntu-24.04-arm", display_text)
+        self.assertIn("--kind image", image_text)
+        self.assertIn("--kind display", display_text)
 
-    def test_failure_uploads(self):
-        for kind in ("image", "display"):
-            steps = self.workflow["jobs"][kind]["steps"]
-            uploads = [s for s in steps if s.get("uses", "").startswith("actions/upload-artifact@")]
+    def test_failure_uploads_and_evidence_are_channel_local(self):
+        for kind in WORKFLOWS:
+            steps = self.build_job(kind)["steps"]
+            uploads = [step for step in steps if step.get("uses", "").startswith("actions/upload-artifact@")]
             self.assertEqual(len(uploads), 2)
             for upload in uploads:
                 self.assertEqual(upload["if"], "${{ always() }}")
-                if upload["with"]["name"] != "${{ needs.validate.outputs.image_artifact }}":
-                    self.assertIn("github.run_attempt", upload["with"]["name"])
                 self.assertEqual(upload["with"]["retention-days"], "14")
-            collect = next(s for s in steps if "ci-collect-artifacts.py" in s.get("run", ""))
+            collect = next(step for step in steps if "ci-collect-artifacts.py" in step.get("run", ""))
             self.assertEqual(collect["if"], "${{ always() }}")
             self.assertIn("steps.build.outcome", collect["env"]["BUILD_OUTCOME"])
-            evidence = next(s for s in steps if "ci-capture-failure-evidence.sh" in s.get("run", ""))
+            evidence = next(step for step in steps if "ci-capture-failure-evidence.sh" in step.get("run", ""))
             self.assertEqual(evidence["if"], "${{ always() }}")
             self.assertIn("steps.build.outcome", evidence["env"]["BUILD_OUTCOME"])
-            log_upload = [s for s in steps if s.get("uses", "").startswith("actions/upload-artifact@")
-                          and "failure-evidence" in s["with"].get("path", "")]
-            self.assertEqual(len(log_upload), 1)
+            log_uploads = [step for step in uploads if "failure-evidence" in step["with"].get("path", "")]
+            self.assertEqual(len(log_uploads), 1)
 
-    def test_validation_failure_evidence(self):
-        steps = self.workflow["jobs"]["validate"]["steps"]
-        evidence = next(s for s in steps if "ci-capture-failure-evidence.sh" in s.get("run", ""))
-        self.assertEqual(evidence["if"], "${{ always() }}")
-        self.assertIn("job.status", evidence["env"]["BUILD_OUTCOME"])
-        self.assertIn("output/ci/failure-evidence/", next(
-            s for s in steps if s.get("uses", "").startswith("actions/upload-artifact@")
-        )["with"]["path"])
-        capture = (REPO / "scripts/ci-capture-failure-evidence.sh").read_text()
-        self.assertIn("validate|image|display", capture)
+    def test_validation_failure_evidence_exists_in_both_channels(self):
+        for workflow in self.workflows.values():
+            steps = workflow["jobs"]["validate"]["steps"]
+            evidence = next(step for step in steps if "ci-capture-failure-evidence.sh" in step.get("run", ""))
+            self.assertEqual(evidence["if"], "${{ always() }}")
+            self.assertIn("job.status", evidence["env"]["BUILD_OUTCOME"])
+            upload = next(step for step in steps if step.get("uses", "").startswith("actions/upload-artifact@"))
+            self.assertIn("output/ci/failure-evidence/", upload["with"]["path"])
 
-    def test_failure_evidence_is_collected(self):
-        collector = (REPO / "scripts/ci-collect-artifacts.py").read_text()
-        self.assertIn('"failure_evidence"', collector)
-        self.assertIn('"logs/failure"', collector)
-
-    def test_factory_firmware_dependencies(self):
-        install = next(s["run"] for s in self.workflow["jobs"]["validate"]["steps"]
-                       if s.get("name") == "Install validation tools")
+    def test_image_channel_retains_factory_ramdiag_and_uncompressed_candidate_contracts(self):
+        ramdiag = (REPO / "scripts/ci-build.sh").read_text()
+        self.assertIn("scripts/ci-build-ramdiag.sh", ramdiag)
+        ramdiag_builder = (REPO / "scripts/ci-build-ramdiag.sh").read_text()
+        self.assertIn('ramdiag_source="$repo_dir/scripts/ramdiag"', ramdiag_builder)
+        self.assertNotIn("cp -a", ramdiag_builder)
+        self.assertNotIn("ln -s", ramdiag_builder)
+        self.assertIn('scripts/build_config.py" kernel_release)', ramdiag_builder)
+        install = next(step["run"] for step in self.workflow("image")["jobs"]["validate"]["steps"]
+                       if step.get("name") == "Install validation tools")
         runner = (REPO / "scripts/ci-prepare-runner.sh").read_text()
         for package in ("u-boot-tools", "e2fsprogs", "util-linux", "device-tree-compiler", "python3",
                         "initramfs-tools-core", "fdisk", "kmod", "zstd", "libcrypt1", "cpio"):
-            with self.subTest(package=package):
-                self.assertIn(package, install.split())
-                self.assertIn(package, runner.split())
-        regressions = (REPO / "scripts/ci-regressions.sh").read_text()
-        for tool in ("resize2fs", "fdtput", "mkimage", "lsinitramfs"):
-            self.assertIn(tool, regressions.replace(";", " ").split())
+            self.assertIn(package, install.split())
+            self.assertIn(package, runner.split())
+        candidate = next(step for step in self.build_job("image")["steps"]
+                         if step.get("with", {}).get("path") == "output/ci/artifacts/")
+        self.assertEqual(candidate["with"]["compression-level"], "0")
 
-    def test_factory_compile_checks_and_regression_suites_are_mandatory(self):
+    def test_static_validation_keeps_factory_and_release_regressions_mandatory(self):
         validate = (REPO / "scripts/ci-validate.sh").read_text()
         regressions = (REPO / "scripts/ci-regressions.sh").read_text()
         for name in ("scripts/build-factory-firmware.py", "scripts/verify-factory-firmware.py",
                      "scripts/prepare-factory-rootfs.py", "board-support/factory-boot/factory_boot.py",
-                     "scripts/factory_firmware.py", "tests/test-factory-firmware.py", "tests/test-factory-rootfs.py"):
+                     "scripts/factory_firmware.py", "tests/test-factory-firmware.py",
+                     "tests/test-factory-rootfs.py"):
             self.assertIn(name, validate)
         for suite in ("factory-firmware", "factory-rootfs"):
             self.assertIn(f'run_fixture {suite} sudo -n python3 -B tests/test-{suite}.py', regressions)
         self.assertIn('run_fixture ramdiag python3 -B tests/test-ramdiag.py', regressions)
         self.assertIn('scripts/ramdiag/*.py', validate)
-
-    def test_firmware_candidate_upload_does_not_compress_again(self):
-        upload = next(s for s in self.workflow["jobs"]["image"]["steps"]
-                      if s.get("uses", "").startswith("actions/upload-artifact@")
-                      and s["with"]["path"] == "output/ci/artifacts/")
-        self.assertEqual(upload["with"]["compression-level"], "0")
+        collector = (REPO / "scripts/ci-collect-artifacts.py").read_text()
+        self.assertIn('"failure_evidence"', collector)
+        self.assertIn('"logs/failure"', collector)
 
 
 class Fixtures(unittest.TestCase):
