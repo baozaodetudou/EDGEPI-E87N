@@ -60,6 +60,172 @@ NV3007 framebuffer/背光支持。modules-load 配置只声明 `fb_nv3007`，不
 NOTICE 或 docs；许可证声明位于 packaging 内。没有风扇控制守护进程；
 温控与 PWM 仍由内核控制。打包不代表板卡显示、风扇或新镜像已经完成实机验证。
 
+## 普通用户安装与升级
+
+发布附件中的 `e87n-display_<版本>_all.deb` 是**已经启动的 Debian 系统的独立软件包**，
+不是 U-Boot 固件，也不是整盘镜像。安装或升级它不会改写 U-Boot、内核、DTB、initrd、
+rootfs 分区或风扇控制器；屏幕硬件仍必须由 E87N 内核提供 `fb_nv3007` 和背光节点。
+
+先从同一个 GitHub Release 下载 `.deb`，在电脑上校验 SHA-256，然后上传到设备。设备默认
+通过 DHCP 获取地址，下面的 `<设备IP>` 替换成路由器租约中的地址：
+
+```sh
+# macOS
+shasum -a 256 e87n-display_<版本>_all.deb
+scp e87n-display_<版本>_all.deb root@<设备IP>:/tmp/
+
+# Linux
+sha256sum e87n-display_<版本>_all.deb
+scp e87n-display_<版本>_all.deb root@<设备IP>:/tmp/
+```
+
+登录设备后安装或升级：
+
+```sh
+ssh root@<设备IP>
+dpkg-deb -f /tmp/e87n-display_<版本>_all.deb Package Version Architecture
+apt-get install -y /tmp/e87n-display_<版本>_all.deb
+systemctl daemon-reload
+systemctl restart e87n-display.service
+```
+
+如果 APT 报告依赖缺失，先更新 Debian 软件源再重试；正常的独立升级不需要重新刷机：
+
+```sh
+apt-get update
+apt-get install -y /tmp/e87n-display_<版本>_all.deb
+```
+
+升级过程中如果 `dpkg` 询问是否保留 `/etc/e87n/display.json`，已有自定义配置时选择
+**保留当前本地版本**。包升级后检查安装状态和服务：
+
+```sh
+dpkg-query -W -f='${Package} ${Version} ${Status}\n' e87n-display
+systemctl is-enabled e87n-display.service
+systemctl is-active e87n-display.service
+systemctl show e87n-display.service -p NRestarts -p ExecMainStatus
+```
+
+以上命令应分别看到 `e87n-display <版本> install ok installed`、`enabled`、`active`，
+且 `NRestarts=0`、`ExecMainStatus=0`。安装包只负责用户空间程序、配置和 systemd 服务；
+如果 `/dev/fb0` 不存在或名称不是 `fb_nv3007`，应先检查内核/DTB，而不是反复安装 `.deb`。
+
+保留旧版 `.deb` 即可回退显示程序；回退不会回退内核或整机系统：
+
+```sh
+apt-get install -y --allow-downgrades /tmp/e87n-display_<旧版本>_all.deb
+systemctl restart e87n-display.service
+dpkg-query -W -f='${Package} ${Version} ${Status}\n' e87n-display
+```
+
+如果只是暂时停止屏幕，可使用 `e87nctl display off`；这不会停止风扇，也不会禁用内核
+thermal governor。重新显示使用 `e87nctl display on`。只有确定不再需要用户空间程序时才使用
+`apt-get remove e87n-display`；不要用 `purge` 作为普通的升级或故障排查步骤。
+
+## 修改主题、页面和亮度
+
+推荐使用 `e87nctl` 修改配置。它会校验取值、加锁并原子写入
+`/etc/e87n/display.json`，同时立即应用背光设置；不建议用编辑器直接覆盖 JSON。
+
+```sh
+# 三种主题
+e87nctl display theme dual       # 双网口卡片，默认主题
+e87nctl display theme single     # 单网口大字布局
+e87nctl display theme compact    # 信息密集布局
+
+# 固定显示某一页，并关闭自动轮换
+e87nctl display rotation off
+e87nctl display screen overview
+
+# 设置亮度、数据刷新间隔
+e87nctl display brightness 20
+e87nctl display refresh 2
+
+# 开启四页轮换，每 3 秒切换一次
+e87nctl display pages overview,network,thermal,storage
+e87nctl display rotation-seconds 3
+e87nctl display rotation on
+
+# 查看最终配置
+e87nctl display config
+```
+
+可用页面为 `overview`、`thermal`、`network`、`storage`；亮度范围为 `0..100`，数据刷新
+和页面轮换间隔范围均为 `2..60` 秒。`refresh_seconds` 控制同一页面多久重新采样，
+`rotation_seconds` 控制页面多久切换，两者互不冲突。轮换页面列表必须是 1–4 个不重复页面。
+
+配置文件中的 8 个字段如下：
+
+| 字段 | 类型/范围 | 作用 |
+| --- | --- | --- |
+| `enabled` | `true` / `false` | 是否绘制并保持屏幕开启 |
+| `brightness_percent` | `0..100` | 屏幕亮度百分比 |
+| `screen` | `overview` / `thermal` / `network` / `storage` | 固定显示页面 |
+| `refresh_seconds` | `2..60` | 同一页面的数据刷新周期 |
+| `theme` | `dual` / `single` / `compact` | 双网口、单网口或信息密集主题 |
+| `rotation_enabled` | `true` / `false` | 是否自动轮换页面 |
+| `rotation_seconds` | `2..60` | 页面轮换周期 |
+| `rotation_screens` | 1–4 个不重复页面 | 页面轮换顺序 |
+
+显示服务会在运行中重新读取配置，因此大多数设置无需重启即可生效。为了让切换时机明确，
+也可以在修改后执行：
+
+```sh
+systemctl restart e87n-display.service
+```
+
+如果必须手工编辑配置，必须保留下面 8 个键且使用合法 JSON；修改后先验证，再应用：
+
+```sh
+vi /etc/e87n/display.json
+e87nctl display config
+e87nctl display apply
+systemctl restart e87n-display.service
+```
+
+手工编辑时不要删除 `rotation_enabled`、`rotation_seconds` 或 `rotation_screens`，也不要
+写入未定义的主题/页面名称。`e87nctl display config` 返回错误时，先修复 JSON，再重启服务。
+
+## 安装后的真实设备验收
+
+下面的检查应在已经启动的目标板上执行；预览 PNG 或 QEMU 不能替代 `/dev/fb0` 实测：
+
+```sh
+e87nctl doctor
+e87nctl display config
+cat /sys/class/graphics/fb0/name
+ls -l /dev/fb0
+systemctl status e87n-display.service --no-pager
+journalctl -u e87n-display.service -b --no-pager -n 100
+```
+
+主题切换验收：
+
+```sh
+for theme in dual single compact; do
+  e87nctl display rotation off
+  e87nctl display theme "$theme"
+  systemctl restart e87n-display.service
+  e87nctl display config
+  systemctl is-active e87n-display.service
+done
+```
+
+轮换验收：
+
+```sh
+e87nctl display pages overview,network,thermal,storage
+e87nctl display rotation-seconds 3
+e87nctl display rotation on
+systemctl restart e87n-display.service
+e87nctl display config
+systemctl show e87n-display.service -p NRestarts -p ExecMainStatus
+```
+
+观察实体屏幕至少 15 秒，应按 `overview → network → thermal → storage` 顺序循环。若页面
+不变，先确认 `rotation_enabled=true`、页面列表有效、服务为 `active`，再查看 journal；不要
+把“配置文件写入成功”误认为 framebuffer 已正常写入。
+
 ## 安装、预装与维护
 
 在已启动的目标 Debian 系统安装或升级：

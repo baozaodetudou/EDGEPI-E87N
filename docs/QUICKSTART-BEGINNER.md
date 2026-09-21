@@ -187,12 +187,52 @@ systemctl restart e87n-display.service
 ```sh
 scp e87n-display_<版本>_all.deb root@<设备IP>:/tmp/
 ssh root@<设备IP>
-apt install /tmp/e87n-display_<版本>_all.deb
+dpkg-deb -f /tmp/e87n-display_<版本>_all.deb Package Version Architecture
+apt-get install -y /tmp/e87n-display_<版本>_all.deb
+systemctl daemon-reload
 systemctl restart e87n-display.service
+dpkg-query -W -f='${Package} ${Version} ${Status}\n' e87n-display
+systemctl is-active e87n-display.service
 ```
 
 升级屏幕包不会替换内核、DTB、U-Boot 或 Debian rootfs；dpkg 可能询问是否保留你改过的
 `/etc/e87n/display.json`，通常选择保留本地配置即可。
+
+安装包的完整说明、校验、依赖修复、卸载、配置字段和真实设备验收见
+[独立屏幕包说明](DISPLAY-PACKAGE.md)。不要把 `.deb` 上传到 U-Boot 页面；它只能在已经
+启动的 Debian 中由 APT/dpkg 安装。
+
+升级后可直接修改屏幕，不需要重新刷机：
+
+```sh
+# 主题：dual / single / compact
+e87nctl display theme compact
+
+# 固定页面：overview / thermal / network / storage
+e87nctl display rotation off
+e87nctl display screen overview
+
+# 每 3 秒按顺序轮换四页
+e87nctl display pages overview,network,thermal,storage
+e87nctl display rotation-seconds 3
+e87nctl display rotation on
+
+# 亮度和刷新频率
+e87nctl display brightness 20
+e87nctl display refresh 2
+
+# 查看配置并确认服务
+e87nctl display config
+systemctl is-active e87n-display.service
+```
+
+`e87nctl` 会校验并安全保存配置到 `/etc/e87n/display.json`。一般不需要重启服务；如果
+需要立即重新初始化 framebuffer，可手动执行：
+
+```sh
+systemctl restart e87n-display.service
+systemctl show e87n-display.service -p NRestarts -p ExecMainStatus
+```
 
 ## 刷写失败或系统不启动怎么办
 
