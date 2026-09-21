@@ -220,7 +220,9 @@ class DebianPackageTests(unittest.TestCase):
             cls.expected[destination] = (cls.staging / source).read_bytes()
         cls.upgrade_version = cls.version + "+test1"
         (cls.staging / "board-support/display.json").write_text(json.dumps({
-            "enabled": True, "brightness_percent": 35, "screen": "thermal", "refresh_seconds": 2
+            "enabled": True, "brightness_percent": 35, "screen": "thermal", "refresh_seconds": 2,
+            "theme": "single", "rotation_enabled": True, "rotation_seconds": 5,
+            "rotation_screens": ["thermal", "overview"]
         }) + "\n")
         (cls.staging / "board-support/e87n-display.conf").write_text("# new package default\nfb_nv3007\n")
         run(["bash", cls.script, "--output-dir", cls.output, "--version", cls.upgrade_version])
@@ -333,7 +335,9 @@ class DebianPackageTests(unittest.TestCase):
                     mask.symlink_to("/dev/null")
                 settings = root / "etc/e87n/display.json"
                 modules = root / "etc/modules-load.d/e87n-display.conf"
-                settings.write_text('{"enabled":false,"brightness_percent":63,"screen":"storage","refresh_seconds":3}\n')
+                settings.write_text('{"enabled":false,"brightness_percent":63,"screen":"storage",'
+                                    '"refresh_seconds":3,"theme":"compact","rotation_enabled":true,'
+                                    '"rotation_seconds":4,"rotation_screens":["storage","thermal"]}\n')
                 modules.write_text("# admin module setting\nfb_nv3007\n")
                 saved = (settings.read_bytes(), modules.read_bytes())
                 unrelated = root / "etc/e87n/local-data"

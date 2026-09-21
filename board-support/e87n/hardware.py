@@ -22,13 +22,20 @@ import time
 from contextlib import ExitStack, contextmanager
 
 
+_SCREENS = ("overview", "thermal", "network", "storage")
+_THEMES = ("dual", "single", "compact")
 _DEFAULT_CONFIG = {
     "enabled": True,
     "brightness_percent": 20,
     "screen": "overview",
     "refresh_seconds": 2,
+    "theme": "dual",
+    "rotation_enabled": False,
+    "rotation_seconds": 3,
+    "rotation_screens": list(_SCREENS),
 }
-_SCREENS = ("overview", "thermal", "network", "storage")
+_LEGACY_CONFIG_KEYS = frozenset(("enabled", "brightness_percent", "screen", "refresh_seconds"))
+_CONFIG_KEYS = frozenset(_DEFAULT_CONFIG)
 _CONFIG_DIR = "etc/e87n"
 _CONFIG_NAME = "display.json"
 _DT = "sys/firmware/devicetree/base"
@@ -45,7 +52,14 @@ class HardwareError(ValueError):
 
 
 def _validate_config(config):
-    if type(config) is not dict or set(config) != set(_DEFAULT_CONFIG):
+    if type(config) is not dict:
+        raise HardwareError("display config must be a JSON object")
+    keys = set(config)
+    if keys == _LEGACY_CONFIG_KEYS:
+        # 1.1.x wrote four keys. Fill the new fields so a package upgrade is
+        # seamless, then persist the expanded schema on the next write.
+        config = dict(_DEFAULT_CONFIG, **config)
+    elif keys != _CONFIG_KEYS:
         raise HardwareError("display config must contain exactly: " + ", ".join(_DEFAULT_CONFIG))
     if type(config["enabled"]) is not bool:
         raise HardwareError("enabled must be a boolean")
@@ -57,6 +71,18 @@ def _validate_config(config):
     refresh = config["refresh_seconds"]
     if type(refresh) is not int or not 2 <= refresh <= 60:
         raise HardwareError("refresh_seconds must be an integer in 2..60")
+    if type(config["theme"]) is not str or config["theme"] not in _THEMES:
+        raise HardwareError("theme must be dual, single or compact")
+    if type(config["rotation_enabled"]) is not bool:
+        raise HardwareError("rotation_enabled must be a boolean")
+    rotation_seconds = config["rotation_seconds"]
+    if type(rotation_seconds) is not int or not 2 <= rotation_seconds <= 60:
+        raise HardwareError("rotation_seconds must be an integer in 2..60")
+    rotation_screens = config["rotation_screens"]
+    if (type(rotation_screens) is not list or not 1 <= len(rotation_screens) <= len(_SCREENS)
+            or any(type(screen) is not str or screen not in _SCREENS for screen in rotation_screens)
+            or len(set(rotation_screens)) != len(rotation_screens)):
+        raise HardwareError("rotation_screens must be a unique list of known screens")
     return dict(config)
 
 

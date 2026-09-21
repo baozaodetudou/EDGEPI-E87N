@@ -1,6 +1,6 @@
 # E87N 小屏界面设计
 
-当前布局版本：`428×142 / RGB565 / 双网口 / 不显示 RPM`。
+当前布局版本：`428×142 / RGB565 / 三主题 / 四页面 / 不显示 RPM`。
 渲染代码位于 `board-support/e87n/display.py`，预览命令为：
 
 ```sh
@@ -15,6 +15,18 @@ python3 -m e87n.display --preview /tmp/e87n-overview.png --screen overview
 - 重要信息优先级：双网口链路/IP → CPU/RAM/温度 → 风扇控制状态。
 - 缺失数据显示 `--` 或 `无IP`，不把缺失值推断成 0 或 `断开`。
 - 屏幕不显示 RPM。E87N 没有可靠 tachometer 输入，PWM 与 cooling level 也不能换算成转速。
+
+## 三种主题
+
+| 主题 | 适合场景 | `overview` 主信息 | 视觉特点 |
+| --- | --- | --- | --- |
+| `dual` | 两个物理网口都需要长期观察 | 网口 1、网口 2、CPU、内存、温度、风扇 | 青色/紫色双卡片，默认主题 |
+| `single` | 只接一个网口或希望 IP 更醒目 | 大号主 IP、CPU、内存、温度、风扇 | 去掉空的第二网口，主 IP 更大 |
+| `compact` | 运维桌面或希望一屏看更多摘要 | IP、CPU、内存、温度、风扇、负载、RX/TX | 灰蓝底色、黄色重点、信息密度最高 |
+
+三种主题都保持 428×142 输出，并且都不显示虚构的网速、协商速率或 RPM。`single` 和
+`compact` 的 `overview`/`network` 页面使用各自布局；`thermal`/`storage` 保持统一的
+温度与存储信息结构，避免轮换时因为网口数量改变而产生跳动。
 
 ## Overview 布局
 
@@ -47,6 +59,20 @@ LAN 1 和 LAN 2 是固定位置，不随链路状态或接口排序交换。采�
 | `network` | 两个接口的 link、IPv4/IPv6、累计 RX/TX 计数 | 不显示 |
 | `storage` | 可用温度传感器和存储设备状态 | 不显示 |
 
+页面轮换默认关闭，避免升级后屏幕突然改变。开启后，daemon 按配置顺序轮换页面；如果
+`screen` 不在 `rotation_screens` 中，会从列表第一项开始，不会因为配置组合而崩溃：
+
+```sh
+e87nctl display rotation on
+e87nctl display rotation-seconds 3
+e87nctl display pages overview,network,thermal,storage
+e87nctl display config
+```
+
+`refresh_seconds` 是数据刷新周期，控制同一页面重新采样的频率；`rotation_seconds` 是
+页面切换周期，控制开启轮换后多久换到下一页。两者可以不同，例如数据每 2 秒刷新、页面
+每 3 秒切换。轮换关闭时，`screen` 决定固定页面。
+
 Thermal 页面把“风扇设置”表达为内核当前控制事实：`AUTO`、cooling level、PWM 百分比和
 policy。当前 Debian 实现仍由 `pwm-fan + thermal governor` 负责长期控制；
 `e87nctl fan test LEVEL SECONDS` 只进行最多 30 秒的临时测试并恢复原状态，不安装第二个
@@ -56,8 +82,8 @@ policy。当前 Debian 实现仍由 `pwm-fan + thermal governor` 负责长期控
 
 原项目的亮度、开关、页面和定时策略可以作为配置体验参考。Debian 侧目前稳定保留：
 
-- `/etc/e87n/display.json`：`enabled`、`brightness_percent`、`screen`、`refresh_seconds`；
-- `e87nctl display on|off|brightness|screen|refresh`；
+- `/etc/e87n/display.json`：亮度、当前页面、主题、刷新周期和轮换页面列表；
+- `e87nctl display on|off|brightness|screen|theme|refresh|rotation|rotation-seconds|pages`；
 - 背光 active-low 映射和启动时重新应用保存值；
 - framebuffer 消失或服务异常时由 systemd 重启服务；
 - 风扇配置由内核 thermal governor 统一仲裁，显示服务只读温度/档位/PWM。
@@ -99,7 +125,7 @@ journalctl -u e87n-display.service -b --no-pager
 ## 2026-09-21 真实板卡验收
 
 设备 `192.168.20.201` 已在 Debian 13 Trixie / Linux `6.18.52-current-edgepi-e87n` 上
-安装并运行 `e87n-display 1.1.5-1`。目标板实测 framebuffer 为 `fb_nv3007`、`428×142`、
+安装并运行历史验收版本 `e87n-display 1.1.5-1`。目标板实测 framebuffer 为 `fb_nv3007`、`428×142`、
 RGB565，`fonts-wqy-microhei` 已安装；`eth0`、`eth1` 两个网口均能被采样，`eth0` 的 IPv4
 为 `192.168.20.201`，`eth1` 无 IPv4 但有真实 IPv6 链路地址。
 
@@ -112,5 +138,5 @@ IPv6。修复后的服务连续检查为 `active`、`NRestarts=0`、`ExecMainSta
 tachometer 输入，因此不显示 RPM。`e87nctl display off/on`、亮度 20%、页面切换和
 `e87nctl fan test 1 1` 均已完成，风扇测试恢复原档位。
 
-以上是软件、framebuffer 写入和真实遥测验收；由于当前环境没有可用摄像头，尚未把 LCD 面板
+以上是历史版本的软件、framebuffer 写入和真实遥测验收；由于当前环境没有可用摄像头，尚未把 LCD 面板
 本身的肉眼观感写成“已拍照确认”。

@@ -26,7 +26,7 @@ apt install --no-install-recommends curl
 
 新镜像通过 APT 预装版本化 `e87n-display`，包含 `e87nctl`、默认显示配置和
 `e87n-display.service`；下一次启动由模块配置加载 `fb_nv3007`。默认 overview 页面、
-20% 亮度、每 2 秒刷新。当前构建不安装旧 `e87n-headless.conf` 黑名单；
+20% 亮度、每 2 秒刷新、默认 `dual` 双网口主题，页面轮换默认关闭。当前构建不安装旧 `e87n-headless.conf` 黑名单；
 仓库保留的 headless 文件及审计选项用于旧配置，不是当前默认。
 温度与风扇由内核管理，显示服务不写风扇控制节点。
 
@@ -39,6 +39,11 @@ GitHub Actions 会对当前 main 重新构建预装显示配置，并把同一�
 小屏独立升级见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)，云端构建见 [GITHUB-ACTIONS.md](GITHUB-ACTIONS.md)。
 小屏不显示 RPM；风扇仅显示内核自动模式、cooling level 和 PWM 百分比。RPM 需要硬件测速反馈，
 原机未提供该反馈，不能把 PWM 或 cooling level 换算成转速。
+
+小屏主题与页面轮换：`dual` 适合双网口，`single` 适合只使用一个网口，`compact` 用于
+一屏显示更多摘要。使用 `e87nctl display theme dual|single|compact` 切换主题，使用
+`e87nctl display rotation on` 和 `e87nctl display pages overview,network,thermal,storage`
+启用页面轮换；轮换时间由 `e87nctl display rotation-seconds 3` 设置。
 
 为防止通用 Filogic 包替换 E87N 移植，保留内核/DTB/BSP 等 Armbian hold。普通 Debian 软件正常更新；解除 hold 或更新内核前需要重新移植并验证。没有自动重启策略。
 

@@ -37,7 +37,40 @@ e87nctl display off
 e87nctl display on
 ```
 
-亮度为整数 0–100；页面为 `overview|thermal|network|storage`；刷新间隔为整数 2–60 秒。默认总览、20% 亮度、每 2 秒刷新。`display config` 只读显示校验后的已保存或默认配置，`display refresh` 保存刷新间隔。设置保存在 `/etc/e87n/display.json`，采用校验、锁及原子持久化；关闭时改设置不会偷偷点亮。`display apply` 仅应用已保存状态，不改配置，供显示服务的启动前步骤使用。使用非 root 管理用户时，写配置命令需要相应权限。
+亮度为整数 0–100；页面为 `overview|thermal|network|storage`；主题为 `dual|single|compact`；
+刷新和轮换间隔为整数 2–60 秒。默认总览、20% 亮度、每 2 秒刷新，轮换默认关闭。
+`display config` 只读显示校验后的已保存或默认配置，`display refresh` 保存数据刷新间隔。
+设置保存在 `/etc/e87n/display.json`，采用校验、锁及原子持久化；关闭时改设置不会偷偷点亮。
+`display apply` 仅应用已保存状态，不改配置，供显示服务的启动前步骤使用。使用非 root
+管理用户时，写配置命令需要相应权限。
+
+主题与轮换示例：
+
+```sh
+e87nctl display theme dual
+e87nctl display theme single
+e87nctl display theme compact
+e87nctl display rotation on
+e87nctl display rotation-seconds 3
+e87nctl display pages overview,network,thermal,storage
+e87nctl display rotation off
+```
+
+`refresh_seconds` 负责同一页面的数据重绘；`rotation_seconds` 负责页面切换。轮换页面列表
+至少一个、最多四个，页面不能重复。旧版只有四个配置字段时，升级后会自动补齐新字段。
+
+配置文件 `/etc/e87n/display.json` 的当前字段如下：
+
+| 字段 | 类型/范围 | 含义 |
+| --- | --- | --- |
+| `enabled` | 布尔值 | 是否绘制并保持屏幕开启 |
+| `brightness_percent` | 整数 0–100 | 用户可见亮度；硬件背光为 active-low |
+| `screen` | `overview\|thermal\|network\|storage` | 固定页面，也是轮换的首选页面 |
+| `refresh_seconds` | 整数 2–60 | 数据采样/重绘周期，不是页面切换周期 |
+| `theme` | `dual\|single\|compact` | 双网口、单网口或信息密集主题 |
+| `rotation_enabled` | 布尔值 | 是否自动轮换页面 |
+| `rotation_seconds` | 整数 2–60 | 自动轮换的页面切换周期 |
+| `rotation_screens` | 1–4 个不重复页面 | 自动轮换的页面顺序 |
 
 `e87nctl fan test LEVEL SECONDS` 是 root-only、0–30 秒的临时冷却档位测试，结束后恢复原档位；它不是持久手动模式，也不关闭 thermal 保护。显示服务是 `e87n-display.service`。服务错误会以非零状态退出并重试，不把缺少帧缓冲或错误板型当成成功。显示服务本身只写 fb0/背光，不写 thermal/cooling/PWM sysfs；关屏不会停风扇，显示服务停止也不会改变风扇控制。
 

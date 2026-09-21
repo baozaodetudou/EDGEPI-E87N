@@ -16,8 +16,9 @@ The daemon lazily imports ``from . import hardware as hw``, calls
 ``hw.load_display_config()`` on EVERY iteration (including disabled ones), and
 calls ``hw.snapshot()`` once per enabled iteration. The hardware module owns
 strict root-owned/no-symlink/exact-key validation of /etc/e87n/display.json and
-the integer refresh interval 2..60. Its missing-file defaults are enabled=true,
-brightness_percent=20, screen=overview, refresh_seconds=2.
+the integer refresh/rotation intervals and theme/page validation. Its missing-file
+defaults are enabled=true, brightness_percent=20, screen=overview,
+refresh_seconds=2, theme=dual and rotation disabled.
 Invalid configuration and I/O errors are fatal (stderr, status 1); systemd
 should use Restart=on-failure to reopen/revalidate the device after failure.
 The control service owns brightness; the kernel alone controls the fan.
@@ -48,6 +49,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 WIDTH, HEIGHT = 428, 142
 SCREENS = ("overview", "thermal", "network", "storage")
+THEMES = ("dual", "single", "compact")
 COMPATIBLE_PATH = Path("/sys/firmware/devicetree/base/compatible")
 FONT_DIRECTORY = Path("/usr/share/fonts/truetype/dejavu")
 CJK_FONT_PATH = Path("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc")
@@ -485,7 +487,7 @@ def _metric(draw, color, x, label, value, *, width=96, value_size=16, font_direc
           font_directory=font_directory)
 
 
-def render(snapshot, screen="overview", *, font_directory=None):
+def _render_dual(snapshot, screen="overview", *, font_directory=None):
     """Pure 428x142 RGB renderer for the E87N low-resolution panel.
 
     The layout is deliberately information-dense but not a desktop dashboard:
@@ -623,6 +625,135 @@ def render(snapshot, screen="overview", *, font_directory=None):
         text(draw, (10, 123), "存储传感器可选", 10, FOREGROUND, width=408)
     return image
 
+
+def _render_single(snapshot, screen="overview", *, font_directory=None):
+    """Single-port dashboard for one-NIC boards or a less crowded layout."""
+    if screen not in SCREENS:
+        raise DisplayError("unknown screen: " + str(screen))
+    if screen not in ("overview", "network"):
+        return _render_dual(snapshot, screen, font_directory=font_directory)
+    image = Image.new("RGB", (WIDTH, HEIGHT), "#071722")
+    draw = ImageDraw.Draw(image)
+    text = partial(_text, font_directory=font_directory)
+    title = "E87N  /  单网口" if screen == "overview" else "网络  /  单网口"
+    text(draw, (10, 8), title, 14, "#72b7ff", width=260, bold=True)
+    text(draw, (323, 10), "运行 " + _uptime(snapshot.get("uptime_seconds")), 11, "#9cb3c9", width=95)
+    draw.line((10, 30, 418, 30), fill="#24465f")
+    ports = _network_items(snapshot)
+    item = ports[0] if ports else {}
+    link, link_color = _network_link(item)
+    name = _safe_text(item.get("name"))
+    ip = _network_ip(item)
+    if screen == "network":
+        _panel(draw, (10, 43, 418, 101), fill="#102638", outline="#72b7ff")
+        text(draw, (22, 50), "主网口", 11, "#72b7ff", bold=True)
+        draw.ellipse((120, 53, 126, 59), fill=link_color)
+        text(draw, (132, 49), link, 11, link_color, width=56, bold=True)
+        text(draw, (22, 67), ip, 19, "#f4f8ff", width=260, bold=True)
+        text(draw, (292, 50), name, 11, "#9cb3c9", width=110)
+        text(draw, (292, 70), "RX " + _bytes(item.get("rx_bytes")), 10, "#9cb3c9", width=110)
+        text(draw, (22, 113), "TX " + _bytes(item.get("tx_bytes")), 11, "#9cb3c9", width=120)
+        text(draw, (170, 113), "DHCP / IPv4", 11, "#72b7ff", width=120, bold=True)
+        text(draw, (315, 113), "单网口主题", 10, "#9cb3c9", width=103, bold=True)
+        return image
+
+    # The extra horizontal space is used for a large address and four compact
+    # health metrics instead of a second empty LAN card.
+    _panel(draw, (10, 43, 214, 98), fill="#102638", outline="#72b7ff")
+    text(draw, (22, 50), "主网口", 11, "#72b7ff", bold=True)
+    draw.ellipse((120, 53, 126, 59), fill=link_color)
+    text(draw, (132, 49), link, 11, link_color, width=66, bold=True)
+    text(draw, (22, 67), ip, 18, "#f4f8ff", width=180, bold=True)
+    text(draw, (22, 87), name, 10, "#9cb3c9", width=180)
+    total, available = snapshot.get("mem_total_kib"), snapshot.get("mem_available_kib")
+    memory = "--"
+    if _nonnegative(total) and total > 0 and _nonnegative(available) and available <= total:
+        memory = "{:.0f}%".format((total - available) * 100 / total)
+    usage = snapshot.get("cpu_usage_percent")
+    usage = "{:.0f}%".format(usage) if _nonnegative(usage) and usage <= 100 else "--"
+    values = (("CPU", usage, "#2fe0cb"), ("内存", memory, "#f4f8ff"),
+              ("温度", _temperature(snapshot.get("cpu_temp_mc")), "#f2b665"),
+              ("风扇", _fan_summary(snapshot.get("fan") if isinstance(snapshot.get("fan"), Mapping) else {}), "#65d48f"))
+    for index, (label, value, color) in enumerate(values):
+        x = 224 + (index % 2) * 97
+        y = 43 + (index // 2) * 29
+        _panel(draw, (x, y, x + 91, y + 25), fill="#0d2231", outline=color, radius=5)
+        text(draw, (x + 7, y + 4), label, 9, "#9cb3c9", width=34, bold=True)
+        text(draw, (x + 42, y + 3), value, 10 if label == "风扇" else 13, color, width=43, bold=True)
+    text(draw, (10, 113), "RX " + _bytes(item.get("rx_bytes")), 10, "#9cb3c9", width=110)
+    text(draw, (112, 113), "TX " + _bytes(item.get("tx_bytes")), 10, "#9cb3c9", width=110)
+    text(draw, (250, 113), "少而清晰", 10, "#9cb3c9", width=168, bold=True)
+    return image
+
+
+def _render_compact(snapshot, screen="overview", *, font_directory=None):
+    """Dense information theme; useful when the LCD is used as a status panel."""
+    if screen not in SCREENS:
+        raise DisplayError("unknown screen: " + str(screen))
+    if screen not in ("overview", "network"):
+        return _render_dual(snapshot, screen, font_directory=font_directory)
+    image = Image.new("RGB", (WIDTH, HEIGHT), "#12151f")
+    draw = ImageDraw.Draw(image)
+    text = partial(_text, font_directory=font_directory)
+    text(draw, (10, 8), "E87N  /  信息", 14, "#ffd166", width=260, bold=True)
+    text(draw, (323, 10), "运行 " + _uptime(snapshot.get("uptime_seconds")), 11, "#b8c1d1", width=95)
+    draw.line((10, 30, 418, 30), fill="#41485a")
+    ports = _network_items(snapshot)
+    if screen == "network":
+        for index, x in enumerate((10, 214)):
+            item = ports[index] if index < len(ports) else {}
+            link, color = _network_link(item)
+            _panel(draw, (x, 43, x + 194, 96), fill="#1b2130", outline="#ffd166" if index == 0 else "#7aa2f7")
+            text(draw, (x + 10, 49), "网口{}".format(index + 1), 10, "#ffd166", bold=True)
+            text(draw, (x + 140, 49), link, 10, color, width=42, bold=True)
+            text(draw, (x + 10, 66), _network_ip(item), 14, "#f4f8ff", width=174, bold=True)
+            text(draw, (x + 10, 84), "RX " + _bytes(item.get("rx_bytes")), 9, "#b8c1d1", width=80)
+            text(draw, (x + 104, 84), "TX " + _bytes(item.get("tx_bytes")), 9, "#b8c1d1", width=80)
+        text(draw, (10, 113), "网络详情", 10, "#ffd166", bold=True)
+        text(draw, (100, 113), "累计流量 / 链路", 10, "#b8c1d1", width=150)
+        text(draw, (300, 113), "信息主题", 10, "#b8c1d1", width=118, bold=True)
+        return image
+    main = ports[0] if ports else {}
+    link, color = _network_link(main)
+    text(draw, (10, 39), "网络", 10, "#b8c1d1", bold=True)
+    text(draw, (62, 37), _network_ip(main), 14, "#f4f8ff", width=192, bold=True)
+    text(draw, (294, 39), link, 10, color, width=50, bold=True)
+    text(draw, (352, 39), _safe_text(main.get("name")), 10, "#b8c1d1", width=66)
+    total, available = snapshot.get("mem_total_kib"), snapshot.get("mem_available_kib")
+    memory = "--"
+    if _nonnegative(total) and total > 0 and _nonnegative(available) and available <= total:
+        memory = "{:.0f}%".format((total - available) * 100 / total)
+    usage = snapshot.get("cpu_usage_percent")
+    usage = "{:.0f}%".format(usage) if _nonnegative(usage) and usage <= 100 else "--"
+    values = (("CPU", usage), ("内存", memory), ("温度", _temperature(snapshot.get("cpu_temp_mc"))),
+              ("风扇", _fan_summary(snapshot.get("fan") if isinstance(snapshot.get("fan"), Mapping) else {})))
+    for index, (label, value) in enumerate(values):
+        x = 10 + index * 102
+        _panel(draw, (x, 56, x + 94, 91), fill="#1b2130", outline="#ffd166", radius=5)
+        text(draw, (x + 8, 63), label, 9, "#b8c1d1", bold=True)
+        text(draw, (x + 8, 77), value, 12 if label == "风扇" else 15, "#ffd166", width=78, bold=True)
+    load = snapshot.get("loadavg")
+    load_text = "--"
+    if isinstance(load, (list, tuple)) and len(load) >= 3 and all(_nonnegative(value) for value in load[:3]):
+        load_text = " / ".join("{:.2f}".format(value) for value in load[:3])
+    text(draw, (10, 108), "负载", 10, "#b8c1d1", bold=True)
+    text(draw, (48, 108), load_text, 10, "#f4f8ff", width=104)
+    text(draw, (170, 108), "RX " + _bytes(main.get("rx_bytes")), 10, "#b8c1d1", width=100)
+    text(draw, (276, 108), "TX " + _bytes(main.get("tx_bytes")), 10, "#b8c1d1", width=100)
+    text(draw, (10, 125), "更多信息主题：CPU / 内存 / 温度 / 风扇 / 流量", 9, "#ffd166", width=408)
+    return image
+
+
+def render(snapshot, screen="overview", *, theme="dual", font_directory=None):
+    """Render one page using the selected dual-port, single-port or compact theme."""
+    if theme not in THEMES:
+        raise DisplayError("unknown theme: " + str(theme))
+    if theme == "single":
+        return _render_single(snapshot, screen, font_directory=font_directory)
+    if theme == "compact":
+        return _render_compact(snapshot, screen, font_directory=font_directory)
+    return _render_dual(snapshot, screen, font_directory=font_directory)
+
 def preview_snapshot():
     """Deterministic sample data, explicitly not measurements of a live board."""
     return {
@@ -649,14 +780,36 @@ def read_snapshot():
 
 def run_daemon():
     framebuffer = None
+    active_screen = None
+    config_identity = None
+    rotation_deadline = 0.0
     try:
         while True:
             config = load_display_config()
+            identity = (config["screen"], config["theme"], config["rotation_enabled"],
+                        config["rotation_seconds"], tuple(config["rotation_screens"]))
+            now = time.monotonic()
+            if identity != config_identity:
+                pages = config["rotation_screens"]
+                active_screen = (config["screen"] if not config["rotation_enabled"]
+                                 or config["screen"] in pages else pages[0])
+                rotation_deadline = now + config["rotation_seconds"]
+                config_identity = identity
+            elif config["rotation_enabled"] and now >= rotation_deadline:
+                pages = config["rotation_screens"]
+                current = active_screen if active_screen in pages else pages[0]
+                active_screen = pages[(pages.index(current) + 1) % len(pages)]
+                rotation_deadline = now + config["rotation_seconds"]
+            elif not config["rotation_enabled"]:
+                active_screen = config["screen"]
             if config["enabled"]:
                 if framebuffer is None:
                     framebuffer = Framebuffer()
-                framebuffer.draw(render(read_snapshot(), config["screen"]))
-            time.sleep(config["refresh_seconds"])
+                framebuffer.draw(render(read_snapshot(), active_screen, theme=config["theme"]))
+            sleep_for = config["refresh_seconds"]
+            if config["rotation_enabled"]:
+                sleep_for = min(sleep_for, max(0.1, rotation_deadline - time.monotonic()))
+            time.sleep(sleep_for)
     finally:
         if framebuffer is not None:
             framebuffer.close()
@@ -729,16 +882,18 @@ def main(argv=None):
     mode.add_argument("--preview", metavar="OUTPUT.png", type=Path, help="render the offline fixture to PNG")
     mode.add_argument("--daemon", action="store_true", help="render live snapshots using display.json")
     parser.add_argument("--screen", choices=SCREENS, help="preview layout (default: overview)")
+    parser.add_argument("--theme", choices=THEMES, help="preview theme (default: dual)")
     parser.add_argument("--preview-font-dir", "--font-dir", type=Path, metavar="DIRECTORY",
                         help="preview-only directory containing DejaVu Sans regular/bold fonts")
     args = parser.parse_args(argv)
-    if args.daemon and (args.screen is not None or args.preview_font_dir is not None):
-        parser.error("--screen and --preview-font-dir are for --preview; the daemon uses display.json and Debian fonts")
+    if args.daemon and (args.screen is not None or args.theme is not None or args.preview_font_dir is not None):
+        parser.error("--screen, --theme and --preview-font-dir are for --preview; the daemon uses display.json and Debian fonts")
     try:
         if args.preview is not None:
             output = _offline_path(args.preview)
             font_directory = _offline_path(args.preview_font_dir) if args.preview_font_dir is not None else None
-            image = render(preview_snapshot(), args.screen or "overview", font_directory=font_directory)
+            image = render(preview_snapshot(), args.screen or "overview", theme=args.theme or "dual",
+                           font_directory=font_directory)
             _save_preview(image, output)
         else:
             run_daemon()

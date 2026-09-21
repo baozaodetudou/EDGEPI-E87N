@@ -25,15 +25,20 @@ e87nctl display config
 e87nctl display --help
 sudo e87nctl display brightness 20
 sudo e87nctl display screen overview
+sudo e87nctl display theme dual
 sudo e87nctl display refresh 5
+sudo e87nctl display rotation on
+sudo e87nctl display rotation-seconds 3
+sudo e87nctl display pages overview,network,thermal,storage
 sudo e87nctl display screen thermal
 sudo e87nctl display off
 sudo e87nctl display on
 ```
 
-Screens: overview, thermal, network, storage. The fan remains automatic even
-with the display off. Configuration is `/etc/e87n/display.json`; service name
-is `e87n-display.service`. Unknown measurements are not successful hardware tests.
+Screens: overview, thermal, network, storage. Themes: dual, single, compact.
+The fan remains automatic even with the display off. Configuration is
+`/etc/e87n/display.json`; service name is `e87n-display.service`. Unknown
+measurements are not successful hardware tests.
 
 The default overview is 428x142 pixels, enabled at 20% brightness and refreshed
 every 2 seconds. It has two fixed `LAN 1`/`LAN 2` cards with link state and an
@@ -74,8 +79,10 @@ absent, without root, board probing or writes. Invalid/unsafe configuration
 still returns an error. `display refresh SECONDS` accepts integers from 2 to 60
 and uses the existing root-only atomic settings/apply path. Brightness, screen
 and on/off behavior are preserved; changing settings while off keeps it off.
-The daemon reloads settings every iteration, so a new screen or interval takes
-effect after its current sleep without a service restart.
+The daemon reloads settings every iteration, so a new screen, theme or interval
+takes effect after its current sleep without a service restart. Rotation is
+disabled by default; `refresh_seconds` refreshes data and `rotation_seconds`
+changes pages.
 
 Offline checks and preview (Pillow and DejaVu Sans required):
 

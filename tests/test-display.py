@@ -32,9 +32,14 @@ from e87n import display
 from PIL import Image, ImageDraw
 
 
-def fixture_config(enabled=True, brightness=20, screen="overview", refresh=2):
+def fixture_config(enabled=True, brightness=20, screen="overview", refresh=2, theme="dual",
+                   rotation_enabled=False, rotation_seconds=3, rotation_screens=None):
+    if rotation_screens is None:
+        rotation_screens = ["overview", "thermal", "network", "storage"]
     return {"enabled": enabled, "brightness_percent": brightness,
-            "screen": screen, "refresh_seconds": refresh}
+            "screen": screen, "refresh_seconds": refresh, "theme": theme,
+            "rotation_enabled": rotation_enabled, "rotation_seconds": rotation_seconds,
+            "rotation_screens": rotation_screens}
 
 
 def fixture_font_directory():
@@ -389,10 +394,12 @@ class RendererTests(unittest.TestCase):
         self.fonts = mock.patch.object(display, "FONT_DIRECTORY", directory)
         self.fonts.start()
         display._font.cache_clear()
+        display._cjk_font.cache_clear()
         self.addCleanup(self.fonts.stop)
         self.addCleanup(display._font.cache_clear)
+        self.addCleanup(display._cjk_font.cache_clear)
 
-    def capture_render(self, snapshot, screen):
+    def capture_render(self, snapshot, screen, theme="dual"):
         texts, boxes = [], []
         original = ImageDraw.ImageDraw.text
         def record(draw, xy, text, *args, **kwargs):
@@ -400,7 +407,7 @@ class RendererTests(unittest.TestCase):
             boxes.append(draw.textbbox(xy, text, font=kwargs["font"], anchor=kwargs.get("anchor")))
             return original(draw, xy, text, *args, **kwargs)
         with mock.patch.object(ImageDraw.ImageDraw, "text", new=record):
-            image = display.render(snapshot, screen)
+            image = display.render(snapshot, screen, theme=theme)
         return image, texts, boxes
 
     def test_all_four_layouts_legible_in_bounds_and_distinct(self):
@@ -550,6 +557,34 @@ class RendererTests(unittest.TestCase):
             display.render(None)
         with self.assertRaises(display.DisplayError):
             display.render({}, "invalid")
+        with self.assertRaises(display.DisplayError):
+            display.render({}, theme="invalid")
+
+    def test_all_themes_render_distinct_and_single_theme_hides_second_port(self):
+        images = set()
+        for theme in display.THEMES:
+            with self.subTest(theme=theme):
+                image, texts, boxes = self.capture_render(display.preview_snapshot(), "overview", theme)
+                self.assertEqual(image.size, (428, 142))
+                self.assertGreater(len(texts), 4)
+                self.assertTrue(all(0 <= left <= right <= 428 and 0 <= top <= bottom <= 142
+                                    for left, top, right, bottom in boxes))
+                images.add(image.tobytes())
+                if theme == "single":
+                    self.assertNotIn("网口2", texts)
+                    self.assertTrue(any("单网口" in str(text) for text in texts))
+                if theme == "compact":
+                    self.assertTrue(any("信息" in str(text) for text in texts))
+        self.assertEqual(len(images), len(display.THEMES))
+
+    def test_all_themes_support_all_rotation_screens(self):
+        for theme in display.THEMES:
+            for screen in display.SCREENS:
+                with self.subTest(theme=theme, screen=screen):
+                    image, _, boxes = self.capture_render(display.preview_snapshot(), screen, theme)
+                    self.assertEqual(image.size, (428, 142))
+                    self.assertTrue(all(0 <= left <= right <= 428 and 0 <= top <= bottom <= 142
+                                        for left, top, right, bottom in boxes))
 
     def test_preview_cli_all_layouts_never_uses_hardware_or_live_config(self):
         original_import = __import__
@@ -642,10 +677,26 @@ class DaemonTests(unittest.TestCase):
             self.assertEqual(config.call_count, 4)
             factory.assert_called_once_with()
             self.assertEqual(snapshot.call_count, 2)
-            self.assertEqual(renderer.call_args_list, [mock.call({}, "thermal"), mock.call({}, "storage")])
+            self.assertEqual(renderer.call_args_list, [mock.call({}, "thermal", theme="dual"),
+                                                       mock.call({}, "storage", theme="dual")])
             self.assertEqual(sleep.call_args_list, [mock.call(2), mock.call(3), mock.call(4), mock.call(60)])
             self.assertEqual(factory.return_value.draw.call_count, 2)
             factory.return_value.close.assert_called_once_with()
+
+    def test_rotation_switches_pages_on_configured_interval(self):
+        config = fixture_config(True, screen="storage", theme="compact", rotation_enabled=True, rotation_seconds=3,
+                                rotation_screens=["overview", "network"], refresh=2)
+        with mock.patch.object(display, "load_display_config", return_value=config), \
+                mock.patch.object(display, "Framebuffer") as factory, \
+                mock.patch.object(display, "read_snapshot", return_value={}), \
+                mock.patch.object(display, "render", return_value="fixture image") as renderer, \
+                mock.patch.object(display.time, "monotonic", side_effect=[0.0, 0.0, 2.0, 2.0, 3.1, 3.1]), \
+                mock.patch.object(display.time, "sleep", side_effect=[None, None, KeyboardInterrupt]):
+            self.assertEqual(display.main(["--daemon"]), 0)
+        self.assertEqual(renderer.call_args_list, [mock.call({}, "overview", theme="compact"),
+                                                   mock.call({}, "overview", theme="compact"),
+                                                   mock.call({}, "network", theme="compact")])
+        factory.return_value.close.assert_called_once_with()
 
     def test_failures_report_nonzero_close_and_do_not_retry(self):
         for stage in ("config", "open", "snapshot", "render", "write"):
@@ -676,6 +727,7 @@ class DaemonTests(unittest.TestCase):
 
     def test_cli_rejects_conflicting_modes_and_daemon_screen(self):
         for arguments in ([], ["--preview", "x.png", "--daemon"], ["--daemon", "--screen", "network"],
+                          ["--daemon", "--theme", "single"],
                           ["--daemon", "--font-dir", "/tmp/fonts"],
                           ["--preview", "x.png", "--screen", "invalid"]):
             with self.subTest(arguments=arguments), mock.patch.object(sys, "stderr", io.StringIO()):

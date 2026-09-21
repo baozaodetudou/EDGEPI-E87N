@@ -77,16 +77,30 @@ systemctl status e87n-display.service --no-pager
 journalctl -u e87n-display.service -b --no-pager
 ```
 
-## 屏幕与双网口界面
+## 屏幕主题与页面轮换
 
 当前小屏的硬件链路已经按原始 E87N OpenWrt 项目适配：NV3007、428×142、RGB565、270°
 旋转、PWM 背光和独立 Debian 服务。`e87n-display` 提供 overview、thermal、network、
 storage 四个页面；显示程序不会接管风扇，只读取内核暴露的状态。
 
-当前界面已经按双网口设备重新设计：两个网口分别显示链路状态、接口名和 IP，底部显示
-CPU、内存、温度及内核风扇模式/PWM；中文字体、彩色状态卡片和四个页面均针对 428×142
-小屏优化。设计规范、实机验收结果和当前实现边界见[屏幕设计与功能说明](docs/SCREEN-DESIGN.md)
-及[真实板卡验收记录](docs/FINAL-VALIDATION-20260921.md)。
+当前界面已经按 428×142 小屏重新设计，提供三种可切换主题：`dual` 双网口、`single`
+单网口、`compact` 信息密集。四个页面为 `overview`、`thermal`、`network`、`storage`；
+还可以按 2–60 秒配置自动轮换，默认关闭、默认页面每 2 秒刷新。主题与轮换只改变显示方式，
+不会接管风扇，风扇仍由 Linux 内核 thermal governor 控制。
+
+```sh
+e87nctl display theme dual       # 双网口彩色卡片
+e87nctl display theme single     # 单网口大字布局
+e87nctl display theme compact    # 显示更多摘要信息
+e87nctl display rotation on
+e87nctl display rotation-seconds 3
+e87nctl display pages overview,network,thermal,storage
+systemctl restart e87n-display.service
+```
+
+面向第一次刷机的完整图文式步骤见[小白刷机与首启指南](docs/QUICKSTART-BEGINNER.md)，
+设计规范、真实验收结果和当前实现边界见[屏幕设计与功能说明](docs/SCREEN-DESIGN.md)及
+[真实板卡验收记录](docs/FINAL-VALIDATION-20260921.md)。
 
 ## 从源码构建
 
@@ -126,6 +140,7 @@ docs/                          构建、刷写、网络、屏幕、验证和发�
 - [默认配置](docs/DEFAULTS.md)
 - [GitHub Actions 手动构建与发布](docs/GITHUB-ACTIONS.md)
 - [下载、校验与刷写](docs/DOWNLOADS.md)
+- [小白刷机与首次启动](docs/QUICKSTART-BEGINNER.md)
 - [构建指南](docs/BUILDING.md)
 - [首次启动](docs/first-boot.md)
 - [网络与双网口](docs/NETWORKING.md)

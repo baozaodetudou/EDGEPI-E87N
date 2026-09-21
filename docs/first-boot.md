@@ -1,5 +1,8 @@
 # E87N Debian Armbian 首启准备与验收
 
+第一次刷机请优先阅读[小白刷机与首次启动指南](QUICKSTART-BEGINNER.md)。本文保留更完整的
+分区、备份、RAM、U-Boot 和验收边界，适合刷机前复核，不建议新手直接跳过快速指南。
+
 当前交付格式为 [U-Boot 未压缩 USTAR 固件](UBOOT-FIRMWARE.md)，目标为原厂 Web 恢复页 plain firmware（类型 `fw`）。包内 `kernel` 是 LZMA 内核、原始 initrd 和 E87N DTB 组成的 FIT；`root` 是含 `/boot` 的 Debian ext4。完整 `.img` / `.img.xz` 仅是构建中间产物或历史证据，不能直接刷写，也不能用 LuCI sysupgrade 安装新 TAR。
 
 **2026 年 9 月 21 日已在真实 E87N 上启动 Debian 13，并完成显示服务、中文字体、双网口采样、温度、PWM 风扇和基本显示控制命令验收。** 详细结果见[真实板卡验收记录](FINAL-VALIDATION-20260921.md)。但完整 eMMC 备份、板上 RAM 测试、断电恢复、长时间散热压力测试和本轮源码提交后的新正式 Release 仍未完成；这些条件不应被软件测试或已有测试包替代。本文不提供猜测 USB Type-C 针脚的步骤。

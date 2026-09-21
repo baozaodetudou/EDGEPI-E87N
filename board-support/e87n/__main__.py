@@ -5,7 +5,7 @@ import json
 import re
 import sys
 
-from .hardware import HardwareError, _Hardware, _SCREENS
+from .hardware import HardwareError, _Hardware, _SCREENS, _THEMES
 
 
 def _percent(value):
@@ -24,6 +24,14 @@ def _seconds(value):
     if not re.fullmatch(r"[0-9]{1,2}", value) or not 0 <= int(value) <= 30:
         raise argparse.ArgumentTypeError("SECONDS must be an integer in 0..30")
     return int(value)
+
+
+def _pages(value):
+    pages = value.split(",")
+    if (not 1 <= len(pages) <= len(_SCREENS) or len(set(pages)) != len(pages)
+            or any(page not in _SCREENS for page in pages)):
+        raise argparse.ArgumentTypeError("PAGES must be comma-separated unique screens: " + ",".join(_SCREENS))
+    return pages
 
 
 def _parser():
@@ -46,8 +54,15 @@ def _parser():
     setters.add_parser("brightness", help="save brightness in 0..100 percent").add_argument(
         "percent", type=_percent, metavar="PERCENT")
     setters.add_parser("screen", help="save the active screen").add_argument("screen", choices=_SCREENS)
+    setters.add_parser("theme", help="save the visual theme").add_argument("theme", choices=_THEMES)
     setters.add_parser("refresh", help="save refresh interval in seconds (2..60)").add_argument(
         "seconds", type=_refresh, metavar="SECONDS")
+    setters.add_parser("rotation", help="enable or disable automatic page rotation").add_argument(
+        "state", choices=("on", "off"))
+    setters.add_parser("rotation-seconds", help="save page rotation interval in seconds (2..60)").add_argument(
+        "seconds", type=_refresh, metavar="SECONDS")
+    setters.add_parser("pages", help="save rotation pages as a comma-separated list").add_argument(
+        "pages", type=_pages, metavar="PAGE[,PAGE...]")
     setters.add_parser("on", help="enable display using saved brightness")
     setters.add_parser("off", help="disable display, preserving brightness and screen")
     setters.add_parser("apply", help="apply saved/default settings once (systemd ExecStartPre)")
@@ -79,8 +94,16 @@ def _main(argv=None, *, _hardware=None):
                 changes = {"brightness_percent": args.percent}
             elif command == "screen":
                 changes = {"screen": args.screen}
+            elif command == "theme":
+                changes = {"theme": args.theme}
             elif command == "refresh":
                 changes = {"refresh_seconds": args.seconds}
+            elif command == "rotation":
+                changes = {"rotation_enabled": args.state == "on"}
+            elif command == "rotation-seconds":
+                changes = {"rotation_seconds": args.seconds}
+            elif command == "pages":
+                changes = {"rotation_screens": args.pages}
             elif command in ("on", "off"):
                 changes = {"enabled": command == "on"}
             result = hardware.display(changes)

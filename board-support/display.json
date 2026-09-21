@@ -2,5 +2,14 @@
   "enabled": true,
   "brightness_percent": 20,
   "screen": "overview",
-  "refresh_seconds": 2
+  "refresh_seconds": 2,
+  "theme": "dual",
+  "rotation_enabled": false,
+  "rotation_seconds": 3,
+  "rotation_screens": [
+    "overview",
+    "thermal",
+    "network",
+    "storage"
+  ]
 }

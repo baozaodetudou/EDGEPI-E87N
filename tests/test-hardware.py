@@ -22,7 +22,9 @@ from e87n import hardware
 from e87n.__main__ import _main
 
 
-DEFAULT = {"enabled": True, "brightness_percent": 20, "screen": "overview", "refresh_seconds": 2}
+DEFAULT = {"enabled": True, "brightness_percent": 20, "screen": "overview", "refresh_seconds": 2,
+           "theme": "dual", "rotation_enabled": False, "rotation_seconds": 3,
+           "rotation_screens": ["overview", "thermal", "network", "storage"]}
 DT = "sys/firmware/devicetree/base"
 BL = "sys/devices/platform/backlight/backlight/backlight"
 PLATFORM = "sys/devices/platform/backlight"
@@ -418,12 +420,18 @@ Local:
 
     def test_off_preserves_brightness_and_setters_preserve_off(self):
         self.config_data(brightness_percent=35)
-        for args in (("off",), ("brightness", "80"), ("screen", "network"), ("refresh", "5")):
+        for args in (("off",), ("brightness", "80"), ("screen", "network"), ("theme", "single"),
+                     ("rotation", "on"), ("rotation-seconds", "5"),
+                     ("pages", "overview,network"), ("refresh", "5")):
             self.assertEqual(self.cli("display", *args)[0], 0)
             self.assertEqual(self.brightness(), 26)
             self.assertFalse(self.hw.load_display_config()["enabled"])
             self.assertEqual((self.root / BL / "bl_power").read_text(), "0\n")
         self.assertEqual(self.hw.load_display_config()["brightness_percent"], 80)
+        self.assertEqual(self.hw.load_display_config()["theme"], "single")
+        self.assertTrue(self.hw.load_display_config()["rotation_enabled"])
+        self.assertEqual(self.hw.load_display_config()["rotation_seconds"], 5)
+        self.assertEqual(self.hw.load_display_config()["rotation_screens"], ["overview", "network"])
         self.assertEqual(self.cli("display", "on")[0], 0)
         self.assertEqual(self.brightness(), 5)
 
@@ -444,8 +452,12 @@ Local:
         cases = [("display", "brightness", value) for value in
                  ("-1", "101", "1.0", "true", "nan", "1e2", "20;touch nope", "$(id)", " 20", "２０")]
         cases += [("fan", "set", "2"), ("fan", "off"), ("fan", "speed", "50"),
-                  ("display", "screen", "shell"), ("--root", str(self.root), "status")]
+                  ("display", "screen", "shell"), ("display", "theme", "shell"),
+                  ("display", "pages", "overview,overview"), ("display", "pages", "overview,bad"),
+                  ("--root", str(self.root), "status")]
         cases += [("display", "refresh", value) for value in
+                  ("0", "1", "61", "-2", "2.0", "nan", "true", "２", " 2", "2;id", "1e1")]
+        cases += [("display", "rotation-seconds", value) for value in
                   ("0", "1", "61", "-2", "2.0", "nan", "true", "２", " 2", "2;id", "1e1")]
         with mock.patch.object(self.hw, "display") as setter:
             for args in cases:
@@ -490,12 +502,33 @@ Local:
             with self.assertRaises(SystemExit) as raised:
                 _main(["display", "--help"], _hardware=self.hw)
         self.assertEqual(raised.exception.code, 0)
-        for command in ("config", "refresh", "brightness", "screen", "on", "off", "apply"):
+        for command in ("config", "refresh", "brightness", "screen", "theme", "rotation",
+                        "rotation-seconds", "pages", "on", "off", "apply"):
             self.assertIn(command, output.getvalue())
 
     def test_shipped_config_matches_overview_defaults(self):
         shipped = Path(__file__).resolve().parents[1] / "board-support/display.json"
         self.assertEqual(json.loads(shipped.read_text()), DEFAULT)
+
+    def test_legacy_config_is_loaded_with_new_defaults(self):
+        legacy = {"enabled": False, "brightness_percent": 73, "screen": "network", "refresh_seconds": 60}
+        self.put("etc/e87n/display.json", json.dumps(legacy))
+        expected = dict(DEFAULT, **legacy)
+        self.assertEqual(self.hw.load_display_config(), expected)
+
+    def test_theme_and_rotation_config_are_validated(self):
+        cases = {
+            "theme": ["unknown", 1, None],
+            "rotation_enabled": [0, 1, "on", None],
+            "rotation_seconds": [0, 1, 61, True, 3.0, "3", None],
+            "rotation_screens": [[], [[]], ["overview", "overview"], ["bad"], "overview", None],
+        }
+        for key, values in cases.items():
+            for value in values:
+                with self.subTest(key=key, value=value):
+                    self.put("etc/e87n/display.json", json.dumps(dict(DEFAULT, **{key: value})))
+                    with self.assertRaises(hardware.HardwareError):
+                        self.hw.load_display_config()
 
     def test_invalid_config_fails_closed(self):
         invalid = ["null", "[]", "{}", "invalid", '{"enabled":true,"enabled":false}',

@@ -86,7 +86,7 @@ sudo python3 -B tests/test-verify-system.py
 | 入口 | 主要覆盖 |
 | --- | --- |
 | `tests/test-hardware.py` | 假 sysfs 遥测、反向背光、配置验证/持久化、失败传播及无风扇写入 |
-| `tests/test-display.py` | 模拟 framebuffer ABI、像素打包、边界与四页渲染；预览使用固定数据 |
+| `tests/test-display.py` | 模拟 framebuffer ABI、像素打包、边界、四页和三主题渲染；同时测试 3 秒页面轮换、配置热加载和预览隔离 |
 | `tests/test-verify-display-fan.py` | 合成 rootfs/config/DTB、静态验证器的拒绝条件；可选真实主机 `dtc`/`fdtget` 集成 |
 | `tests/test-doctor.py` | 假 proc/sys 中的身份、内存、遥测与隐私边界；始终不宣称硬件验收 |
 | `tests/test-network-policy.py` | 用 GNU patch 重建 DTS 别名；可选精简 DTB 夹具，不测试真实网口 |

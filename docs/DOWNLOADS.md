@@ -69,6 +69,9 @@ sysupgrade 包。它包含 Debian rootfs，不包含 OpenWrt 用户空间。
 
 ## 刷写后首次启动
 
+如果你第一次操作 E87N，请先看[小白刷机与首次启动指南](QUICKSTART-BEGINNER.md)，其中有
+断电、RESET、U-Boot 地址、浏览器上传、DHCP 查找和 SSH 登录的完整顺序。
+
 刷写完成后等待设备启动，从 DHCP 租约中查找地址：
 
 ```sh

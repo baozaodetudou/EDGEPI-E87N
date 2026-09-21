@@ -34,7 +34,10 @@ CONFIG = ("# Linux/arm64 6.18.52 Kernel Configuration\n" +
           "".join("CONFIG_%s=y\n" % name for name in BUILTINS) +
           "CONFIG_FB_TFT=m\nCONFIG_FB_TFT_NV3007=m\n" +
           "# CONFIG_FRAMEBUFFER_CONSOLE is not set\n# CONFIG_CPU_FREQ is not set\n")
-DEFAULT = '{"enabled":true,"brightness_percent":20,"screen":"overview","refresh_seconds":2}\n'
+DEFAULT = ('{"enabled":true,"brightness_percent":20,"screen":"overview",'
+           '"refresh_seconds":2,"theme":"dual","rotation_enabled":false,'
+           '"rotation_seconds":3,"rotation_screens":["overview","thermal",'
+           '"network","storage"]}\n')
 SERVICE = """[Unit]
 Description=E87N display
 [Service]
@@ -359,7 +362,8 @@ class RootfsTests(unittest.TestCase):
                DEFAULT.replace('"enabled":true', '"enabled":1'),
                DEFAULT.replace('"enabled":true', '"enabled":false'),
                DEFAULT.replace(":20", ":20.0"), DEFAULT.replace(":20", ":21"),
-               DEFAULT.replace(":2}", ":NaN}"), DEFAULT.replace(":2}", ':2,"extra":0}'),
+               DEFAULT.replace('"rotation_seconds":3', '"rotation_seconds":NaN'),
+               DEFAULT.replace('"rotation_seconds":3', '"rotation_seconds":3,"extra":0'),
                DEFAULT.replace('"overview"', '"other"'), "[]", "null"]
         for data in bad:
             with self.subTest(data=data):
