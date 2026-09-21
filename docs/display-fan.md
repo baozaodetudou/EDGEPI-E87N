@@ -1,18 +1,18 @@
 # E87N Debian 原生屏幕与风扇支持
 
-目标固定为 Debian 13 Trixie + Linux 6.18.51，不切换为 OpenWrt。此实现参考原系统的硬件接口，但不安装 LuCI/UCI/procd、原 musl 显示 ELF 或原风扇守护程序。它是新的本地命令行控制与小屏程序，不是原 LuCI 网页的复刻，也不会新开 HTTP 服务。
+目标为 Debian 13 Trixie + Linux 6.18 LTS，当前审查版本为 Debian 13.7 / Linux 6.18.52，完整 release 为 `6.18.52-current-edgepi-e87n`；版本和源码 pin 以 [e87n-build.json](../userpatches/config/e87n-build.json) 为准。此实现参考原系统的硬件接口，但不安装 LuCI/UCI/procd、原 musl 显示 ELF 或原风扇守护程序。它是原生命令行控制与小屏程序，不会新开 HTTP 服务。
 
-## 当前配置与历史候选 — 2026-09-13
+## 当前配置与历史候选 — 2026-09-21
 
-当前基础镜像暂不安装或自动加载 `e87n-display`，以保证 NV3007 驱动问题不影响 SSH 和 systemd；独立包仍会构建发布，驱动修正后可安装升级，见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)。
+当前最小镜像预装 `e87n-display`，启用 NV3007 与 PWM 背光设备树节点，提供模块自动加载配置和下一次启动启用的显示服务。相同版本的软件包仍独立构建发布，用于升级和重新安装，见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)。构建不再安装旧 headless 黑名单。
 
 [9 月 13 日历史屏幕/风扇候选](candidate-display-fan-20260913.md)保留其当次构建、静态检查、导出与哈希证据。9 月 12 日的 Trixie 与 Bookworm 镜像也属历史候选；这些文件均不能作为当前最小配置交付。
 
-VM 中可丢弃 rootfs 副本的显示包安装和用户空间集成已有通过结果，范围见 [TESTING.md](TESTING.md)。新完整镜像、Debian 实体首启、物理屏幕、背光与风扇仍待验收；预览 PNG 使用示例数据，不能作为设备照片或实测证据。
+candidate3 的 Docker/QEMU 软件验收及独立显示包生命周期结果见[冻结记录](FINAL-VALIDATION-20260920.md)，其基础镜像使用旧 headless 配置。当前显示配置须重新构建和验证；Debian 实体首启、物理屏幕、背光与风扇仍待验收。QEMU 不模拟这些外设，预览 PNG 也不能作为设备照片或实测证据。
 
 ## 实现范围
 
-- 当前 6.18 补丁集共 **14 个补丁**，其中包含 GPL NV3007 fbtft 驱动（保留作者和初始化序列，适配 6.18 Kconfig）与 GMAC aliases；SPI/背光内建，`fb_nv3007` 模块配置为随启动加载。
+- 当前使用维护中的 Frank-W MT7987 内核，加上 `userpatches/kernel/edgepi-e87n-6.18/` 的 E87N 补丁；包括 GPL NV3007 fbtft 驱动、GMAC aliases、1 GiB 保留内存及 LVTS 修正。SPI/背光内建，`fb_nv3007` 模块配置为随启动加载；补丁数量及摘要以本次构建 receipt 为准。
 - `/dev/fb0` 使用 428×142、16-bit RGB565；原 SPI 52 MHz、270°旋转保持，刷新配置上限改为 30 FPS。实际界面默认每 2 秒更新，不能把 30 当作实测帧率。
 - 四页原生界面：`overview` 设备概览、`thermal` 温度及风扇、`network` 网卡字节计数、`storage` NVMe 温度。未发现的指标显示 `--`；没有测速线便不编造 RPM。Python/Pillow/DejaVu 字体由 Debian 软件包提供。
 - 背光 PWM2、50000 ns、normal polarity；用户亮度在软件中反向映射。上电默认 raw 26（暗），显示服务应用保存的亮度，首次默认 20%。逻辑关闭写 raw 26，不能使用常见的 raw 0 或 `bl_power=4` 关闭方法。
@@ -46,7 +46,7 @@ e87nctl display on
 
 ```bash
 sudo bash scripts/verify-image.sh --release trixie \
-  --require-usb-root --headless --require-system /absolute/path/to/new.img
+  --require-usb-root --require-display-fan --require-system /absolute/path/to/new.img
 ```
 
 验证器只读挂载其自行创建的 loop，检查实际镜像中的内核配置、DTB、模块、Python 语法、依赖文件、默认配置及服务链接；不会执行镜像程序，也不会接触板子的 eMMC。测试中的假 sysfs 和预览 PNG 只验证代码与布局，不能充当物理屏幕或风扇测试。
@@ -68,4 +68,4 @@ NV3007/fbtft/PWM 背光支持需要随新内核和镜像重新验证。VM、副�
 
 首次必须在可恢复、隔离的启动环境下核验面板 probe、实际颜色/方向、0/20/100%亮度、开关与设置持久化，并观察 CPU 温度、冷却档位、真实风扇起转及负载温升。内核自动温控不等于断线、传感器失效、堵转或全部异常场景均有保证；CPU DVFS 仍禁用，WED 和其他待测项目也没有因本功能而变为已验证。
 
-完整镜像仍包含新 GPT。原设备 U-Boot 加载能力、分区和恢复备份未验证前，不直接整盘写入 eMMC。继续遵守 [首启与写入边界](first-boot.md)：当前默认密码公开，首次只接可信内网并改密，SSH host keys 应在首次 SSH 前独立生成；旧候选的自动登录和共享初始密钥风险按其历史记录处理。DTS 默认 256 MiB 与原系统实际 1 GiB 的内存交接仍待新路径验证。
+Armbian 中间镜像仍包含新 GPT，不能直接整盘写入 eMMC；正式固件使用最终 U-Boot TAR。继续遵守 [首启与写入边界](first-boot.md)：当前默认密码公开，首次只接可信内网并改密，SSH host keys 应在首次 SSH 前独立生成；旧候选的自动登录和共享初始密钥风险按其历史记录处理。当前 E87N DTS 已通过 902 补丁描述 1 GiB 内存和固件保留区，真实 U-Boot 内存交接仍需上板验证。

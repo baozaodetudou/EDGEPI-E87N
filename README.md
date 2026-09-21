@@ -5,8 +5,9 @@
 [Frank-W MT7987 内核](https://github.com/frank-w/BPI-Router-Linux/tree/6.18-main)，
 通过 Armbian 框架构建，保留 E87N 自身的设备树和原厂 U-Boot 分区契约。
 
-当前冻结候选已完成完整编译、最终 U-Boot TAR 审计和同产物 Docker/QEMU 验收。
-候选为 Debian 13.7 / Linux 6.18.52；QEMU 已验证 systemd、SSH、DHCP、DNS、APT、重启、持久化和独立显示包生命周期。
+2026-09-20 的 candidate3（旧 headless 配置）已完成完整编译、最终 U-Boot TAR 审计和同产物 Docker/QEMU 验收。
+该候选为 Debian 13.7 / Linux 6.18.52；QEMU 已验证 systemd、SSH、DHCP、DNS、APT、重启、持久化和独立显示包生命周期。
+当前源码已改为预装显示包并启用 LCD/背光；新配置须重新构建、审计并执行同产物模拟验收，不能沿用 candidate3 的通过结论。
 MT7987 实机启动、双网口、eMMC、USB/NVMe、温控、风扇、屏幕和真实 U-Boot 交接仍需上板验收。
 详细结果见[最终验收记录](docs/FINAL-VALIDATION-20260920.md)、[路线复核](docs/PORTING-REVIEW-20260920.md)与[验收标准](docs/REFACTOR-ACCEPTANCE.md)。
 
@@ -22,7 +23,7 @@ MT7987 实机启动、双网口、eMMC、USB/NVMe、温控、风扇、屏幕和�
 | 首次启动 | 自动生成独立 SSH host keys；没有强制创建用户向导 |
 | 默认体积 | 命令行系统，不预装桌面、LuCI、Docker 服务或 RAID/LVM 管理套件 |
 | 风扇 | 由内核温控；QEMU 只能验证系统集成，实机转速/温度仍待完成 |
-| 小屏 | 独立 `e87n-display` Debian 包；驱动默认不自动加载，实机显示仍待完成 |
+| 小屏 | 预装 `e87n-display`，启用 NV3007/背光节点、模块自动加载配置及显示服务；同一包独立发布用于升级，实机显示仍待完成 |
 
 镜像使用独立的 `linux-image-current-edgepi-e87n` 和 `linux-dtb-current-edgepi-e87n`
 包名，避免通用 Filogic 软件包替换本板内核。内核/DTB 保持锁定；板级升级要求成套
@@ -53,7 +54,7 @@ UUID，使模拟测试和发布附件能够对应同一产物。
 
 ## 手动构建与下载
 
-唯一 GitHub Actions 工作流为 [E87N Debian 13 release](https://github.com/baozaodetudou/EDGEPI-E87N/actions/workflows/build-e87n.yml)。
+唯一 GitHub Actions 工作流为 [E87N experimental release](https://github.com/baozaodetudou/EDGEPI-E87N/actions/workflows/build-e87n.yml)。
 手动选择 `main` 并点击 Run workflow，不需要填写输入；push、tag push 和定时任务不触发。
 工作流生成包含版本、run ID、attempt 的唯一 tag，只有全部构建和模拟验收门禁通过才发布。
 
@@ -61,30 +62,31 @@ UUID，使模拟测试和发布附件能够对应同一产物。
 
 - `*-uboot-firmware.tar`：原厂 U-Boot plain firmware 封装；内含 FIT、Debian ext4 rootfs 和构建记录。
 - `e87n-display_<版本>_all.deb`：可独立安装、升级的小屏软件包。
-- SHA-256、内核配套包和构建/验证证据。
+
+SHA-256 写入 Release 正文；内核配套包、元数据、校验清单及构建/验证证据保留在对应 Actions artifacts。
 
 源码 zip/tar.gz 不是系统镜像。完整 GPT `.img` 是中间产物，不能直接通过原厂 Web
 固件入口写入 eMMC。固件封装使用 `sysupgrade-` 目录约定，用户空间依然是 Debian。
-当前本地 candidate3 已完成软件验收，但尚未声明已发布 GitHub Release 或完成实机刷写；[下载记录](docs/DOWNLOADS.md)中的 6.18.51 文件均为历史产物。
+本地 candidate3 的旧配置软件验收记录不代表当前显示配置已发布 GitHub Release 或完成实机刷写；[下载记录](docs/DOWNLOADS.md)中的 6.18.51 文件均为历史产物。
 
 ## 使用与维护
 
 新系统通过验收并安装后，从路由器 DHCP 租约获取 IP：
 
 ```sh
-ssh root@<设备IP>
+ssh root@"<设备IP>"
 passwd
 systemctl status ssh
 apt update
 apt install --no-install-recommends curl
 ```
 
-按[屏幕包说明](docs/DISPLAY-PACKAGE.md)安装独立包后，使用 `e87nctl` 配置页面、亮度和刷新周期。
-没有真实转速反馈时显示 `--`，不把 PWM 百分比伪装为 RPM。屏幕硬件开发与验收放在完整系统之后。
+新镜像预装 `e87nctl`，可配置页面、亮度和刷新周期；按[屏幕包说明](docs/DISPLAY-PACKAGE.md)独立升级或重新安装。
+没有真实转速反馈时显示 `--`，不把 PWM 百分比伪装为 RPM。显示、背光和风扇的实机效果仍需单独验收。
 
 - [默认配置](docs/DEFAULTS.md)、[网络说明](docs/NETWORKING.md)、[显示包](docs/DISPLAY-PACKAGE.md)
 - [厂商固件契约](docs/UBOOT-FIRMWARE.md)、[工厂布局适配](board-support/factory-boot/README.md)
-- [历史构建指南](docs/BUILDING.md)、[旧 README](docs/README-LEGACY-20260920.md)
+- [构建指南](docs/BUILDING.md)、[旧 README](docs/README-LEGACY-20260920.md)
 - [来源与许可](NOTICE.md)
 
 基础系统使用 Debian、systemd 和 Armbian 构建组件；OpenWrt E87N 源码提供板级硬件参考。

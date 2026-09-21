@@ -83,7 +83,7 @@ printf 'Read-only image audit: %s -> %s/candidate.img\n' "$candidate" "$audit_di
 # tree. Retain it for the remainder of this disposable job, even on failure.
 xz -dc -- "$candidate" > "$audit_dir/candidate.img"
 sudo -n bash scripts/verify-image.sh --release "$release" --require-usb-root \
-	--headless --require-system "$audit_dir/candidate.img" \
+	--require-display-fan --require-system "$audit_dir/candidate.img" \
 	2>&1 | tee output/ci/logs/image-audit-1.log
 
 # Build a disposable RAM-only network/SSH diagnostic matrix from the same
@@ -95,10 +95,10 @@ image_basename=${candidate##*/}
 firmware_output="$repo_dir/output/ci/firmware/${image_basename%.img.xz}-uboot-firmware.tar"
 mkdir -p "$repo_dir/output/ci/firmware"
 sudo -n python3 scripts/build-factory-firmware.py \
-	--image "$audit_dir/candidate.img" --output "$firmware_output" --headless
+	--image "$audit_dir/candidate.img" --output "$firmware_output"
 # The runner owns this log directory; only the verifier needs root privileges.
 # shellcheck disable=SC2024
-sudo -n python3 scripts/verify-factory-firmware.py "$firmware_output" --headless \
+sudo -n python3 scripts/verify-factory-firmware.py "$firmware_output" \
 	> output/ci/logs/factory-firmware-audit-1.log 2>&1
 # Build the same VERSION source locally for the final-firmware guest's package
 # lifecycle test. The independent display job still owns the release download.

@@ -1,5 +1,7 @@
 # E87N Debian/Armbian 路线复核（2026-09-20）
 
+> 范围补充（2026-09-21）：candidate3 的结果对应旧 headless 配置。当前源码已预装显示包、启用 LCD/背光并继续调整板级补丁；需要针对新输入重新构建和验收。当前行为以 [DEFAULTS.md](DEFAULTS.md) 和 [display-fan.md](display-fan.md) 为准，下文已记录的候选结果不自动延伸到后续改动。
+
 结论：Debian 13 ARM64 用户空间、Armbian 构建框架、MT7987 专用内核及 E87N 设备树、现有 U-Boot/FIT 的路线成立。candidate3 已完成完整构建、最终固件审计和同产物 Docker/QEMU 软件验收，但仍属于非官方板级移植，尚未完成实机验收。此前的诊断方法和测试包存在确定缺陷，不能把构建或上传成功当成硬件可用，也不能只凭网络失联就判定 U-Boot 损坏或内核未启动。
 
 ## 官方资料与可复用参考
@@ -28,7 +30,7 @@
 
 本次发现一个具体升级风险：[Frank-W 58f389fe](https://github.com/frank-w/BPI-Router-Linux/commit/58f389fe32c0ff80eaf88035c551a68be786e313) 修正 MT7987 PLL 注册参数。
 
-已对照[上游 6.18.51 声明](https://github.com/gregkh/linux/blob/v6.18.51/drivers/clk/mediatek/clk-pll.h)和[6.18.52 声明](https://github.com/gregkh/linux/blob/v6.18.52/drivers/clk/mediatek/clk-pll.h)：前者接收 `struct device_node *`，后者改为 `struct device *`。本仓库 361 补丁当前传 `node`，与 6.18.51 一致；升级到 6.18.52 时必须同步适配。不能把这个升级风险直接宣布为当前失联的根因，也不能只改版本号升级。
+已对照[上游 6.18.51 声明](https://github.com/gregkh/linux/blob/v6.18.51/drivers/clk/mediatek/clk-pll.h)和[6.18.52 声明](https://github.com/gregkh/linux/blob/v6.18.52/drivers/clk/mediatek/clk-pll.h)：前者接收 `struct device_node *`，后者改为 `struct device *`。当时旧 361 补丁传 `node`，属于升级风险；当前 6.18 路线已改用维护中的 Frank-W 基线，不再独立应用旧 361 补丁。这个历史风险不能直接解释实机失联，也说明升级不能只改版本号。
 
 ## 本次已确认的诊断缺陷
 
@@ -46,6 +48,6 @@
 3. 完整候选必须用正常 initramfs 挂载 Debian rootfs 并进入 systemd PID 1，验证 SSH、双口 DHCP、DNS、APT、重启、存储、温控。当前 RAMdiag 的 shell PID 1 只是测试工具，不是最终系统。
 4. 升级至经过适配的新 6.18 LTS 维护版，再做同套验证；不能用旧内核实测结果替代新内核验收。
 5. RAM 启动及恢复链路通过后，才按已验证的原厂分区契约安装。完整 GPT 中间镜像不能当作厂商 Web Firmware 文件使用。
-6. 同步设计 FIT、内核包、模块、DTB、initrd 的更新与回退。当前 kernel hold 可以防止不匹配，但不是完整的长期内核更新方案。最后再接回独立屏幕包并完成实机功能测试。
+6. 同步设计 FIT、内核包、模块、DTB、initrd 的更新与回退。当前 kernel hold 可以防止不匹配，但不是完整的长期内核更新方案。显示包已经接入默认预装流程并保留独立升级接口，后续必须验证实际显示、背光、温度和风扇功能。
 
 本次 candidate3 已在 ARM64 Docker/QEMU 中用最终 FIT、initrd 和 rootfs 完成启动与稳定性软件验收；没有上传、写入或启动实体 E87N，设备查询和真实 U-Boot 交接仍待实机验证。

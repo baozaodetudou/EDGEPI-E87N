@@ -1,12 +1,12 @@
 # 构建 E87N Armbian
 
-> 2026-09-20 已开始切换到维护中的 Frank-W MT7987 内核。当前版本、来源和包名以
+> 当前采用维护中的 Frank-W MT7987 内核。版本、来源和包名以
 > `userpatches/config/e87n-build.json` 为唯一配置；容器/模拟测试见
 > [CONTAINER-TESTING.md](CONTAINER-TESTING.md)，完成条件见
-> [REFACTOR-ACCEPTANCE.md](REFACTOR-ACCEPTANCE.md)。下面的 6.18.51、旧提交与 R4
-> 打包记录是历史流程，不能作为本轮 6.18.52 构建完成或测试成功的依据。
+> [REFACTOR-ACCEPTANCE.md](REFACTOR-ACCEPTANCE.md)。文中的 R4 打包记录是历史流程；
+> candidate3 也使用旧 headless 配置，不能作为当前预装显示配置已完成验收的依据。
 
-当前配方采用 [DEFAULTS.md](DEFAULTS.md) 定义的 headless 最小系统：`root` / `doumao`、SSH 22 密码登录、networkd/netplan DHCP、`Asia/Shanghai`、`zh_CN.UTF-8` 和正常 APT。显示包单独构建发布，暂不在基础镜像中自动加载。没有首次创建用户向导或强制公钥门槛，额外存储模块默认 `E87N_EXTRA_STORAGE=no`。
+当前配方采用 [DEFAULTS.md](DEFAULTS.md) 定义的显示/风扇最小系统：`root` / `doumao`、SSH 22 密码登录、networkd/netplan DHCP、`Asia/Shanghai`、`zh_CN.UTF-8` 和正常 APT。新 rootfs 预装 `e87n-display`，启用 LCD/背光节点、模块自动加载配置及显示服务；同版本包也单独构建发布。没有首次创建用户向导或强制公钥门槛，额外存储模块默认 `E87N_EXTRA_STORAGE=no`。
 
 当前交付为[原厂 U-Boot 未压缩 USTAR 固件](UBOOT-FIRMWARE.md)，Armbian `.img` / `.img.xz` 只作中间产物或历史证据，不可刷写。R4 本地已生成并独立审计 EXIT 0；R4 重新打包历史 Actions 34737922588 的原始 RAW，修正 DTB 的 1 GiB/保留区及 bootargs（含 902 等效修正），没有完整重编 Armbian 或内核。V3 因内核地址修正已废弃，主机导出及 SHA-256 比对已完成。没有 E87N 重启、刷写、完整恢复备份、已实测控制通道或板上 RAM 测试记录。
 
@@ -18,23 +18,23 @@
 
 | 输入 | 当前值与来源 |
 | --- | --- |
-| Armbian 框架 | `7c1bb29eb0e7bd75b0703d86fe654b2680e646da`，由 `build-armbian.sh` 固定 |
+| Armbian 框架 | `7c1bb29eb0e7bd75b0703d86fe654b2680e646da`，启动器从中央配置读取 |
 | 框架兼容修补 | `patches/armbian-build/0001-python-env-path.patch`；修复最小环境中的 Python PATH 引号 |
-| Linux stable | `f6388029ea9e2c9e807d73827658738ea131faee`，对应 6.18.51 |
-| 内核来源 | `https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git`，使用明确的 `commit:` |
+| Linux 6.18 LTS | `a638fabe36f293e58ab6be002af04b866959c546`，当前 6.18.52；release 为 `6.18.52-current-edgepi-e87n` |
+| 内核来源 | `https://github.com/frank-w/BPI-Router-Linux.git`，中央配置固定完整提交，family 使用明确的 `commit:` |
 | 板卡 / 分支 | `BOARD=edgepi-e87n` / `BRANCH=current`；family 拒绝其他分支 |
-| 目标发行版 | `RELEASE=trixie`；历史屏幕/风扇候选实际为 Debian 13.6，新构建以实际包版本为准 |
+| 目标发行版 | `RELEASE=trixie`，Debian 13 ARM64；当前审查点版本 13.7，实际 guest 版本须与中央配置一致 |
 | 内核配置 | `userpatches/config/kernel/linux-edgepi-e87n-lts.config`，另有板卡 hook 调整最终配置 |
-| 当前补丁目录 | `userpatches/kernel/edgepi-e87n-6.18/`，共 15 个补丁，包括 NV3007、901 GMAC aliases 和 `902-e87n-memory-1g.patch` 的 1 GiB/固件保留区修正 |
+| 当前补丁目录 | `userpatches/kernel/edgepi-e87n-6.18/`；包含 NV3007、LVTS、901 GMAC aliases 和 902 内存/保留区修正，完整列表与摘要以构建 receipt 为准 |
 | 固件转换 | `scripts/build-factory-firmware.py`、`scripts/prepare-factory-rootfs.py`、`board-support/factory-boot/`；最终为 FIT kernel + 含 `/boot` 的 ext4 root + CONTROL 的未压缩 USTAR |
 | 用户空间与固件 | `board-support/`、`packaging/e87n-display/`、`scripts/build-display-deb.sh`、`userpatches/customize-image.sh`、`firmware/`；PHY 固件安装前检查 SHA-256 与大小 |
 | 额外存储模块 | `E87N_EXTRA_STORAGE=no`；只有显式设为 `yes` 才请求额外 DM/RAID 等模块 |
 
-这些 pin 固定框架和内核源码，不构成逐字节可复现的整个系统快照。`customize-image.sh` 从 Debian 签名软件源更新软件包并安装 SSH/网络/时间与 locale 基础依赖；`e87n-display` 由独立 job 构建。显示包依赖 `python3`、`python3-pil` 和 `fonts-dejavu-core`，独立版本与升级方法见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)。
+这些 pin 固定框架和内核源码，不构成逐字节可复现的整个系统快照。`customize-image.sh` 从 Debian 签名软件源更新软件包，安装 SSH/网络/时间与 locale 基础依赖，并构建、预装 `e87n-display`。独立 job 另外构建用于发布升级的 deb；CI 固定 `SOURCE_DATE_EPOCH=0` 并核对该包与 QEMU 实际测试包的 SHA-256。显示包依赖 `python3`、`python3-pil` 和 `fonts-dejavu-core`，独立版本与升级方法见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)。
 
 重建特定候选时，应保留该候选的仓库输入、框架兼容修补、最终内核配置、构建参数、主机/容器版本、包版本、日志和校验清单。候选记录中的冻结输入归档和 release 整理属于当次人工交付步骤，`build.sh` 不会自动生成同样的 release 目录或证明新镜像与旧镜像哈希相同。
 
-内核不会自动跟踪最新 LTS。升级需要同步检查 family、补丁、配置和验证器；显示/风扇验证器目前明确检查 `6.18.51-current-filogic`。保留的 `edgepi-e87n-6.12/` 是历史补丁集。单独传入 `RELEASE=bookworm` 只改变 rootfs，不会恢复历史内核或重建旧候选。
+内核不会自动跟踪最新 LTS。升级先修改中央配置，再同步检查 family、补丁、最终配置和验证器；CI 与产物审计从 `scripts/build_config.py` 读取版本和 release。保留的 `edgepi-e87n-6.12/` 是历史补丁集。当前定制脚本要求 Debian 13 Trixie，不能通过传入 `RELEASE=bookworm` 重建旧候选。
 
 ## Linux 默认入口
 
@@ -94,7 +94,7 @@ KERNEL_GIT=shallow EXTRAWIFI=no CPUTHREADS=4
 默认容器镜像为 `ghcr.io/armbian/docker-armbian-build:armbian-debian-trixie-latest`。也可明确选择 Debian 基础镜像，由入口脚本和 Armbian 安装依赖：
 
 ```sh
-E87N_BUILD_IMAGE=debian:13.6-slim ./build.sh
+E87N_BUILD_IMAGE=debian:13.7-slim ./build.sh
 ```
 
 `E87N_BUILD_IMAGE` 选择构建主机镜像，不锁定目标 rootfs 包版本。严格记录环境时应保留实际容器镜像 digest，而不只记录标签。`E87N_BUILD_CPUS`、`E87N_BUILD_MEMORY` 默认分别为 `4`、`4g`；调整 Docker 资源与编译线程数是不同的设置。
@@ -189,13 +189,15 @@ output/ci/firmware/                  CI 最终 -uboot-firmware.tar
 在专用 Linux 构建主机完成实际 raw 镜像审计后，使用普通 `.img` 文件作为输入：
 
 ```sh
-sudo -n python3 scripts/build-factory-firmware.py --headless \
+sudo -n python3 scripts/build-factory-firmware.py \
   --image /path/to/Armbian-candidate.img \
   --output /path/to/candidate-uboot-firmware.tar
-sudo -n python3 scripts/verify-factory-firmware.py --headless /path/to/candidate-uboot-firmware.tar
+sudo -n python3 scripts/verify-factory-firmware.py /path/to/candidate-uboot-firmware.tar
 ```
 
-转换器处理主机私有文件副本，不连接板卡或修改输入镜像。需要 Linux root、loop/只读挂载工具、Python 3、e2fsprogs、device-tree-compiler、u-boot-tools、initramfs-tools-core 及主机 C 编译器等；完整依赖以脚本和 CI 准备步骤为准。`./build.sh` 生成中间镜像不等于已完成这两步。
+当前默认显示配置不传 `--headless`，并在 raw 阶段使用 `verify-image.sh --release trixie --require-usb-root --require-display-fan --require-system`。保留的 headless 选项只用于与之匹配的旧配置，不能用来绕过当前显示检查。
+
+转换器处理主机私有文件副本，不连接板卡或修改输入镜像。需要 Linux root、loop/只读挂载工具、Python 3、e2fsprogs、device-tree-compiler、u-boot-tools、initramfs-tools-core、kmod、zstd 及主机 C 编译器等；完整依赖以脚本和 CI 准备步骤为准。`./build.sh` 生成中间镜像不等于已完成这两步。最终还需按 [CONTAINER-TESTING.md](CONTAINER-TESTING.md) 将同次构建的 TAR 和独立 deb 交给 Docker/QEMU，保留精确绑定产物的报告。
 
 新实现把原 bootfs 复制到 root 内 `/boot`，移除旧独立 `/boot` 挂载，禁用通用 Armbian resize 并安装严格验证布局的 p5 专用 resize2fs 服务；factory MAC helper 在 DHCP 前只读 p2 的 `0x24`/`0x2a`。内核/DTB hold 必须保留。
 
@@ -203,7 +205,9 @@ sudo -n python3 scripts/verify-factory-firmware.py --headless /path/to/candidate
 
 外层为未压缩 USTAR，仅有 `sysupgrade-edgepi-e87n/{kernel,root,CONTROL}`。FIT 使用 LZMA 内核、原始 initrd 和 DTB；root 为原始 ext4。最终完整 TAR 必须 `<=768 MiB`，FIT 必须容纳于 32 MiB p4，root 及厂商尾部 512 KiB 擦除须在 p5 内。此大小限制不是 Web 空闲 RAM 实测结果。
 
-本轮原生 VM 已报告：902 `--dry-run --fuzz=0`、加强后的 factory 24 项、root adapter 24 项、完整 Linux `ci-regressions.sh` 全套及静态 CI 85 项通过；新增 runtime/root preparer 两个编译检查目标也已复验通过。首次转换的 LZMA kernel 5993493 字节、原始 initrd 16328217 字节、DTB 21479 字节，FIT 可容纳于 32 MiB p4。V3 已废弃；R4 TAR 793057280 字节、root 770703360 字节，独立最终审计 EXIT 0，准确文件名和 SHA-256 见[下载说明](DOWNLOADS.md)。
+### 历史 R4 转换与审计记录
+
+下列数字、测试计数和结果属于历史 R4，不能作为当前源码的验收记录。原生 VM 当时已报告：902 `--dry-run --fuzz=0`、加强后的 factory 24 项、root adapter 24 项、完整 Linux `ci-regressions.sh` 全套及静态 CI 85 项通过；新增 runtime/root preparer 两个编译检查目标也已复验通过。首次转换的 LZMA kernel 5993493 字节、原始 initrd 16328217 字节、DTB 21479 字节，FIT 可容纳于 32 MiB p4。V3 已废弃；R4 TAR 793057280 字节、root 770703360 字节，独立最终审计 EXIT 0，准确文件名和 SHA-256 见[下载说明](DOWNLOADS.md)。
 
 实际 ARM64 Image 头的 `text_offset=0`、有效 `image_size=0x1690000`（23658496 字节）、`flags=0xa` 决定 R4 FIT 的 kernel load/entry 改为 **`0x40000000`**（2 MiB 对齐 RAM 基址），配合 1 GiB DTB。新审计显式核对对齐与 image_size 范围，拒绝非法 Image 头、FIT loadables、非空 FIT reservation map 和额外 init 参数，要求 root 使用 4 KiB ext4 块；不能沿用 V3 审计结论。依据见 [Linux ARM64 booting](https://docs.kernel.org/arch/arm64/booting.html)，旧地址/重定位差异见[固件契约](UBOOT-FIRMWARE.md)。
 

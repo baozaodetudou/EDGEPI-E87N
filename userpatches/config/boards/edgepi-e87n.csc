@@ -108,8 +108,8 @@ function custom_kernel_config__edgepi_e87n_first_boot() {
 	# Let the watchdog core take ownership and ping it before userspace exists;
 	# without this, a healthy kernel can be reset during early boot.
 	opts_val["WATCHDOG_OPEN_TIMEOUT"]="0"
-	# The serial console remains available; fbcon must not overwrite the dashboard.
-	# The panel DT node is disabled until explicitly enabled after board validation.
+# The serial console remains available; fbcon must not overwrite the dashboard.
+# The panel DT node is enabled in the display-capable production profile.
 	opts_m+=(FB_TFT FB_TFT_NV3007)
 	# Upstream 6.18 uses the mediatek/ PHY subdirectory and the 2P5GE symbol.
 	# Firmware is installed in rootfs; keep the matching PHY driver modular.

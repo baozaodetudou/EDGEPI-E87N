@@ -64,8 +64,10 @@ upgrade. Ordinary /boot changes do not update the raw FIT kernel partition.
 
 ## Final TAR evidence (format v2)
 
-The converter and final TAR verifier now read the actual root payload, without
-requiring extlinux or a display package for the headless profile. They require
+The converter and final TAR verifier read the actual root payload without
+requiring extlinux. The current default profile includes the display package
+and enabled LCD/backlight nodes, and is audited without `--headless`.
+The explicit headless option remains for matching older profiles only. They require
 the independent `linux-image-current-edgepi-e87n` and
 `linux-dtb-current-edgepi-e87n` packages to be held, ARM64 and the same Debian
 package version. The image/config/DTB/initrd filenames use the release from the

@@ -536,7 +536,11 @@ def _offline_path(path):
         if candidate.parts[1:2] in (("dev",), ("sys",), ("proc",)):
             raise DisplayError("preview output must not be a hardware path")
         try:
-            info = candidate.lstat()
+            # Call os.lstat directly instead of Path.lstat. On Python 3.9,
+            # pathlib's cached accessor can retain a bound reference to the
+            # original os.lstat and receive the Path object twice when the
+            # offline preview test replaces os.lstat with a guarded wrapper.
+            info = os.lstat(candidate)
         except FileNotFoundError:
             if pending:
                 raise

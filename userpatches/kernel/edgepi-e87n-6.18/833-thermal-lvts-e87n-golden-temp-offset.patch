@@ -1,0 +1,21 @@
+Subject: [PATCH] thermal: lvts: use E87N MT7987 golden temperature offset
+
+The E87N calibration cell at eFuse offset 0x918 contains the golden
+temperature in byte 3 (bit offset 24). The generic MT7987 table in the
+6.18.52 baseline uses bit offset 32, which reads the first CPU calibration
+byte on this board and rejects the valid 60 C golden temperature as 182 C.
+
+Keep this override board-specific: it is based on the live E87N eFuse
+contents and does not change the generic MT7987 SoC table.
+
+diff --git a/drivers/thermal/mediatek/lvts_thermal.c b/drivers/thermal/mediatek/lvts_thermal.c
+--- a/drivers/thermal/mediatek/lvts_thermal.c
++++ b/drivers/thermal/mediatek/lvts_thermal.c
+@@ -1821,7 +1821,7 @@ static const struct lvts_data mt7987_lvts_ap_data = {
+ 	.temp_factor	= LVTS_COEFF_A_MT7987,
+ 	.temp_offset	= LVTS_COEFF_B_MT7987,
+-	.gt_calib_bit_offset = 32,
++	.gt_calib_bit_offset = 24,
+ 	.def_calibration = 19380,
+ 	.require_valid_calibration = true,
+ };

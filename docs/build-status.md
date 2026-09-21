@@ -1,6 +1,6 @@
 # Build status — 2026-09-12
 
-> Historical build log, superseded by the [2026-09-13 display/fan candidate](candidate-display-fan-20260913.md). References below to 12 patches or an unsupported display describe the older images, not the current 13-patch source tree. Local artifacts and logs mentioned here are excluded from Git; see [artifact availability](DOWNLOADS.md).
+> Historical build log for 2026-09-12. Versions, patch counts and unsupported-display statements below describe those frozen inputs only. Current Debian 13 / Linux 6.18 LTS inputs are centralized in [e87n-build.json](../userpatches/config/e87n-build.json); the current image recipe preinstalls the display package and enables LCD/backlight nodes. See [current defaults](DEFAULTS.md), [display/fan support](display-fan.md) and the separately scoped [candidate3 acceptance record](FINAL-VALIDATION-20260920.md). Local artifacts and logs mentioned here are excluded from Git; see [artifact availability](DOWNLOADS.md).
 
 The current target is **Debian 13 Trixie + Linux 6.18.51 LTS**. The family now
 pins the official stable-kernel commit

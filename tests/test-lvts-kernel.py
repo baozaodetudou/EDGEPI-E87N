@@ -97,7 +97,7 @@ static void thermal_zone_device_update(struct thermal_zone_device *tz, int event
 
 TESTS = r'''
 int main(void) {
-    struct lvts_data data = { .gt_calib_bit_offset = 32 };
+    struct lvts_data data = { .gt_calib_bit_offset = E87N_GT_BIT_OFFSET };
     u32 gt, expected;
     unsigned int checks = 0;
     /* Exact allocations let ASan detect even a one-byte over-read. Reference
@@ -125,8 +125,13 @@ int main(void) {
         free(bytes);
     }
     u8 efuse[16] = {0, 0, 0, 37, 51, 0x12, 0x34, 0, 0x56, 0x78, 0x9a};
-    data.gt_calib_bit_offset = 24;
+    data.gt_calib_bit_offset = E87N_GT_BIT_OFFSET;
+    gt = 0xdeadbeef;
+    assert(lvts_calibration_gt(efuse, 3, &data, &gt) == -EINVAL);
+    assert(gt == 0xdeadbeef);
     assert(lvts_calibration_gt(efuse, 4, &data, &gt) == 0 && gt == 37);
+    /* Generic offset=32 remains supported by the bounded decoder. It is not
+     * the E87N layout selected by patch 833. */
     data.gt_calib_bit_offset = 32;
     assert(lvts_calibration_gt(efuse, 5, &data, &gt) == 0 && gt == 51);
     assert(lvts_calibration_gt(efuse, 4, &data, &gt) == -EINVAL);
@@ -140,6 +145,8 @@ int main(void) {
     u8 unaligned[17];
     memcpy(unaligned + 1, efuse, sizeof(efuse));
     assert(lvts_calibration_gt(unaligned + 1, 16, &data, &gt) == 0 && gt == 51);
+    data.gt_calib_bit_offset = E87N_GT_BIT_OFFSET;
+    assert(lvts_calibration_gt(unaligned + 1, 4, &data, &gt) == 0 && gt == 37);
 
     struct device dev = {0};
     struct lvts_ctrl_data ctrl_data = {
@@ -150,35 +157,63 @@ int main(void) {
     data.require_valid_calibration = true;
     data.def_calibration = 19380; /* Must never mask bad MT7987 data. */
     data.temp_offset = 204650;
-    for (size_t len = 0; len <= 4; len++) {
+    /* At bit24 the golden byte needs four bytes, not five. Sensor calibration
+     * independently needs bytes through offset 10 (eleven bytes in total). */
+    for (size_t len = 0; len <= 3; len++) {
         golden_temp = 41;
         golden_temp_offset = 1234;
         assert(lvts_golden_temp_init(&dev, efuse, len, &data) == -EINVAL);
         assert(golden_temp == 41 && golden_temp_offset == 1234);
         assert(lvts_calibration_init(&dev, &ctrl, &ctrl_data, efuse, len) == -EINVAL);
     }
-    assert(lvts_golden_temp_init(&dev, efuse, 16, &data) == 0);
-    assert(golden_temp == 51 && golden_temp_offset == 51 * 500 + 204650);
-    assert(lvts_calibration_init(&dev, &ctrl, &ctrl_data, efuse, 16) == 0);
+    assert(lvts_golden_temp_init(&dev, efuse, 4, &data) == 0);
+    assert(golden_temp == 37 && golden_temp_offset == 37 * 500 + 204650);
+    for (size_t len = 4; len <= 10; len++)
+        assert(lvts_calibration_init(&dev, &ctrl, &ctrl_data, efuse, len) == -EINVAL);
+    assert(lvts_calibration_init(&dev, &ctrl, &ctrl_data, efuse, 11) == 0);
     assert(ctrl.calibration[0] == 0x341233 && ctrl.calibration[1] == 0x9a7856);
     for (unsigned int invalid = 0; invalid <= 255; invalid++) {
         if (invalid > 0 && invalid < LVTS_GOLDEN_TEMP_MAX) continue;
-        efuse[4] = invalid;
+        efuse[E87N_GT_BIT_OFFSET / 8] = invalid;
         golden_temp = 41;
+        golden_temp_offset = 1234;
+        gt = 0xdeadbeef;
+        assert(lvts_calibration_gt(efuse, 16, &data, &gt) == -ENODATA);
+        assert(gt == 0xdeadbeef);
         assert(lvts_golden_temp_init(&dev, efuse, 16, &data) == -ENODATA);
-        assert(golden_temp == 41);
+        assert(golden_temp == 41 && golden_temp_offset == 1234);
         assert(lvts_calibration_init(&dev, &ctrl, &ctrl_data, efuse, 16) == -ENODATA);
     }
-    efuse[4] = 51;
+    efuse[E87N_GT_BIT_OFFSET / 8] = 37;
+    assert(efuse[4] == 51); /* Invalid GT cases must not corrupt sensor data. */
     assert(lvts_calibration_init(&dev, &ctrl, &ctrl_data, efuse, 10) == -EINVAL);
     memset(efuse + 8, 0, 3);
     assert(lvts_calibration_init(&dev, &ctrl, &ctrl_data, efuse, 16) == -ENODATA);
     memset(efuse + 8, 255, 3);
     assert(lvts_calibration_init(&dev, &ctrl, &ctrl_data, efuse, 16) == -ENODATA);
     data.require_valid_calibration = false; /* Existing other-SoC fallback. */
-    efuse[4] = 0;
+    efuse[E87N_GT_BIT_OFFSET / 8] = 0;
     assert(lvts_calibration_init(&dev, &ctrl, &ctrl_data, efuse, 16) == 0);
     assert(ctrl.calibration[0] == 19380 && ctrl.calibration[1] == 19380);
+
+    /* Read-only E87N capture on 2026-09-21: nvmem0 at 0x918, length 16.
+     * This proves decoding of the observed bytes, not temperature accuracy. */
+    u8 observed[16] = {0, 0, 0, 0x3c, 0xb6, 0x4c, 0, 0,
+                       0xea, 0x4c, 0, 0, 1, 0x15, 0, 0};
+    data.require_valid_calibration = true;
+    assert(lvts_calibration_gt(observed, 4, &data, &gt) == 0 && gt == 60);
+    assert(lvts_golden_temp_init(&dev, observed, sizeof(observed), &data) == 0);
+    assert(golden_temp == 60 && golden_temp_offset == 60 * 500 + 204650);
+    assert(lvts_calibration_init(&dev, &ctrl, &ctrl_data, observed, sizeof(observed)) == 0);
+    assert(ctrl.calibration[0] == 0x004cb6 && ctrl.calibration[1] == 0x004cea);
+    data.gt_calib_bit_offset = 32;
+    data.require_valid_calibration = false;
+    assert(lvts_calibration_gt(observed, 5, &data, &gt) == 0 && gt == 182);
+    data.require_valid_calibration = true;
+    assert(lvts_golden_temp_init(&dev, observed, sizeof(observed), &data) == -ENODATA);
+    assert(golden_temp == 60 && golden_temp_offset == 60 * 500 + 204650);
+    assert(lvts_calibration_init(&dev, &ctrl, &ctrl_data, observed, sizeof(observed)) == -ENODATA);
+    data.gt_calib_bit_offset = E87N_GT_BIT_OFFSET;
 
     u8 registers[32] = {0};
     struct thermal_zone_device zone0 = {.id = 0}, zone2 = {.id = 2};
@@ -196,7 +231,7 @@ int main(void) {
     assert(updates == 0 && irq_acked == irq_status);
     irq_status = 0;
     assert(lvts_ctrl_irq_handler(&ctrl) == IRQ_NONE && irq_acked == 0);
-    printf("PASS: %u bit/length combinations; both real calibration callers, strict errors, unaligned data, IRQ ACK/NULL/invalid sensor checks\n", checks);
+    printf("PASS: %u bit/length combinations; patch833 offset24/observed eFuse, both real calibration callers, strict errors, unaligned data, IRQ ACK/NULL/invalid sensor checks\n", checks);
     return 0;
 }
 '''
@@ -210,16 +245,23 @@ def main():
         target = root / SOURCE
         target.parent.mkdir(parents=True)
         shutil.copyfile(Path(sys.argv[1]) / SOURCE, target)
-        for prefix in ("831", "832"):
+        for prefix in ("831", "832", "833"):
             patches = list((REPO / "userpatches/kernel/edgepi-e87n-6.18").glob(prefix + "-*.patch"))
             assert len(patches) == 1
             subprocess.run(["patch", "--batch", "--forward", "--fuzz=0", "-p1", "-i", str(patches[0])],
                            cwd=root, check=True)
         source = target.read_text()
+        table = re.search(r"^static const struct lvts_data mt7987_lvts_ap_data = \{(.*?)^\};",
+                          source, re.M | re.S)
+        assert table, "missing patched MT7987 calibration table"
+        offsets = re.findall(r"^\s*\.gt_calib_bit_offset\s*=\s*(\d+)\s*,", table[1], re.M)
+        assert offsets == ["24"], "patch 833 must select E87N golden temperature bit offset 24"
+        assert re.search(r"^\s*\.require_valid_calibration\s*=\s*true\s*,", table[1], re.M), \
+            "patch 833 must retain strict MT7987 calibration validation"
         names = ("lvts_calibration_gt", "lvts_calibration_init", "lvts_golden_temp_init", "lvts_ctrl_irq_handler")
         extracted = "\n\n".join(function(source, name) for name in names)
         harness = root / "lvts-test.c"
-        harness.write_text(PRELUDE + extracted + TESTS)
+        harness.write_text(PRELUDE + "\n#define E87N_GT_BIT_OFFSET " + offsets[0] + "\n" + extracted + TESTS)
         binary = root / "lvts-test"
         subprocess.run([os.environ.get("CC", "cc"), "-std=gnu11", "-O1", "-g", "-Wall", "-Wextra",
                         "-Werror", "-Wno-unused-parameter", "-fsanitize=address,undefined",

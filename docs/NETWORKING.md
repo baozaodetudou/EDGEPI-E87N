@@ -45,7 +45,7 @@ machine-id 与 SSH host keys 仍应每台独立生成。DHCP 绑定应核对实�
 
 历史 `tests/test-network-policy.py` 使用 GNU patch 以 `--fuzz=0` 应用 901，检查两条 alias 指向不同的启用 GMAC 节点；有 dtc 时编译精简夹具。这些是 alias 源码验证，既不是完整新 DTB 构建，也不验证新 helper 在真实网络启动时恢复 MAC。
 
-当前补丁集包含新增的 902 内存/保留区修正，共 15 个补丁；原生内核树 902 的 `--dry-run --fuzz=0` 已通过，实际构建仍需审计 FIT 内 DTB 和 root 内 `/boot`。root adapter 24 项离线测试已有通过结果，完整启动和上板验收仍待记录，至少需要核对：
+当前 Frank-W 6.18 基线叠加 E87N 补丁，保留 901 GMAC aliases 与 902 内存/保留区修正；补丁列表和摘要以本次构建 receipt 为准。历史 902 dry-run 和 root adapter 24 项测试只对应当时输入，实际新构建仍需审计 FIT 内 DTB 和 root 内 `/boot`。完整上板验收至少需要核对：
 
 - 合法与无效 p2 数据、错误布局、缺 alias/命名属性、已启用接口等情形的明确结果，确保 factory 和环境只读。
 - 完整 systemd 启动顺序中 helper 先于 DHCP，最终 MAC 与 p2 两个地址对应，无后续策略覆盖。

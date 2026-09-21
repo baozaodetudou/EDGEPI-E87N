@@ -1,7 +1,7 @@
 # U-Boot 固件获取、发布状态与校验
 
-> 当前 candidate3 已完成 Debian 13.7 / 6.18.52 构建、最终固件审计和同产物 Docker/QEMU 门禁。
-> 当前产物摘要见[最终验收记录](FINAL-VALIDATION-20260920.md)；下列 6.18.51 / R4 内容均为历史记录。
+> candidate3 已完成 Debian 13.7 / 6.18.52 构建、最终固件审计和同产物 Docker/QEMU 门禁，但它使用旧 headless 配置。
+> 其产物摘要见[冻结验收记录](FINAL-VALIDATION-20260920.md)。当前源码已预装显示包并启用 LCD/背光，需要新的构建与验收；不能把下列文件当作新显示配置产物。6.18.51 / R4 内容均为历史记录。
 
 本仓库公开的是构建源码、板级补丁、Debian 小屏程序、测试与文档。
 **R4 本地已生成，对同一 TAR 的独立最终审计 EXIT 0，准确文件信息见下文。** R4 重新打包历史 Actions 34737922588 的原始 RAW，修正 DTB 的 1 GiB/保留区及 bootargs（含 902 等效修正），没有完整重编 Armbian 或内核。V3 因内核地址修正已废弃，不作为交付、不发布其哈希。主机导出及 SHA-256 比对已完成，未来新源码工作流未 dispatch，远端 Release 发布未确认。
@@ -9,7 +9,7 @@
 `git clone` 不会下载之前本地生成的 `.img.xz`、内核包、完整日志或构建缓存。
 可按 [构建指南](BUILDING.md) 自行生成，或在 [GitHub Actions](GITHUB-ACTIONS.md) 对应 run 成功并上传 artifacts 后取得文件，再校验。工作流文件存在、任务开始运行与成功产物上传是不同状态；artifacts 也不等同于 Release。
 
-## 当前 candidate3（本地验收记录，不是远端发布记录）
+## 冻结 candidate3（旧 headless 配置，本地验收记录）
 
 ```text
 文件名：Armbian-trixie-6.18.52-e87n-679b7d5-uboot-firmware.tar

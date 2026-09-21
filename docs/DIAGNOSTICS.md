@@ -13,7 +13,7 @@ e87nctl doctor
 `E87N_EXTRA_STORAGE=no`，管理工具按需安装；诊断不把它们当作默认预装能力。
 
 `board-support/e87n/doctor.py` 提供 `doctor(root="/")`，只使用 Python 标准库，
-返回可 JSON 序列化的字典。目标为 Debian 13 Trixie、Linux 6.18.51、EdgePi E87N。
+返回可 JSON 序列化的字典。目标为 Debian 13 Trixie、Linux 6.18.52、EdgePi E87N；构建版本来源见 [e87n-build.json](../userpatches/config/e87n-build.json)，诊断程序自身的基础版本匹配值位于 `doctor.py` 的 `_VERSION`。
 它观察当前内核和调用者所在挂载/网络环境公开的数据；容器、chroot 或未挂载
 proc/sys 的离线目录会使结果缺失或只反映该环境，不能替代整盘镜像验证。
 
@@ -56,7 +56,7 @@ print(json.dumps(result, sort_keys=True, allow_nan=False))
 | --- | --- |
 | `root_access` | 选定根必须为可访问的绝对目录。默认 `/`；仅 Python API 支持夹具注入。 |
 | `os` | `/etc/os-release`，不可读取时尝试 `/usr/lib/os-release`。只解析 `ID`、`VERSION_ID`、`VERSION_CODENAME`，不执行文件。Debian 13/13.x 满足版本检查；缺少代号以 null 报告，明确非 Trixie 会报错。 |
-| `kernel` | `/proc/sys/kernel/osrelease`。比较严格的三段基础版本 `6.18.51`；允许发行版后缀但不输出后缀，`6.18.510` 不匹配。不以主机 `uname` 补足缺失值。 |
+| `kernel` | `/proc/sys/kernel/osrelease`。比较严格的三段基础版本 `6.18.52`；允许发行版后缀但不输出后缀，`6.18.520` 不匹配。不以主机 `uname` 补足缺失值。 |
 | `device_tree` | `/sys/firmware/devicetree/base/{model,compatible}` 的 NUL 结尾属性，检查 `EdgePi E87N` 与完整兼容串 `edgepi,e87n`，不输出任意设备树文本。 |
 | `memory` | `/proc/meminfo` 唯一、有效的 `MemTotal`，单位 KiB；≤262144 KiB（256 MiB）发出警告，建议核对 DTS/U-Boot 内存交接。1024 MiB 只是已知板卡的标称比较参考，不用它填充实际检测值，也不保证高于 256 MiB 就识别了全部 RAM。 |
 | `root_filesystem` | `/proc/self/mountinfo`，不可读取时尝试 `/proc/mounts`。仅报告 `/` 是否存在、文件系统类别与 ro/rw；挂载点或 superblock 任一为 ro 都报告只读。多个根挂载有歧义，临时/只读根发出警告。不输出来源设备、UUID 或挂载选项原文。 |

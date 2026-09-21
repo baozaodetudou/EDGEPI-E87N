@@ -4,7 +4,7 @@
 
 **用户要求完全准备好再刷。当前没有板卡重启、刷写、完整恢复备份、串口连接或板上 RAM 测试记录。** R4 本地已生成，独立最终审计 EXIT 0；factory 24 项、root adapter 24 项通过，完整 Linux `ci-regressions.sh` 已在磁盘临时目录运行并 EXIT 0。CI 85 项已再次通过；新增 runtime/root preparer 两个编译检查目标也已复验通过。主机导出与两文件摘要比对已完成；这不是硬件验收。R4 重新打包历史 Actions 34737922588 的原始 RAW，修正 DTB 的 1 GiB/保留区及 bootargs（含 902 等效修正），没有完整重编 Armbian 或内核。V3 已废弃，未来新源码工作流未 dispatch。这些结果不代替硬件和恢复准备，详见[阶段记录](SYSTEM-READINESS.md)。本文不提供刷写、修改环境或猜测 USB Type-C 针脚的步骤。
 
-[DEFAULTS.md](DEFAULTS.md) 定义新系统的 `root` / `doumao`、SSH 22 密码登录、networkd/netplan DHCP、`Asia/Shanghai`、`zh_CN.UTF-8` 和正常 APT。当前基础镜像暂不自动加载 NV3007；显示包单独发布，待驱动修正后安装。没有首次创建用户向导或强制公钥门槛，串口需要正常认证。
+[DEFAULTS.md](DEFAULTS.md) 定义新系统的 `root` / `doumao`、SSH 22 密码登录、networkd/netplan DHCP、`Asia/Shanghai`、`zh_CN.UTF-8` 和正常 APT。当前配方预装显示包，启用 NV3007/背光节点、模块自动加载配置与显示服务；独立 deb 用于升级和重新安装。没有首次创建用户向导或强制公钥门槛，串口需要正常认证。配置启用不代表屏幕或风扇已经实机验收，candidate3 的旧 headless 验收也不能代替当前显示配置的验证。
 
 ## 1. 刷写前的准备条件
 
@@ -35,7 +35,7 @@ p1 的 `0x80000` 字节单环境只读副本已离线通过 CRC32 校验；未�
 
 ## 3. 新 FIT、板级配置与根文件系统
 
-框架固定为 Armbian `7c1bb29eb0e7bd75b0703d86fe654b2680e646da`，内核固定为 `f6388029ea9e2c9e807d73827658738ea131faee`（Linux 6.18.51 LTS）。独立 `BOARDFAMILY=edgepi-e87n` 加载本仓库 family，再保留 `LINUXFAMILY=filogic` 包名；board hook 设置 `ATF_COMPILE=no`、`BOOTCONFIG=none`，不构建或注入 bootloader。跳过注入不会使 Armbian 的新 GPT 自动保留原盘数据。
+版本与 pin 以 [e87n-build.json](../userpatches/config/e87n-build.json) 为准：当前为 Debian 13.7、Armbian `7c1bb29eb0e7bd75b0703d86fe654b2680e646da` 和 Frank-W `a638fabe36f293e58ab6be002af04b866959c546`（Linux 6.18.52 LTS）。`BOARDFAMILY` 与 `LINUXFAMILY` 均为 `edgepi-e87n`，使用独立内核/DTB 包名及 `6.18.52-current-edgepi-e87n` release；board hook 设置 `ATF_COMPILE=no`、`BOOTCONFIG=none`，不构建或注入 bootloader。跳过注入不会使 Armbian 的新 GPT 自动保留原盘数据。
 
 补丁集新增 `902-e87n-memory-1g.patch`，在 `901` GMAC aliases 之后把 E87N DT 描述改为实测的 1 GiB，并保留 wmcpu 和顶部 ramoops/secmon。应审计最终 FIT 内的 DTB 和 root 内 `/boot` 副本，再通过已验证的控制通道及启动证据核对实际交接；不再依赖“把历史 256 MiB 默认值交给 U-Boot 猜测修正”的说明。
 

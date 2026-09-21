@@ -1,7 +1,8 @@
-Subject: [PATCH] arm64: dts: add E87N on Frank-W 6.18.52 MT7987 providers
+Subject: [PATCH] arm64: dts: add E87N display/fan support on MT7987
 
 Inherit maintained SoC bindings, including native PCS and LVTS IRQ support.
-Keep E87N wiring and thermal policy, and disable unvalidated DVFS/panel probe.
+Keep E87N wiring and thermal policy, and enable the NV3007 panel and PWM
+backlight for the display-capable image profile.
 
 --- a/arch/arm64/boot/dts/mediatek/Makefile
 +++ b/arch/arm64/boot/dts/mediatek/Makefile
@@ -55,7 +56,7 @@ Keep E87N wiring and thermal policy, and disable unvalidated DVFS/panel probe.
 +				     130 140 150 160 170 180 190 200 210 220 230
 +				     240 250 255>;
 +		default-brightness-level = <26>;
-+		status = "disabled";
++		status = "okay";
 +	};
 +
 +	gpio-keys {
@@ -278,7 +279,7 @@ Keep E87N wiring and thermal policy, and disable unvalidated DVFS/panel probe.
 +		reset-gpios = <&pio 10 GPIO_ACTIVE_LOW>;
 +		dc-gpios = <&pio 11 GPIO_ACTIVE_HIGH>;
 +		spi-max-frequency = <52000000>;
-+		status = "disabled";
++		status = "okay";
 +	};
 +};
 +

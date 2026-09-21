@@ -1,8 +1,8 @@
 # 测试与验证 E87N Armbian
 
-当前测试目标是 [DEFAULTS.md](DEFAULTS.md) 中的最小配置；本轮云端完整构建和实际镜像静态审计已通过，另有可丢弃 rootfs 副本的用户空间集成结果，详见[本轮记录](ci-keygen-fix-20260913.md)。诊断、网络与系统静态检查分别使用 `tests/test-doctor.py`、`tests/test-network-policy.py` 和 `tests/test-verify-system.py`；最后一项需要专用 Linux 构建环境的 root 身份来创建临时 root-owned 夹具，不挂载设备。网络测试要求 GNU patch，macOS 可用 `gpatch`，并会打印实际工具版本。
+当前测试目标是 [DEFAULTS.md](DEFAULTS.md) 中预装显示包、启用 LCD/背光的 Debian 13 / Linux 6.18 LTS 最小配置。版本、pin 和 kernel release 来自 [e87n-build.json](../userpatches/config/e87n-build.json)。[旧云端构建](ci-keygen-fix-20260913.md)及 [candidate3 软件验收](FINAL-VALIDATION-20260920.md)各自对应冻结输入，不能作为当前显示配置通过的证据。诊断、网络与系统静态检查分别使用 `tests/test-doctor.py`、`tests/test-network-policy.py` 和 `tests/test-verify-system.py`；最后一项需要专用 Linux 构建环境的 root 身份来创建临时 root-owned 夹具，不挂载设备。网络测试要求 GNU patch，macOS 可用 `gpatch`，并会打印实际工具版本。
 
-基础 headless 镜像必须执行 `verify-image.sh --release trixie --require-usb-root --headless --require-system candidate.img`。`--require-system` 核对 `root` / `doumao` 密码登录配置、首次 SSH 前生成独立身份的服务依赖、无串口自动登录、无旧初始化服务、networkd/netplan DHCP、上海时区、中文 UTF-8、签名 APT 源和真实 DTB 的 GMAC aliases；显示包单独执行显示包和静态显示审计。这些都是静态检查，不执行镜像程序，也不能证明 SSH 已能登录。
+当前镜像必须执行 `verify-image.sh --release trixie --require-usb-root --require-display-fan --require-system candidate.img`。`--require-system` 核对 `root` / `doumao` 密码登录配置、首次 SSH 前生成独立身份的服务依赖、无串口自动登录、无旧初始化服务、networkd/netplan DHCP、上海时区、中文 UTF-8、签名 APT 源和真实 DTB 的 GMAC aliases；`--require-display-fan` 同时检查显示/风扇配置及预装显示包。这些都是静态检查，不执行镜像程序，也不能证明 SSH 已能登录。`--headless` 仅保留用于相应旧配置，不能替代当前显示检查。
 
 历史上，2026-09-13 的 **Debian 13.6 Trixie / Linux 6.18.51 屏幕/风扇候选**已完成完整构建、真实镜像只读审计和导出校验，尚未上板启动或测试。已有结果与精确哈希见[历史候选记录](candidate-display-fan-20260913.md)。2026-09-13 11:10:49 CST 完成的旧配置 VM 构建也已被当前最小配置取代，不能作为当前测试结果。本文提供复跑入口，不把命令示例当作新的通过记录。
 
@@ -13,10 +13,11 @@
 | 检查 | 输入与范围 | 不能据此认定 |
 | --- | --- | --- |
 | Python / shell fixture 回归 | 临时文件、假 sysfs、模拟设备及进程状态 | 真实内核、镜像或板卡通过 |
-| 框架加载 / 补丁发现与应用 | 固定框架、14 个补丁、指定 Linux 基线；可选实际 DTB 编译 | 完整内核已编译或设备可启动 |
+| 框架加载 / 补丁发现与应用 | 固定框架、当前 E87N 补丁目录、中央配置指定的 Frank-W 基线；可选实际 DTB 编译 | 完整内核已编译或设备可启动 |
 | 真实包 / 配置 / DTB 静态检查 | 本轮实际生成的文件 | rootfs、initramfs 或所有硬件正常 |
 | `verify-image.sh` | 完成的 raw 镜像、真实只读 loop/GPT/ext4/UUID/initramfs；显式启用 USB-root、显示/风扇与最小系统检查 | U-Boot 能加载、首启成功或 eMMC 写入安全 |
 | `smoke-minimal-userspace.sh` | 可信候选的可丢弃 rootfs 副本执行最新 customize、APT、locale 与隔离 loopback SSH/PAM | 新内核/镜像构建、完整 PID 1 启动、实体网口或板卡通过 |
+| Docker/QEMU 同产物验收 | 最终 TAR 的内核/initrd、私有 rootfs 副本及精确摘要绑定的独立 deb；systemd、网络、APT、重启与包生命周期 | MT7987 外设、LCD/背光、LVTS 精度、风扇转速或真实 U-Boot 交接正常 |
 | 上板证据采集 | 已经启动的 Linux 板卡日志和只读状态 | 屏幕效果、风扇起转、负载稳定性或完整硬件验收 |
 
 ## 不需要构建源码或设备的 fixture 测试
@@ -128,7 +129,7 @@ bash tests/test-board-config.sh
 bash tests/test-python-path.sh
 ```
 
-两者均可用第一个参数指定已有框架目录。`test-board-config.sh` 检查当前 pin、14 个补丁、启动配置与内核配置 hook；它没有编译内核。`test-python-path.sh` 执行框架中的真实 Python 环境赋值，并实际调用 `git --version`，检查最小环境的 PATH 修补，不是纯 mock 测试。
+两者均可用第一个参数指定已有框架目录。`test-board-config.sh` 检查当前 pin、补丁目录、启动配置与内核配置 hook；它没有编译内核。`test-python-path.sh` 执行框架中的真实 Python 环境赋值，并实际调用 `git --version`，检查最小环境的 PATH 修补，不是纯 mock 测试。
 
 补丁发现测试使用框架自己的 Python parser：
 
@@ -136,17 +137,17 @@ bash tests/test-python-path.sh
 uv run --script tests/test-patch-discovery.py
 ```
 
-需要已安装 `uv` 和 Python >= 3.12；脚本声明的依赖为 `GitPython==3.1.62`、`unidiff==1.0.0`、`Unidecode==1.4.0`、`rich==15.0.0`、`PyYAML==6.0.3`。`uv` 首次准备环境可能下载依赖。已有满足要求的构建 Python 环境也可直接运行 `python3 -B tests/test-patch-discovery.py`。可依次传入框架目录和 userpatches 目录；默认读取本仓库。此项验证 14 个文件的发现、排序及解析，不执行补丁应用或编译。
+需要已安装 `uv` 和 Python >= 3.12；脚本声明的依赖为 `GitPython==3.1.62`、`unidiff==1.0.0`、`Unidecode==1.4.0`、`rich==15.0.0`、`PyYAML==6.0.3`。`uv` 首次准备环境可能下载依赖。已有满足要求的构建 Python 环境也可直接运行 `python3 -B tests/test-patch-discovery.py`。可依次传入框架目录和 userpatches 目录；默认读取本仓库。此项验证当前补丁文件的发现、排序及解析，不执行补丁应用或编译。
 
-若已准备包含固定提交及所需对象的 Linux stable Git 仓库，可实际应用补丁：
+若已准备包含中央配置固定提交及所需对象的 Frank-W Linux Git 仓库，可实际应用补丁：
 
 ```sh
-bash scripts/check-kernel-patches.sh ./source/linux-stable
+bash scripts/check-kernel-patches.sh ./source/frank-w-linux
 # 可选：同一检查再用主机 C 预处理器、dtc、fdtget 编译 E87N DTB。
-CHECK_DTB=yes bash scripts/check-kernel-patches.sh ./source/linux-stable
+CHECK_DTB=yes bash scripts/check-kernel-patches.sh ./source/frank-w-linux
 ```
 
-`./source/linux-stable` 是手动准备的示例路径，不是启动器保证生成的 checkout。脚本默认从 family 读取 `f6388029ea9e2c9e807d73827658738ea131faee` 和 `edgepi-e87n-6.18`，将受影响基线文件取到独立临时目录后逐个以 `--fuzz=0` 应用；不会修改所给仓库的工作树。部分克隆缺少对象时 Git 可能尝试获取对象，不能把此项无条件称为离线测试。
+`./source/frank-w-linux` 是手动准备的示例路径，不是启动器保证生成的 checkout。基线 pin 以中央配置和 family 为准，当前为 `a638fabe36f293e58ab6be002af04b866959c546`，补丁目录为 `edgepi-e87n-6.18`。脚本将受影响基线文件取到独立临时目录后逐个以 `--fuzz=0` 应用；不会修改所给仓库的工作树。部分克隆缺少对象时 Git 可能尝试获取对象，不能把此项无条件称为离线测试。
 
 需要 GNU patch；macOS 的 GNU patch 可通过 `PATCH_BIN=gpatch` 指定。可选 DTB 编译还需要 `cc`（或 `CPP_BIN` 指定的 C 预处理器）、`dtc`、`fdtget`。脚本保留审计目录和日志，遇第一个补丁失败即停止。补丁零 fuzz 应用和 DTB 编译不等于完整内核编译或完整 DT schema 检查；保留并审查 `dtc.log` 的 warning。
 
@@ -163,24 +164,25 @@ bash scripts/verify-artifacts.sh --release trixie \
   --boot-dir ./artifacts/current/bootfs
 ```
 
-`--debs` 递归检查恰好一套匹配的 arm64 `linux-image-current-filogic` 和 `linux-dtb-current-filogic` 包；不安装包，也不执行维护脚本。此模式不检查 Debian rootfs 身份、固件、extlinux 或 initramfs。不要将多个构建的内核/DTB 包混在同一个检查目录。
+`--debs` 递归检查恰好一套匹配的 arm64 `linux-image-current-edgepi-e87n` 和 `linux-dtb-current-edgepi-e87n` 包；不安装包，也不执行维护脚本。此模式不检查 Debian rootfs 身份、固件、extlinux 或 initramfs。不要将多个构建的内核/DTB 包混在同一个检查目录。
 
 目录模式核对实际 extlinux 选择的 Image/DTB、最终配置、模块、Debian 身份、PHY 固件及 root UUID 配置关系。它不会自行提取镜像，也不能仅凭配置文本获得真实 ext4 UUID。`--boot-dir` 必须保持原 bootfs 的路径/链接布局；release 中便于审计的扁平 boot 组件集不一定满足这个要求。合成输入应标记 `--fixture`，该标记不会绕过检查。
 
 LTS 平台策略与显示/风扇静态检查可单独对已经提取的真实文件运行，需要主机 `fdtget`：
 
 ```sh
+kernel_release=$(python3 scripts/build_config.py kernel_release)
 bash scripts/verify-lts-platform.sh \
-  --config ./artifacts/current/bootfs/config-6.18.51-current-filogic \
-  --dtb ./artifacts/current/bootfs/dtb-6.18.51-current-filogic/mediatek/mt7987a-edgepi-e87n.dtb
+  --config "./artifacts/current/bootfs/config-$kernel_release" \
+  --dtb "./artifacts/current/bootfs/dtb-$kernel_release/mediatek/mt7987a-edgepi-e87n.dtb"
 
 python3 -B scripts/verify-display-fan.py \
   --rootfs ./artifacts/current/rootfs \
-  --config ./artifacts/current/bootfs/config-6.18.51-current-filogic \
-  --dtb ./artifacts/current/bootfs/dtb-6.18.51-current-filogic/mediatek/mt7987a-edgepi-e87n.dtb
+  --config "./artifacts/current/bootfs/config-$kernel_release" \
+  --dtb "./artifacts/current/bootfs/dtb-$kernel_release/mediatek/mt7987a-edgepi-e87n.dtb"
 ```
 
-前者检查 Linux 6.18 的 DTB/config 板级策略，包括以太网资源、LVTS/PWM/efuse 和禁用 CPU DVFS；后者检查当前 6.18.51 显示/风扇配置、DTB、模块/依赖文件、Python 语法、默认 JSON 和服务启用关系。不会导入目标程序、运行显示服务或测试实体面板。`verify-image.sh` 的显示/风扇开关会调用后者，**不会自动调用 `verify-lts-platform.sh`**。
+前者检查 Linux 6.18 的 DTB/config 板级策略，包括以太网资源、LVTS/PWM/efuse 和禁用 CPU DVFS；后者按中央配置中的 kernel release 检查显示/风扇配置、DTB、模块/依赖文件、Python 语法、默认 JSON 和服务启用关系。不会导入目标程序、运行显示服务或测试实体面板。`verify-image.sh` 的显示/风扇开关会调用后者，**不会自动调用 `verify-lts-platform.sh`**。
 
 额外存储默认 `E87N_EXTRA_STORAGE=no`，最终配置须核对可选 DM/RAID 等驱动未启用。`verify-lts-platform.sh --require-storage` 仅用于显式以 `E87N_EXTRA_STORAGE=yes` 构建的配置；不要对默认最小镜像强制要求额外模块。开关、配置检查和实际模块验收边界见 [OPTIONAL-STORAGE.md](OPTIONAL-STORAGE.md)。
 
@@ -209,7 +211,7 @@ sudo apt-get install -y bash coreutils python3 util-linux fdisk mount gdisk \
 
 ```sh
 sudo bash scripts/verify-image.sh --release trixie \
-  --require-usb-root --headless --require-system \
+  --require-usb-root --require-display-fan --require-system \
   ./artifacts/current/candidate.img
 ```
 
@@ -221,11 +223,13 @@ sudo bash scripts/verify-image.sh --release trixie \
 2. 对打开的镜像文件新建专属只读 loop，确认分区只读、ext4 类型，并执行 `e2fsck -fn`，不修复文件系统。
 3. 在专用临时目录中以 `ro,noload,nodev,nosuid,noexec` 挂载，读取真实 root UUID 并调用产物检查。
 4. 用主机 `dumpimage`/`lsinitramfs` 检查 extlinux 选择的 initramfs，确认 `/init` 存在，不执行它。`--require-usb-root` 另外依据最终配置及 `modules.dep` 核对对应版本的 USB/SCSI/T-PHY 模块和递归依赖。
-5. `--headless --require-system` 调用基础系统静态验证器；显示包单独调用显示/风扇静态验证器。结束时只释放本次创建的挂载和 loop，保留审计文件。
+5. `--require-system` 调用系统静态验证器，`--require-display-fan` 调用显示/风扇静态验证器。结束时只释放本次创建的挂载和 loop，保留审计文件。
 
 检查或清理失败都会返回非零结果。若清理失败，按打印的所属路径人工检查；脚本不会强制卸载、全局清理 loop，或拆除来源不符的挂载。`PASS` 只代表上述静态范围，不证明真实 U-Boot 能读取 USB、识别 extlinux、执行 `booti` 或启动这张镜像。
 
 ## 导出校验与记录结果
+
+raw 静态检查之后，还需完成最终 TAR 转换、独立审计及 [Docker/QEMU 同产物验收](CONTAINER-TESTING.md)。每次源码或显示配置变化都需要新结果，不能复制历史 PASS。
 
 如果产物目录附带 `SHA256SUMS`，在该目录内校验。例如 Linux 主机：
 
@@ -253,7 +257,7 @@ macOS 对应命令为 `shasum -a 256 -c SHA256SUMS`。同时检查 xz 完整性�
 
 ## 后续上板验收范围
 
-副本中的 APT、locale、SSH/PAM 和密钥检查已通过上述限定范围；当前配置在实体 E87N 上的启动、SSH 与 host keys 首启时序、DHCP/DNS/NTP、时区与 locale、APT 安装、显示包升级、面板 probe/颜色/方向、亮度与设置持久化、风扇实际起转、温度校准与负载温升仍待验证。网口、eMMC、USB、NVMe、MAC 持久化和重启也不能从 fixture 或镜像静态结果推断为通过。DTS 默认 256 MiB 与原 OpenWrt 记录的实际 1 GiB 之间的 RAM fixup 仍需核对。CPU DVFS 仍禁用，MT7987 WED 仍不支持；没有测速反馈就不能报告 RPM。
+副本中的 APT、locale、SSH/PAM 和密钥检查已通过上述限定范围；当前配置在实体 E87N 上的启动、SSH 与 host keys 首启时序、DHCP/DNS/NTP、时区与 locale、APT 安装、显示包升级、面板 probe/颜色/方向、亮度与设置持久化、风扇实际起转、温度校准与负载温升仍待验证。网口、eMMC、USB、NVMe、MAC 持久化和重启也不能从 fixture 或镜像静态结果推断为通过。当前 E87N DTS 已通过 902 补丁声明 1 GiB 内存及固件保留区，仍需核对真实 U-Boot/Linux 交接。CPU DVFS 仍禁用；WED 等未验收硬件路径不能由软件测试推断可用，没有测速反馈就不能报告 RPM。
 
 先按[首启与写入边界](first-boot.md)准备隔离、可恢复的启动方式。下列采集命令只供后续**已经启动的 Linux 板卡**手动运行，不属于主机 fixture 组，也不负责启动板卡：
 

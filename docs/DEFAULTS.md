@@ -1,6 +1,6 @@
 # 最小系统默认配置
 
-本配置仅用于本仓库新构建的 Debian 13 Trixie / Linux 6.18.51 镜像，不修改设备现有 OpenWrt。历史同名镜像不会自动更新。
+本配置仅用于本仓库新构建的 Debian 13 Trixie 显示/风扇最小镜像，不修改设备现有 OpenWrt。版本唯一来源为 [e87n-build.json](../userpatches/config/e87n-build.json)：当前审查目标为 Debian 13.7、Linux 6.18.52 LTS，包内核 release 为 `6.18.52-current-edgepi-e87n`。历史同名镜像不会自动更新。
 
 | 项目 | 默认值 |
 | --- | --- |
@@ -10,7 +10,7 @@
 | 时区 | `Asia/Shanghai` |
 | 语言与编码 | `zh_CN.UTF-8`；`LANGUAGE=zh_CN:zh` |
 | 软件管理 | Debian 签名软件源，支持 `apt update`、`apt install` |
-| 小屏 | 基础镜像暂不安装或自动加载；`e87n-display` 作为独立包后续安装 |
+| 小屏 | 预装 `e87n-display`；LCD/背光节点启用，配置 `fb_nv3007` 自动加载及显示服务；独立 deb 用于升级 |
 | 风扇 | 内核自动温控；没有第二个用户态风扇控制器 |
 
 默认密码是公开的，只在可信内网首启，登录后运行 `passwd` 改密。没有首次创建用户的向导或强制公钥门槛；串口也不自动免密登录。镜像不携带共用 SSH host keys，首次启动在 SSH 前生成设备自己的密钥。
@@ -18,15 +18,20 @@
 从路由器 DHCP 租约获取实际 IP 后：
 
 ```sh
-ssh root@<设备IP>
+ssh root@"<设备IP>"
 passwd
 apt update
 apt install --no-install-recommends curl
 ```
 
-基础镜像不安装 `e87n-display`，因此没有 `e87nctl` 命令。配置
-`/etc/modprobe.d/e87n-headless.conf` 会阻止 NV3007 被 udev 自动探测，initramfs
-也携带该配置。温度与风扇仍由内核管理；显示驱动和用户空间包待后续验证后再启用。
+新镜像通过 APT 预装版本化 `e87n-display`，包含 `e87nctl`、默认显示配置和
+`e87n-display.service`；下一次启动由模块配置加载 `fb_nv3007`。默认 overview 页面、
+20% 亮度、每 2 秒刷新。当前构建不安装旧 `e87n-headless.conf` 黑名单；
+仓库保留的 headless 文件及审计选项用于旧配置，不是当前默认。
+温度与风扇由内核管理，显示服务不写风扇控制节点。
+
+candidate3 的软件验收属于旧 headless 配置。当前预装显示的新配置需要独立构建与
+同产物验收；启用驱动或服务不等于屏幕、背光、温度精度和风扇散热已在实机验证。
 
 不预装桌面、Web 管理后台、Docker、LuCI 或额外 RAID/LVM 管理套件；没有 DHCP 服务器、NAT、LAN/WAN 角色划分。根据用途再安装软件，避免镜像承担未使用的后台服务。内核仍保留正常 Linux 底层和板级驱动；额外存储模块为[可选构建项](OPTIONAL-STORAGE.md)。
 

@@ -1,6 +1,6 @@
 # E87N 最小系统范围与验证状态
 
-目标已冻结为 **Debian 13.7 Trixie / Linux 6.18.52 最小命令行系统**，包含正常 APT、有线 DHCP、SSH 和独立小屏包。candidate3 已通过完整构建、最终固件审计和同产物 Docker/QEMU 软件验收；这仍是实验性 E87N 移植，尚无 Debian 实机首启与硬件验收记录。
+当前目标为 **Debian 13.7 Trixie / Linux 6.18.52 最小命令行系统**，版本以中央配置为准，包含正常 APT、有线 DHCP、SSH、预装小屏包和内核风扇温控。candidate3 的旧 headless 配置已通过完整构建、最终固件审计和同产物 Docker/QEMU 软件验收；当前启用 LCD/背光并预装显示包的配置需要重新构建与验收。这仍是实验性 E87N 移植，尚无 Debian 实机首启与完整硬件验收记录。
 
 当前 candidate3 的正式摘要见[最终验收记录](FINAL-VALIDATION-20260920.md)。QEMU 报告为 `PASS`，但不模拟 MT7987 物理网口、eMMC、SPI 屏幕、PWM 风扇、factory MAC 或原厂 U-Boot，因此不能替代上板验证。
 
@@ -8,7 +8,9 @@
 
 旧最小配置曾在 [Actions 34737922588](https://github.com/baozaodetudou/EDGEPI-E87N/actions/runs/34737922588) 完成整盘镜像构建、静态审计和上传，源码 `2a60011`，见[历史记录](ci-keygen-fix-20260913.md)。旧[屏幕/风扇候选](candidate-display-fan-20260913.md)及其哈希不变；它们不证明新 TAR、902 或 factory 首启适配已完成。可丢弃 rootfs 副本集成与云端镜像构建也均不包含实体板卡启动。远端 Release 发布未确认。
 
-## 本轮已报告的阶段结果
+## 历史 R4 阶段结果
+
+本节计数、大小和哈希只属于 R4。当时结果及 candidate3 后续结果均不能替代当前显示配置的新验收。
 
 | 检查 | 当前证据与边界 |
 | --- | --- |
@@ -36,7 +38,7 @@ R4 SHA-256：`b3587a5377edf7c95f0d620eb038e67643287ac75629f20cc1b071e5dfa47545`�
 | 设备身份 | 镜像清除 SSH host keys；首次 SSH 前生成独立密钥；空 machine-id 留待首启生成 | 副本上的密钥生成与持久性已测；完整首启服务时序仍待验证 |
 | 网络与时间 | 两个有线网口使用 networkd/netplan DHCP；helper 在 DHCP 前只读 p2 `0x24`/`0x2a` 的 factory MAC；resolved/timesyncd；`Asia/Shanghai` | 原系统只读确认 eth0/eth1 的 of_node 为 mac0/mac1；新 helper 顺序、DHCP/DNS/NTP 与跨重启地址仍待测，无固定管理 IP 或 LAN/WAN/NAT 预设 |
 | 语言与软件管理 | `zh_CN.UTF-8`、`LANGUAGE=zh_CN:zh`；Debian 签名源，正常 `apt update` / `apt install` | UTF-8 与真实 APT 安装已在副本测试；包与 locale 不代表硬件验证 |
-| 小屏与风扇 | 内核自动温控；`e87n-display` 独立发布，基础镜像暂不自动加载屏幕驱动 | 风扇接口已实机读取；NV3007 驱动待修正，显示和散热完整验收待测 |
+| 小屏与风扇 | 内核自动温控；新镜像预装 `e87n-display`，启用 LCD/背光、模块加载配置和显示服务；同版本 deb 独立发布 | 原 OpenWrt 的风扇接口只读记录不等于 Debian 验收；当前显示、背光、校准精度和散热仍需实测 |
 | 额外存储 | `E87N_EXTRA_STORAGE=no`；DM/LUKS/LVM/RAID 等额外内核模块显式选择构建；管理套件按需安装 | 不预装 RAID/LVM 管理套件，不创建阵列、加密卷或格式化磁盘，不提供加密/LVM 根启动承诺 |
 | 诊断 | `e87nctl doctor` 检查身份、内存、根分区、网络、温控/屏幕注册和内核前提 | 始终报告 `hardware_validation=not-performed`，不会自动压力测试或写硬件 |
 | 更新 | Debian 签名仓库；保留内核/DTB/BSP hold；允许 apt update 和安装用户空间软件 | 不能解除内核 hold：单改 `/boot`/模块不会更新 p4 FIT；后续升级需成套重建 FIT/root/initrd/DTB/模块 |

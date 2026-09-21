@@ -2,7 +2,9 @@
 
 当前交付格式为 `<basename>-uboot-firmware.tar`：面向这台 E87N 原厂 U-Boot Web 恢复页 plain firmware（Web 类型 `fw`）的**未压缩 USTAR**。包内运行的是 Debian 13 Trixie / Armbian；`sysupgrade-` 目录名只是厂商解析器约定，不表示采用 OpenWrt rootfs，也不表示可用 LuCI sysupgrade 安装。
 
-## 当前 candidate3
+## 冻结 candidate3（旧 headless 配置）
+
+当前源码默认预装显示包并启用 LCD/背光。candidate3 的下列哈希及验收结果保留为旧配置证据，不能视为当前显示配置已经重新构建或验收。
 
 candidate3 已完成 Debian 13.7 / Linux 6.18.52 的完整构建、最终 TAR 独立审计和同产物 Docker/QEMU 验收。当前 TAR SHA-256 为 `efef220d81ad7f97155cc82d9246c3e1443ce8e4b9fa544002e39e050c2cc35d`，显示包 SHA-256 为 `cc8bf0e71ae852c1e284c127ed00ee0460a0f731f4d0da99d390a05145327a12`，完整记录见[最终验收记录](FINAL-VALIDATION-20260920.md)。这仍不是实体板卡验收；刷写前的备份、U-Boot 恢复路径、RAM 诊断启动和真实外设测试仍未完成。下方 R4 内容是历史产物记录，不能替代当前 candidate3。
 
@@ -49,7 +51,7 @@ CONTROL：875 字节
 在专用 Linux 构建主机上，转换器接受已审计的、未压缩的 Armbian 两分区 GPT 普通文件：
 
 ```sh
-sudo -n python3 scripts/build-factory-firmware.py --headless \
+sudo -n python3 scripts/build-factory-firmware.py \
   --image /path/to/Armbian-candidate.img \
   --output /path/to/candidate-uboot-firmware.tar
 ```
@@ -67,10 +69,11 @@ sysupgrade-edgepi-e87n/
 
 外层 TAR 不使用 gzip/xz/zstd，也不使用 PAX/GNU 扩展。FIT 中使用原始 `initrd.img-<版本>`，不嵌套带 legacy U-Boot 头的 `uInitrd`；“原始”描述去掉 legacy 包装，不要求解开 initramfs 自身的压缩。`root` 是 ext4 文件系统镜像，不是文件目录归档、squashfs 或 OpenWrt overlay。`CONTROL` 是审计元数据，不是第三个刷写 payload。内核、DTB、initrd、模块与 `/boot` 必须对应同一套经审计输入。
 
-当前无屏幕镜像需要在转换和最终审计时都指定 `--headless`：
-`sudo -n python3 scripts/verify-factory-firmware.py --headless candidate-uboot-firmware.tar`。
-`CONTROL` 会记录 `headless: true`，验证器核对该标记，并继续检查内核、DTB、存储布局、
-SSH、DHCP、APT、locale 和内核温控。省略参数仍按历史显示版契约审计。
+当前显示配置在转换和最终审计时均不传 `--headless`：
+`sudo -n python3 scripts/verify-factory-firmware.py candidate-uboot-firmware.tar`。
+`CONTROL` 记录 `headless: false`，除内核、DTB、存储布局、SSH、DHCP、APT、
+locale 和温控外，还要求预装显示包及显示/背光配置满足审计。
+只有明确审计旧 headless 配置时，才在转换和验证两端使用对应参数；不能用它绕过当前显示要求。
 
 ### R4：依据实际 ARM64 Image 头修正地址
 
