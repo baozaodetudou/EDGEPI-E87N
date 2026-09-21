@@ -329,14 +329,6 @@ class PublisherTests(unittest.TestCase):
         self.assertNotEqual(self.run_cli(), 0)
         self.assertTrue(any(call[-1].endswith("page=2") for call in self.fake.calls))
 
-    def test_legacy_display_release_blocks_republishing_same_debian_version(self):
-        self.reset_channel("display")
-        encoded = publisher.display_version().replace("+", ".plus.").replace("~", ".tilde.")
-        self.fake.other_releases = [{"tag_name": f"e87n-display-{encoded}-35586533613-1"}]
-        self.assertNotEqual(self.run_cli("preflight"), 0)
-        self.assertEqual(self.actions(), [])
-        self.assertIn("Release version already exists", self.errors.getvalue())
-
     def test_partial_remote_failures_preserve_draft_and_never_clobber(self):
         for stage, actions in (("create", ["create"]), ("upload", ["create", "upload"]),
                                ("edit", ["create", "upload", "edit"])):

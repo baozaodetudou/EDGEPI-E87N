@@ -19,8 +19,7 @@ Release 与 Firmware Release 使用相同 tag、run、版本或 SHA-256。兼容
 正式 Display tag 固定为 `e87n-display-v<version>`，不包含 Actions run ID。同一 Debian
 版本只能发布一次；源码或包内容变化时必须先递增 `packaging/e87n-display/VERSION`，否则
 preflight 会因 tag/Release 已存在而拒绝发布。run/attempt 仅用于 Actions 候选 artifact 和
-构建证据绑定。碰撞检测也识别历史 run-id tag；远端已发布的 `1.2.0-1` 不能换一个新 tag
-再次发布，下一次显示包发布必须使用更高 Debian 版本。
+构建证据绑定。
 
 ### NV3007 framebuffer 兼容性
 
