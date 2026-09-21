@@ -113,13 +113,16 @@ journalctl -u e87n-display.service -b --no-pager
 ```sh
 scp e87n-display_<version>_all.deb root@<设备IP>:/tmp/
 ssh root@<设备IP>
-apt install /tmp/e87n-display_<version>_all.deb
-systemctl restart e87n-display.service
+apt-get -y \
+  -o Dpkg::Options::=--force-confdef \
+  -o Dpkg::Options::=--force-confold \
+  install /tmp/e87n-display_<version>_all.deb
 systemctl status e87n-display.service --no-pager
 ```
 
 升级包不会替换内核、DTB、U-Boot、rootfs，也不会创建风扇控制守护进程。配置文件由
-`dpkg` conffile 管理，管理员已有的 `/etc/e87n/display.json` 应按提示保留。
+`dpkg` conffile 管理，上面的命令会保留管理员已有的 `/etc/e87n/display.json`。完整的配置
+备份、更新验证、页面/主题切换、回退和排障步骤见[屏幕包更新与设置指南](DISPLAY-USER-GUIDE.md)。
 
 ## 不能由下载证明的事情
 

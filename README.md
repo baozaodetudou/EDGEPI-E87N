@@ -121,11 +121,12 @@ e87nctl display theme light
 e87nctl display rotation on
 e87nctl display rotation-seconds 3
 e87nctl display pages overview,cpu,memory,thermal,fan,network,traffic,storage
-systemctl restart e87n-display.service
+e87nctl display config
 ```
 
-屏幕包的独立安装、升级、配置修改、主题切换和真实设备验收见[独立屏幕包说明](docs/DISPLAY-PACKAGE.md)。
-只修改主题或轮换配置不需要重新刷 U-Boot；在已经启动的 Debian 上升级对应的 `.deb` 即可。
+屏幕包的下载校验、保留配置升级、固定页面、自动轮换、主题、亮度、开关、回退和排障见
+[屏幕包更新与设置指南](docs/DISPLAY-USER-GUIDE.md)。包构建、维护脚本和镜像预装细节见
+[独立屏幕包技术说明](docs/DISPLAY-PACKAGE.md)。只修改设置或升级 `.deb` 不需要重新刷 U-Boot。
 
 面向第一次刷机的完整图文式步骤见[小白刷机与首启指南](docs/QUICKSTART-BEGINNER.md)，
 设计规范、真实验收结果和当前实现边界见[屏幕设计与功能说明](docs/SCREEN-DESIGN.md)及
@@ -176,7 +177,8 @@ docs/                          构建、刷写、网络、屏幕、验证和发�
 - [首次启动](docs/first-boot.md)
 - [网络与双网口](docs/NETWORKING.md)
 - [屏幕设计与功能](docs/SCREEN-DESIGN.md)
-- [独立屏幕包](docs/DISPLAY-PACKAGE.md)
+- [屏幕包更新与设置](docs/DISPLAY-USER-GUIDE.md)
+- [独立屏幕包技术说明](docs/DISPLAY-PACKAGE.md)
 - [U-Boot 固件格式](docs/UBOOT-FIRMWARE.md)
 - [测试与验收](docs/TESTING.md)
 - [来源与许可](NOTICE.md)

@@ -1,5 +1,9 @@
 # e87n-display Debian 软件包
 
+普通用户如果只是更新屏幕包、切换页面/主题、设置自动轮换、调整亮度或排查显示问题，请先看
+[屏幕包更新与设置指南](DISPLAY-USER-GUIDE.md)。本文主要记录软件包内容、构建、维护脚本、
+镜像预装和开发验收边界。
+
 `e87n-display` 是供 E87N minimal Debian 13（Trixie）镜像预装、也可单独升级的
 显示与诊断包。版本独立于镜像、Armbian 和内核；默认版本来源为
 `packaging/e87n-display/VERSION`。镜像启动器将打包脚本、`packaging/` 与
@@ -76,6 +80,9 @@ NOTICE 或 docs；许可证声明位于 packaging 内。没有风扇控制守护
 
 ## 普通用户安装与升级
 
+下面保留软件包生命周期摘要；可直接照做的下载、备份、升级、设置和回退流程见
+[屏幕包更新与设置指南](DISPLAY-USER-GUIDE.md)。
+
 Display Release 中的 `e87n-display_<version>_all.deb` 是**已经启动的 Debian 系统的独立软件包**，
 不是 U-Boot 固件，也不是整盘镜像。安装或升级它不会改写 U-Boot、内核、DTB、initrd、
 rootfs 分区或风扇控制器；屏幕硬件仍必须由 E87N 内核提供 `fb_nv3007` 和背光节点。
@@ -99,20 +106,25 @@ scp e87n-display_<版本>_all.deb root@<设备IP>:/tmp/
 ```sh
 ssh root@<设备IP>
 dpkg-deb -f /tmp/e87n-display_<版本>_all.deb Package Version Architecture
-apt-get install -y /tmp/e87n-display_<版本>_all.deb
-systemctl daemon-reload
-systemctl restart e87n-display.service
+apt-get -y \
+  -o Dpkg::Options::=--force-confdef \
+  -o Dpkg::Options::=--force-confold \
+  install /tmp/e87n-display_<版本>_all.deb
 ```
 
 如果 APT 报告依赖缺失，先更新 Debian 软件源再重试；正常的独立升级不需要重新刷机：
 
 ```sh
 apt-get update
-apt-get install -y /tmp/e87n-display_<版本>_all.deb
+apt-get -y \
+  -o Dpkg::Options::=--force-confdef \
+  -o Dpkg::Options::=--force-confold \
+  install /tmp/e87n-display_<版本>_all.deb
 ```
 
-升级过程中如果 `dpkg` 询问是否保留 `/etc/e87n/display.json`，已有自定义配置时选择
-**保留当前本地版本**。包升级后检查安装状态和服务：
+上面的 `--force-confdef --force-confold` 会在无人值守升级时保留当前本地配置；如果没有使用
+这些选项且 `dpkg` 交互询问，已有自定义配置时选择**保留当前本地版本**。包升级后检查安装
+状态和服务：
 
 ```sh
 dpkg-query -W -f='${Package} ${Version} ${Status}\n' e87n-display
@@ -125,11 +137,15 @@ systemctl show e87n-display.service -p NRestarts -p ExecMainStatus
 且 `NRestarts=0`、`ExecMainStatus=0`。安装包只负责用户空间程序、配置和 systemd 服务；
 如果 `/dev/fb0` 不存在或名称不是 `fb_nv3007`，应先检查内核/DTB，而不是反复安装 `.deb`。
 
-保留旧版 `.deb` 即可回退显示程序；回退不会回退内核或整机系统：
+保留旧版 `.deb` 只能提供回退程序，还必须先恢复目标旧版本能识别的配置。1.3 的八页面和
+`dark/aurora/light` 配置不能直接交给只识别四页面和旧主题名的 1.2 包。完整步骤见
+[屏幕包更新与设置指南](DISPLAY-USER-GUIDE.md)。回退不会回退内核或整机系统：
 
 ```sh
-apt-get install -y --allow-downgrades /tmp/e87n-display_<旧版本>_all.deb
-systemctl restart e87n-display.service
+apt-get -y --allow-downgrades \
+  -o Dpkg::Options::=--force-confdef \
+  -o Dpkg::Options::=--force-confold \
+  install /tmp/e87n-display_<旧版本>_all.deb
 dpkg-query -W -f='${Package} ${Version} ${Status}\n' e87n-display
 ```
 
@@ -294,7 +310,8 @@ disable/mask 的选择，禁用且未运行的服务不会被升级启动。手�
 ```sh
 sudo apt-get -y -o Dpkg::Options::=--force-confdef \
   -o Dpkg::Options::=--force-confold install ./e87n-display_1.3.1-1_all.deb
-sudo apt-get remove e87n-display  # 停止显示；保留配置及服务启用状态记录
+sudo e87nctl display off          # 卸载前明确关闭背光并停止显示采样
+sudo apt-get remove e87n-display  # 卸载服务；保留配置及服务启用状态记录
 sudo apt-get purge e87n-display   # 删除包的 conffile 与 helper 状态
 ```
 

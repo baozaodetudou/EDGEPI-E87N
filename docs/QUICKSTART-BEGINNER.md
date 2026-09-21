@@ -146,7 +146,7 @@ e87nctl display theme light
 ```
 
 - `dark`：深色高对比配色。
-- `aurora`：青绿和蓝色强调配色。
+- `aurora`：近黑背景，洋红/紫色主强调并辅以青色。
 - `light`：浅色配色。
 
 三种主题只改变颜色，不改变字段含义或数据可用性规则；页面布局会根据当前有效遥测自动
@@ -161,7 +161,7 @@ memory     内存占用和容量
 thermal    温度与风扇
 fan        风扇控制状态
 network    网口、地址和链路
-traffic    汇总流量和速率
+traffic    RX/TX 累计流量汇总
 storage    存储温度
 ```
 
@@ -170,7 +170,6 @@ storage    存储温度
 ```sh
 e87nctl display rotation off
 e87nctl display screen overview
-systemctl restart e87n-display.service
 ```
 
 每 3 秒自动轮换：
@@ -179,7 +178,6 @@ systemctl restart e87n-display.service
 e87nctl display pages overview,cpu,memory,thermal,fan,network,traffic,storage
 e87nctl display rotation-seconds 3
 e87nctl display rotation on
-systemctl restart e87n-display.service
 ```
 
 `refresh_seconds` 是数据刷新间隔，`rotation_seconds` 是页面切换间隔，两者互不冲突。轮换
@@ -201,20 +199,22 @@ sha256sum e87n-display_<version>_all.deb
 scp e87n-display_<version>_all.deb root@<设备IP>:/tmp/
 ssh root@<设备IP>
 dpkg-deb -f /tmp/e87n-display_<version>_all.deb Package Version Architecture
-apt-get install -y /tmp/e87n-display_<version>_all.deb
-systemctl daemon-reload
-systemctl restart e87n-display.service
+apt-get -y \
+  -o Dpkg::Options::=--force-confdef \
+  -o Dpkg::Options::=--force-confold \
+  install /tmp/e87n-display_<version>_all.deb
 dpkg-query -W -f='${Package} ${Version} ${Status}\n' e87n-display
 systemctl is-active e87n-display.service
 ```
 
 升级屏幕包不会替换内核、DTB、U-Boot 或 Debian rootfs，也不要求 display 的版本、tag 或
-发布日期与当前 firmware 相同；dpkg 可能询问是否保留你改过的 `/etc/e87n/display.json`，
-通常选择保留本地配置即可。
+发布日期与当前 firmware 相同；上面的 `--force-confdef --force-confold` 会在无人值守升级时
+保留你已有的 `/etc/e87n/display.json`。
 
-安装包的完整说明、校验、依赖修复、卸载、配置字段和真实设备验收见
-[独立屏幕包说明](DISPLAY-PACKAGE.md)。不要把 `.deb` 上传到 U-Boot 页面；它只能在已经
-启动的 Debian 中由 APT/dpkg 安装。
+完整的下载校验、配置备份、更新、切换、回退和排障步骤见
+[屏幕包更新与设置指南](DISPLAY-USER-GUIDE.md)；包构建和维护脚本细节见
+[独立屏幕包技术说明](DISPLAY-PACKAGE.md)。不要把 `.deb` 上传到 U-Boot 页面；它只能在
+已经启动的 Debian 中由 APT/dpkg 安装。
 
 升级后可直接修改屏幕，不需要重新刷机：
 
