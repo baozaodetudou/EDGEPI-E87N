@@ -14,7 +14,7 @@ candidate3 的 Docker/QEMU 软件验收及独立显示包生命周期结果见[�
 
 - 当前使用维护中的 Frank-W MT7987 内核，加上 `userpatches/kernel/edgepi-e87n-6.18/` 的 E87N 补丁；包括 GPL NV3007 fbtft 驱动、GMAC aliases、1 GiB 保留内存及 LVTS 修正。SPI/背光内建，`fb_nv3007` 模块配置为随启动加载；补丁数量及摘要以本次构建 receipt 为准。
 - `/dev/fb0` 使用 428×142、16-bit RGB565；原 SPI 52 MHz、270°旋转保持，刷新配置上限改为 30 FPS。实际界面默认每 2 秒更新，不能把 30 当作实测帧率。
-- 四页原生界面：`overview` 设备概览、`thermal` 温度及风扇、`network` 双网口链路/地址/字节计数、`storage` NVMe 温度。未发现的指标显示 `--`；Python/Pillow、DejaVu 拉丁字体和 WQY MicroHei 中文字体由 Debian 软件包提供。
+- 八页原生界面：`overview` 设备概览、`cpu` CPU 使用率/负载/频率、`memory` 内存占用与容量、`thermal` 温度、`fan` 风扇控制状态、`network` 双网口链路与地址、`traffic` 汇总流量与速率、`storage` NVMe 温度。未发现的指标显示 `--`；Python/Pillow、DejaVu 拉丁字体和 WQY MicroHei 中文字体由 Debian 软件包提供。
 - 风扇默认由内核 `pwm-fan` + thermal `step_wise` 自动控制。界面显示 `AUTO`、`LEVEL`、`PWM%` 和 kernel policy；小屏不显示 tachometer RPM，也不把 PWM 或 cooling level 当作转速。
 - 背光 PWM2、50000 ns、normal polarity；用户亮度在软件中反向映射。上电默认 raw 26（暗），显示服务应用保存的亮度，首次默认 20%。逻辑关闭写 raw 26，不能使用常见的 raw 0 或 `bl_power=4` 关闭方法。
 - 风扇 PWM1、50000 ns，四级 `0/128/192/255`，50/65/75℃触发 1/2/3 档，迟滞 2℃。这些是控制阈值，不是芯片安全额定温度。没有用户态风扇写入者，不会与内核 governor 抢控制。
@@ -37,7 +37,8 @@ e87nctl display off
 e87nctl display on
 ```
 
-亮度为整数 0–100；页面为 `overview|thermal|network|storage`；主题为 `dual|single|compact`；
+亮度为整数 0–100；页面为 `overview|cpu|memory|thermal|fan|network|traffic|storage`；
+主题为 `dark|aurora|light`，只改变颜色，不改变布局或字段；
 刷新和轮换间隔为整数 2–60 秒。默认总览、20% 亮度、每 2 秒刷新，轮换默认关闭。
 `display config` 只读显示校验后的已保存或默认配置，`display refresh` 保存数据刷新间隔。
 设置保存在 `/etc/e87n/display.json`，采用校验、锁及原子持久化；关闭时改设置不会偷偷点亮。
@@ -47,17 +48,19 @@ e87nctl display on
 主题与轮换示例：
 
 ```sh
-e87nctl display theme dual
-e87nctl display theme single
-e87nctl display theme compact
+e87nctl display theme dark
+e87nctl display theme aurora
+e87nctl display theme light
 e87nctl display rotation on
 e87nctl display rotation-seconds 3
-e87nctl display pages overview,network,thermal,storage
+e87nctl display pages overview,cpu,memory,thermal,fan,network,traffic,storage
 e87nctl display rotation off
 ```
 
 `refresh_seconds` 负责同一页面的数据重绘；`rotation_seconds` 负责页面切换。轮换页面列表
-至少一个、最多四个，页面不能重复。旧版只有四个配置字段时，升级后会自动补齐新字段。
+至少一个、最多八个，页面不能重复。自动轮换时，如果没有风扇或 NVMe 遥测，会跳过
+`fan` 或 `storage`；固定选择时仍显示缺失值。旧版缺少新字段时会自动使用默认值，旧主题
+`dual`、`single`、`compact` 分别迁移为 `dark`、`light`、`aurora`。
 
 配置文件 `/etc/e87n/display.json` 的当前字段如下：
 
@@ -65,12 +68,12 @@ e87nctl display rotation off
 | --- | --- | --- |
 | `enabled` | 布尔值 | 是否绘制并保持屏幕开启 |
 | `brightness_percent` | 整数 0–100 | 用户可见亮度；硬件背光为 active-low |
-| `screen` | `overview\|thermal\|network\|storage` | 固定页面，也是轮换的首选页面 |
+| `screen` | 八个已定义页面之一 | 固定页面，也是轮换的首选页面 |
 | `refresh_seconds` | 整数 2–60 | 数据采样/重绘周期，不是页面切换周期 |
-| `theme` | `dual\|single\|compact` | 双网口、单网口或信息密集主题 |
+| `theme` | `dark\|aurora\|light` | 只改变配色，不改变布局或字段 |
 | `rotation_enabled` | 布尔值 | 是否自动轮换页面 |
 | `rotation_seconds` | 整数 2–60 | 自动轮换的页面切换周期 |
-| `rotation_screens` | 1–4 个不重复页面 | 自动轮换的页面顺序 |
+| `rotation_screens` | 1–8 个不重复页面 | 自动轮换的页面顺序 |
 
 `e87nctl fan test LEVEL SECONDS` 是 root-only、0–30 秒的临时冷却档位测试，结束后恢复原档位；它不是持久手动模式，也不关闭 thermal 保护。显示服务是 `e87n-display.service`。服务错误会以非零状态退出并重试，不把缺少帧缓冲或错误板型当成成功。显示服务本身只写 fb0/背光，不写 thermal/cooling/PWM sysfs；关屏不会停风扇，显示服务停止也不会改变风扇控制。
 

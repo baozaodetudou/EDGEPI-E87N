@@ -1,9 +1,9 @@
 # E87N 真实板卡显示验收（2026-09-21）
 
-本记录包含同一台真实 E87N 的两次验证：早先的基础 framebuffer 验收使用
-`e87n-display 1.1.5-1`；2026 年 9 月 21 日随后将独立包升级到 `1.2.0-1`，并在实体
-设备上逐一切换三种主题、开启四页面 3 秒轮换。历史基础结果保留在下文，本文件的最新
-结论以 `1.2.0-1` 验收为准。
+本记录包含同一台真实 E87N 的连续验证：早先的基础 framebuffer 验收使用
+`e87n-display 1.1.5-1`，随后升级到 `1.2.0-1`；2026 年 9 月 21 日又将独立包升级到
+`1.3.0-1`，验证八个页面、三种配色、旧配置迁移和独立发布回归。历史结果保留在下文，
+本文件的最新结论以 `1.3.0-1` 验收为准。
 
 ## 设备与软件
 
@@ -13,11 +13,34 @@
 | 系统 | Debian 13 Trixie / Armbian unofficial |
 | 内核 | `6.18.52-current-edgepi-e87n` |
 | framebuffer | `fb_nv3007`、`428×142`、16-bit RGB565 |
-| 显示包 | `e87n-display 1.2.0-1`（由 `1.1.5-1` 独立升级） |
+| 显示包 | `e87n-display 1.3.0-1`（由 `1.2.0-1` 独立升级） |
 | 中文字体 | `fonts-wqy-microhei 0.2.0-beta-4` |
 | 网口 | `eth0`、`eth1` |
 
-## 结果
+## `e87n-display 1.3.0-1` 验收结果
+
+- 在板端从当前源码构建 `e87n-display_1.3.0-1_all.deb`，SHA-256 为
+  `a8e4f401ed3f1649051e9ffc7b65bb274c02d93807db25b415cf52ce4a9a031c`；包元数据为
+  `Package: e87n-display`、`Version: 1.3.0-1`、`Architecture: all`。
+- 通过 APT 从 `1.2.0-1` 原地升级，保留管理员修改过的 `/etc/e87n/display.json`。旧主题
+  `compact` 在运行时正确迁移为 `aurora`；最终写回 `aurora`，并保留原四页轮换顺序、
+  3 秒轮换和 20% 亮度。
+- `dark`、`aurora`、`light` 三种配色与 `overview`、`cpu`、`memory`、`thermal`、
+  `fan`、`network`、`traffic`、`storage` 八个页面逐一组合测试，共 24 组。每组均从真实
+  `/dev/fb0` 读回完整的 `121552` 字节 RGB565 帧，24 个 SHA-256 均不同。
+- 显示/硬件聚焦回归在板端通过：`test-hardware.py` 58 项、`test-display.py` 52 项、
+  `test-doctor.py` 44 项、`test-verify-display-fan.py` 32 项、`test-display-package.py` 19 项。
+- Display workflow 静态验证在板端使用 actionlint `1.7.12` 和 ShellCheck `0.10.0` 通过；
+  workflow 41 项、Release prepare 11 项、Release publish 13 项、build config 5 项均通过，
+  `ci-build.sh display` 成功构建 `1.3.0-1`。
+- 最终服务为 `active (running)`、`NRestarts=0`、`ExecMainStatus=0`；本轮切换期间 journal
+  没有 error 级别记录。
+- 本轮只升级显示 deb，没有刷写 U-Boot、内核、DTB 或整机镜像。
+
+以上 framebuffer 读回证明服务写入了各页面的不同像素内容，但不等于摄像头或肉眼确认
+LCD 面板的颜色、方向和清晰度。
+
+## `e87n-display 1.2.0-1` 历史结果
 
 - `e87n-display.service`: `active (running)`。
 - `NRestarts=0`，`ExecMainStatus=0`。
@@ -37,7 +60,7 @@
 - 实测风扇：`pwm-fan`、`step_wise`、PWM `128/255 = 50%`，没有 `fan1_input`，因此不把
   PWM 推断为 RPM。
 
-## 本轮修复
+## `e87n-display 1.2.0-1` 历史修复
 
 1. 接受 E87N fbtft 的 `var_screeninfo.nonstd=1` RGB565 标记。
 2. 显示服务的 systemd 沙箱从仅 `AF_UNIX` 调整为 `AF_UNIX AF_INET`，只满足本地

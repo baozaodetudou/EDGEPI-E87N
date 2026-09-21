@@ -44,9 +44,10 @@ PACKAGE = "/usr/lib/python3/dist-packages/e87n"
 SERVICE = "/usr/lib/systemd/system/e87n-display.service"
 ENABLE = "/etc/systemd/system/multi-user.target.wants/e87n-display.service"
 DEFAULT = {"enabled": True, "brightness_percent": 20, "screen": "overview",
-           "refresh_seconds": 2, "theme": "dual", "rotation_enabled": False,
+           "refresh_seconds": 2, "theme": "dark", "rotation_enabled": False,
            "rotation_seconds": 3,
-           "rotation_screens": ["overview", "thermal", "network", "storage"]}
+           "rotation_screens": ["overview", "cpu", "memory", "thermal",
+                                "fan", "network", "traffic", "storage"]}
 UNIT_DIRS = ("/etc/systemd/system", "/run/systemd/system",
              "/usr/local/lib/systemd/system", "/usr/lib/systemd/system",
              "/lib/systemd/system")

@@ -23,8 +23,9 @@ from e87n.__main__ import _main
 
 
 DEFAULT = {"enabled": True, "brightness_percent": 20, "screen": "overview", "refresh_seconds": 2,
-           "theme": "dual", "rotation_enabled": False, "rotation_seconds": 3,
-           "rotation_screens": ["overview", "thermal", "network", "storage"]}
+           "theme": "dark", "rotation_enabled": False, "rotation_seconds": 3,
+           "rotation_screens": ["overview", "cpu", "memory", "thermal",
+                                "fan", "network", "traffic", "storage"]}
 DT = "sys/firmware/devicetree/base"
 BL = "sys/devices/platform/backlight/backlight/backlight"
 PLATFORM = "sys/devices/platform/backlight"
@@ -420,7 +421,7 @@ Local:
 
     def test_off_preserves_brightness_and_setters_preserve_off(self):
         self.config_data(brightness_percent=35)
-        for args in (("off",), ("brightness", "80"), ("screen", "network"), ("theme", "single"),
+        for args in (("off",), ("brightness", "80"), ("screen", "network"), ("theme", "aurora"),
                      ("rotation", "on"), ("rotation-seconds", "5"),
                      ("pages", "overview,network"), ("refresh", "5")):
             self.assertEqual(self.cli("display", *args)[0], 0)
@@ -428,7 +429,7 @@ Local:
             self.assertFalse(self.hw.load_display_config()["enabled"])
             self.assertEqual((self.root / BL / "bl_power").read_text(), "0\n")
         self.assertEqual(self.hw.load_display_config()["brightness_percent"], 80)
-        self.assertEqual(self.hw.load_display_config()["theme"], "single")
+        self.assertEqual(self.hw.load_display_config()["theme"], "aurora")
         self.assertTrue(self.hw.load_display_config()["rotation_enabled"])
         self.assertEqual(self.hw.load_display_config()["rotation_seconds"], 5)
         self.assertEqual(self.hw.load_display_config()["rotation_screens"], ["overview", "network"])
@@ -444,7 +445,7 @@ Local:
             self.assertEqual((self.root / BL / "bl_power").read_text(), "0\n")
 
     def test_all_screens_persist(self):
-        for screen in ("overview", "thermal", "network", "storage"):
+        for screen in ("overview", "cpu", "memory", "thermal", "fan", "network", "traffic", "storage"):
             self.assertEqual(self.cli("display", "screen", screen)[0], 0)
             self.assertEqual(self.hw.load_display_config()["screen"], screen)
 
@@ -515,6 +516,16 @@ Local:
         self.put("etc/e87n/display.json", json.dumps(legacy))
         expected = dict(DEFAULT, **legacy)
         self.assertEqual(self.hw.load_display_config(), expected)
+
+    def test_legacy_theme_names_migrate_to_colour_skins(self):
+        for old, new in (("dual", "dark"), ("single", "light"), ("compact", "aurora")):
+            preserved = dict(DEFAULT, theme=old,
+                             rotation_screens=["overview", "thermal", "network", "storage"])
+            self.put("etc/e87n/display.json", json.dumps(preserved))
+            loaded = self.hw.load_display_config()
+            self.assertEqual(loaded["theme"], new)
+            self.assertEqual(loaded["rotation_screens"],
+                             ["overview", "thermal", "network", "storage"])
 
     def test_theme_and_rotation_config_are_validated(self):
         cases = {

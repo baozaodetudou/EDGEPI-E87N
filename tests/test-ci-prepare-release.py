@@ -155,7 +155,7 @@ class ReleasePreparation(unittest.TestCase):
         self.assertIn(base + image_filename(), notes)
         self.assertIn(DEB, notes)
         self.assertIn("not a second Release download", notes)
-        self.assertIn("1.2.0-1", notes)
+        self.assertIn(VERSION, notes)
         self.assertNotIn("No board has been validated", notes)
 
     def test_valid_display_staging_is_independent_and_contains_only_display_evidence(self):
@@ -174,6 +174,7 @@ class ReleasePreparation(unittest.TestCase):
         self.assertIn("/" + DEB, notes)
         self.assertNotIn("uboot-firmware.tar", notes)
         self.assertIn("不需要重新构建", notes)
+        self.assertIn("实体设备验收记录", notes)
 
     def assert_manifest(self, expected_entries):
         lines = (self.output / "SHA256SUMS").read_text().splitlines()

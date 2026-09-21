@@ -35,9 +35,9 @@ CONFIG = ("# Linux/arm64 6.18.52 Kernel Configuration\n" +
           "CONFIG_FB_TFT=m\nCONFIG_FB_TFT_NV3007=m\n" +
           "# CONFIG_FRAMEBUFFER_CONSOLE is not set\n# CONFIG_CPU_FREQ is not set\n")
 DEFAULT = ('{"enabled":true,"brightness_percent":20,"screen":"overview",'
-           '"refresh_seconds":2,"theme":"dual","rotation_enabled":false,'
-           '"rotation_seconds":3,"rotation_screens":["overview","thermal",'
-           '"network","storage"]}\n')
+           '"refresh_seconds":2,"theme":"dark","rotation_enabled":false,'
+           '"rotation_seconds":3,"rotation_screens":["overview","cpu","memory",'
+           '"thermal","fan","network","traffic","storage"]}\n')
 SERVICE = """[Unit]
 Description=E87N display
 [Service]

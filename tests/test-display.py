@@ -32,10 +32,10 @@ from e87n import display
 from PIL import Image, ImageDraw
 
 
-def fixture_config(enabled=True, brightness=20, screen="overview", refresh=2, theme="dual",
+def fixture_config(enabled=True, brightness=20, screen="overview", refresh=2, theme="dark",
                    rotation_enabled=False, rotation_seconds=3, rotation_screens=None):
     if rotation_screens is None:
-        rotation_screens = ["overview", "thermal", "network", "storage"]
+        rotation_screens = ["overview", "cpu", "memory", "thermal", "fan", "network", "traffic", "storage"]
     return {"enabled": enabled, "brightness_percent": brightness,
             "screen": screen, "refresh_seconds": refresh, "theme": theme,
             "rotation_enabled": rotation_enabled, "rotation_seconds": rotation_seconds,
@@ -399,7 +399,7 @@ class RendererTests(unittest.TestCase):
         self.addCleanup(display._font.cache_clear)
         self.addCleanup(display._cjk_font.cache_clear)
 
-    def capture_render(self, snapshot, screen, theme="dual"):
+    def capture_render(self, snapshot, screen, theme="dark"):
         texts, boxes = [], []
         original = ImageDraw.ImageDraw.text
         def record(draw, xy, text, *args, **kwargs):
@@ -410,7 +410,7 @@ class RendererTests(unittest.TestCase):
             image = display.render(snapshot, screen, theme=theme)
         return image, texts, boxes
 
-    def test_all_four_layouts_legible_in_bounds_and_distinct(self):
+    def test_all_pages_legible_in_bounds_and_distinct(self):
         images = set()
         for screen in display.SCREENS:
             with self.subTest(screen=screen):
@@ -425,7 +425,7 @@ class RendererTests(unittest.TestCase):
                     self.assertLessEqual(right, 428)
                     self.assertLessEqual(bottom, 142)
                 images.add(image.tobytes())
-        self.assertEqual(len(images), 4)
+        self.assertEqual(len(images), len(display.SCREENS))
 
     def test_missing_measurements_are_dashes_and_rpm_is_not_rendered(self):
         for screen in display.SCREENS:
@@ -535,6 +535,44 @@ class RendererTests(unittest.TestCase):
             self.assertIn(text, texts)
         self.assertFalse(any("/s" in text for text in texts))
 
+    def test_socket_free_ipv4_fallback_is_visible_without_repeating_ipv6(self):
+        snapshot = {"local_ipv4": ["192.0.2.87"], "network": [
+            {"name": "end0", "carrier": 1, "ipv6": ["fe80::87"],
+             "rx_bytes": 1, "tx_bytes": 2},
+        ]}
+        _, overview, _ = self.capture_render(snapshot, "overview")
+        self.assertIn("LOCAL IPv4", overview)
+        self.assertIn("192.0.2.87", overview)
+        self.assertNotIn("fe80::87", overview)
+        _, network, _ = self.capture_render(snapshot, "network")
+        self.assertIn("LOCAL IPv4", network)
+        self.assertIn("192.0.2.87", network)
+        self.assertEqual(network.count("fe80::87"), 1)
+
+    def test_cpu_memory_fan_and_traffic_pages_render_real_semantics(self):
+        snapshot = display.preview_snapshot()
+        expectations = {
+            "cpu": ("24%", "0.42", "0.31", "0.28", "1800 MHz", "ondemand", "cpufreq-dt"),
+            "memory": ("38%", "已用 384.0 MiB", "可用 640.0 MiB", "1.0 GiB"),
+            "fan": ("自动", "档位 L2/3", "75%", "kernel-thermal", "step_wise", "无测速"),
+            "traffic": ("32.9 GiB", "7.9 GiB", "end0", "192.0.2.87"),
+        }
+        for screen, expected in expectations.items():
+            with self.subTest(screen=screen):
+                _, texts, _ = self.capture_render(snapshot, screen)
+                for text in expected:
+                    self.assertIn(text, texts)
+                self.assertFalse(any("RPM" in str(text) for text in texts))
+
+    def test_optional_rotation_pages_follow_available_live_data(self):
+        requested = ["overview", "fan", "storage", "network"]
+        self.assertEqual(display._available_pages({}, requested), ["overview", "network"])
+        self.assertEqual(display._available_pages({"fan": {"state": 0}}, requested),
+                         ["overview", "fan", "network"])
+        self.assertEqual(display._available_pages({"storage": [{"name": "nvme0"}]}, requested),
+                         ["overview", "storage", "network"])
+        self.assertEqual(display._available_pages({}, ["fan", "storage"]), ["overview"])
+
     def test_malformed_snapshot_fields_do_not_invent_values_or_overrun(self):
         data = {"cpu_temp_mc": float("nan"), "phy_temp_mc": "40", "fan": None,
                 "loadavg": [], "mem_total_kib": 100, "mem_available_kib": 101,
@@ -550,7 +588,8 @@ class RendererTests(unittest.TestCase):
                                 for left, top, right, bottom in boxes))
         _, texts, _ = self.capture_render(data, "network")
         self.assertIn("网口1", texts)
-        self.assertIn("无IP", texts)
+        self.assertIn("无IPv4", texts)
+        self.assertIn("无IPv6", texts)
 
     def test_invalid_snapshot_root_or_screen_is_an_error(self):
         with self.assertRaises(display.DisplayError):
@@ -560,7 +599,7 @@ class RendererTests(unittest.TestCase):
         with self.assertRaises(display.DisplayError):
             display.render({}, theme="invalid")
 
-    def test_all_themes_render_distinct_and_single_theme_hides_second_port(self):
+    def test_all_themes_render_distinct_palettes(self):
         images = set()
         for theme in display.THEMES:
             with self.subTest(theme=theme):
@@ -570,11 +609,6 @@ class RendererTests(unittest.TestCase):
                 self.assertTrue(all(0 <= left <= right <= 428 and 0 <= top <= bottom <= 142
                                     for left, top, right, bottom in boxes))
                 images.add(image.tobytes())
-                if theme == "single":
-                    self.assertNotIn("网口2", texts)
-                    self.assertTrue(any("单网口" in str(text) for text in texts))
-                if theme == "compact":
-                    self.assertTrue(any("信息" in str(text) for text in texts))
         self.assertEqual(len(images), len(display.THEMES))
 
     def test_all_themes_support_all_rotation_screens(self):
@@ -677,14 +711,14 @@ class DaemonTests(unittest.TestCase):
             self.assertEqual(config.call_count, 4)
             factory.assert_called_once_with()
             self.assertEqual(snapshot.call_count, 2)
-            self.assertEqual(renderer.call_args_list, [mock.call({}, "thermal", theme="dual"),
-                                                       mock.call({}, "storage", theme="dual")])
+            self.assertEqual(renderer.call_args_list, [mock.call({}, "thermal", theme="dark"),
+                                                       mock.call({}, "storage", theme="dark")])
             self.assertEqual(sleep.call_args_list, [mock.call(2), mock.call(3), mock.call(4), mock.call(60)])
             self.assertEqual(factory.return_value.draw.call_count, 2)
             factory.return_value.close.assert_called_once_with()
 
     def test_rotation_switches_pages_on_configured_interval(self):
-        config = fixture_config(True, screen="storage", theme="compact", rotation_enabled=True, rotation_seconds=3,
+        config = fixture_config(True, screen="storage", theme="aurora", rotation_enabled=True, rotation_seconds=3,
                                 rotation_screens=["overview", "network"], refresh=2)
         with mock.patch.object(display, "load_display_config", return_value=config), \
                 mock.patch.object(display, "Framebuffer") as factory, \
@@ -693,9 +727,24 @@ class DaemonTests(unittest.TestCase):
                 mock.patch.object(display.time, "monotonic", side_effect=[0.0, 0.0, 2.0, 2.0, 3.1, 3.1]), \
                 mock.patch.object(display.time, "sleep", side_effect=[None, None, KeyboardInterrupt]):
             self.assertEqual(display.main(["--daemon"]), 0)
-        self.assertEqual(renderer.call_args_list, [mock.call({}, "overview", theme="compact"),
-                                                   mock.call({}, "overview", theme="compact"),
-                                                   mock.call({}, "network", theme="compact")])
+        self.assertEqual(renderer.call_args_list, [mock.call({}, "overview", theme="aurora"),
+                                                   mock.call({}, "overview", theme="aurora"),
+                                                   mock.call({}, "network", theme="aurora")])
+        factory.return_value.close.assert_called_once_with()
+
+    def test_rotation_leaves_optional_page_when_live_data_disappears(self):
+        config = fixture_config(True, screen="fan", rotation_enabled=True,
+                                rotation_screens=["fan", "storage"], refresh=2)
+        snapshots = [{"fan": {"control": "kernel-thermal"}}, {}]
+        with mock.patch.object(display, "load_display_config", return_value=config), \
+                mock.patch.object(display, "Framebuffer") as factory, \
+                mock.patch.object(display, "read_snapshot", side_effect=snapshots), \
+                mock.patch.object(display, "render", return_value="fixture image") as renderer, \
+                mock.patch.object(display.time, "monotonic", side_effect=[0.0, 0.0, 1.0, 1.0]), \
+                mock.patch.object(display.time, "sleep", side_effect=[None, KeyboardInterrupt]):
+            self.assertEqual(display.main(["--daemon"]), 0)
+        self.assertEqual(renderer.call_args_list, [mock.call(snapshots[0], "fan", theme="dark"),
+                                                   mock.call(snapshots[1], "overview", theme="dark")])
         factory.return_value.close.assert_called_once_with()
 
     def test_failures_report_nonzero_close_and_do_not_retry(self):
@@ -727,7 +776,7 @@ class DaemonTests(unittest.TestCase):
 
     def test_cli_rejects_conflicting_modes_and_daemon_screen(self):
         for arguments in ([], ["--preview", "x.png", "--daemon"], ["--daemon", "--screen", "network"],
-                          ["--daemon", "--theme", "single"],
+                          ["--daemon", "--theme", "dark"],
                           ["--daemon", "--font-dir", "/tmp/fonts"],
                           ["--preview", "x.png", "--screen", "invalid"]):
             with self.subTest(arguments=arguments), mock.patch.object(sys, "stderr", io.StringIO()):

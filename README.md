@@ -100,21 +100,22 @@ journalctl -u e87n-display.service -b --no-pager
 ## 屏幕主题与页面轮换
 
 当前小屏的硬件链路已经按原始 E87N OpenWrt 项目适配：NV3007、428×142、RGB565、270°
-旋转、PWM 背光和独立 Debian 服务。`e87n-display` 提供 overview、thermal、network、
-storage 四个页面；显示程序不会接管风扇，只读取内核暴露的状态。
+旋转、PWM 背光和独立 Debian 服务。`e87n-display` 提供 `overview`、`cpu`、`memory`、
+`thermal`、`fan`、`network`、`traffic`、`storage` 八个页面；显示程序不会接管风扇，
+只读取内核暴露的状态。
 
-当前界面已经按 428×142 小屏重新设计，提供三种可切换主题：`dual` 双网口、`single`
-单网口、`compact` 信息密集。四个页面为 `overview`、`thermal`、`network`、`storage`；
-还可以按 2–60 秒配置自动轮换，默认关闭；默认数据每 2 秒刷新，轮换间隔默认 3 秒。主题与轮换只改变显示方式，
-不会接管风扇，风扇仍由 Linux 内核 thermal governor 控制。
+三种主题现在是相同布局的配色皮肤：`dark` 深色工业、`aurora` 黑紫霓虹、`light` 明亮高对比。
+页面可以按 2–60 秒自动轮换，默认关闭；默认数据每 2 秒刷新，轮换间隔默认 3 秒。
+没有风扇或 NVMe 遥测时，自动轮换会跳过对应可选页面。主题与轮换只改变显示方式，
+风扇仍由 Linux 内核 thermal governor 控制。
 
 ```sh
-e87nctl display theme dual       # 双网口彩色卡片
-e87nctl display theme single     # 单网口大字布局
-e87nctl display theme compact    # 显示更多摘要信息
+e87nctl display theme dark
+e87nctl display theme aurora
+e87nctl display theme light
 e87nctl display rotation on
 e87nctl display rotation-seconds 3
-e87nctl display pages overview,network,thermal,storage
+e87nctl display pages overview,cpu,memory,thermal,fan,network,traffic,storage
 systemctl restart e87n-display.service
 ```
 

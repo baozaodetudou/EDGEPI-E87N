@@ -324,9 +324,9 @@ Source code (zip/tar.gz) 是源码，不是 Debian 安装包。
 在目标 Debian 系统中可使用 `sudo apt-get install ./包名.deb` 安装；包管理器会独立
 记录 display 版本。固件镜像内的基线版本可能更旧，这是两个发布通道的预期行为。
 
-`e87n-display 1.2.0-1` 已有单独的实体设备验收记录；当前 Release 的具体版本、
-提交和设备适配状态仍应以本次构建及项目验收文档为准。显示包验收不代表完整固件、
-U-Boot 恢复、网络、存储或长期散热均已通过实机验证。
+项目为独立显示包保留实体设备验收记录；当前 Release 的具体版本、提交和设备适配状态
+仍应以本次构建及项目验收文档为准。显示包验收不代表完整固件、U-Boot 恢复、网络、
+存储或长期散热均已通过实机验证。
 
 Metadata, checksum manifests and full logs remain in the source build's Actions
 artifacts (14-day retention); they are not extra installation downloads on this Release.

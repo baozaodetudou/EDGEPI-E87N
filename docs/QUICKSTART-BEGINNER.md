@@ -140,21 +140,28 @@ journalctl -u e87n-display.service -b --no-pager
 ### 三种主题
 
 ```sh
-e87nctl display theme dual
-e87nctl display theme single
-e87nctl display theme compact
+e87nctl display theme dark
+e87nctl display theme aurora
+e87nctl display theme light
 ```
 
-- `dual`：双网口主题，显示网口 1 和网口 2。
-- `single`：单网口主题，去掉空的第二网口，让主 IP 更大更清楚。
-- `compact`：信息密集主题，额外显示负载、RX/TX 等摘要。
+- `dark`：深色高对比配色。
+- `aurora`：青绿和蓝色强调配色。
+- `light`：浅色配色。
 
-### 四个页面
+三种主题只改变颜色，不改变页面布局或字段。保留的旧配置会自动迁移：`dual -> dark`、
+`single -> light`、`compact -> aurora`。
+
+### 八个页面
 
 ```text
 overview   总览
+cpu        CPU 使用率、负载和频率
+memory     内存占用和容量
 thermal    温度与风扇
-network    网口和流量
+fan        风扇控制状态
+network    网口、地址和链路
+traffic    汇总流量和速率
 storage    存储温度
 ```
 
@@ -169,14 +176,15 @@ systemctl restart e87n-display.service
 每 3 秒自动轮换：
 
 ```sh
-e87nctl display pages overview,network,thermal,storage
+e87nctl display pages overview,cpu,memory,thermal,fan,network,traffic,storage
 e87nctl display rotation-seconds 3
 e87nctl display rotation on
 systemctl restart e87n-display.service
 ```
 
 `refresh_seconds` 是数据刷新间隔，`rotation_seconds` 是页面切换间隔，两者互不冲突。轮换
-默认关闭，升级旧版本时原来的四字段配置会自动补齐新字段。
+默认关闭；自动轮换时，如果设备没有风扇或 NVMe 遥测，会跳过 `fan` 或 `storage` 页面。
+固定选择这些页面时仍会显示明确的缺失值。升级旧版本时缺少的新字段会自动使用默认值。
 
 ## 单独升级小屏包
 
@@ -206,15 +214,15 @@ systemctl is-active e87n-display.service
 升级后可直接修改屏幕，不需要重新刷机：
 
 ```sh
-# 主题：dual / single / compact
-e87nctl display theme compact
+# 主题：dark / aurora / light
+e87nctl display theme aurora
 
-# 固定页面：overview / thermal / network / storage
+# 固定页面：8 个页面任选其一
 e87nctl display rotation off
 e87nctl display screen overview
 
-# 每 3 秒按顺序轮换四页
-e87nctl display pages overview,network,thermal,storage
+# 每 3 秒按顺序轮换八页
+e87nctl display pages overview,cpu,memory,thermal,fan,network,traffic,storage
 e87nctl display rotation-seconds 3
 e87nctl display rotation on
 

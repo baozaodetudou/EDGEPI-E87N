@@ -3,13 +3,17 @@
   "brightness_percent": 20,
   "screen": "overview",
   "refresh_seconds": 2,
-  "theme": "dual",
+  "theme": "dark",
   "rotation_enabled": false,
   "rotation_seconds": 3,
   "rotation_screens": [
     "overview",
+    "cpu",
+    "memory",
     "thermal",
+    "fan",
     "network",
+    "traffic",
     "storage"
   ]
 }

@@ -1,6 +1,6 @@
 # E87N 小屏界面设计
 
-当前布局版本：`428×142 / RGB565 / 三主题 / 四页面 / 不显示 RPM`。
+当前布局版本：`428×142 / RGB565 / 三配色 / 八页面 / 不显示 RPM`。
 渲染代码位于 `board-support/e87n/display.py`，预览命令为：
 
 ```sh
@@ -10,23 +10,22 @@ python3 -m e87n.display --preview /tmp/e87n-overview.png --screen overview
 ## 设计原则
 
 - 428×142 是硬约束；所有页面都以此尺寸渲染，再写入 NV3007 framebuffer。
-- 深色工业风、青色信息主色、绿色正常、橙色温度警示、灰色缺失值。
+- 三套配色共享完全相同的布局和数据语义，切换主题不会隐藏页面或网口。
 - 只使用大块面板、短标签和高对比纯色，适配 RGB565、低亮度和 270° 旋转。
 - 重要信息优先级：双网口链路/IP → CPU/RAM/温度 → 风扇控制状态。
 - 缺失数据显示 `--` 或 `无IP`，不把缺失值推断成 0 或 `断开`。
 - 屏幕不显示 RPM。E87N 没有可靠 tachometer 输入，PWM 与 cooling level 也不能换算成转速。
 
-## 三种主题
+## 三种配色主题
 
-| 主题 | 适合场景 | `overview` 主信息 | 视觉特点 |
-| --- | --- | --- | --- |
-| `dual` | 两个物理网口都需要长期观察 | 网口 1、网口 2、CPU、内存、温度、风扇 | 青色/紫色双卡片，默认主题 |
-| `single` | 只接一个网口或希望 IP 更醒目 | 大号主 IP、CPU、内存、温度、风扇 | 去掉空的第二网口，主 IP 更大 |
-| `compact` | 运维桌面或希望一屏看更多摘要 | IP、CPU、内存、温度、风扇、负载、RX/TX | 灰蓝底色、黄色重点、信息密度最高 |
+| 主题 | 适合场景 | 视觉特点 |
+| --- | --- | --- |
+| `dark` | 默认、低亮度和长期运行 | 深蓝背景、青色主信息、绿色正常、橙色温度 |
+| `aurora` | 希望重点状态更醒目 | 近黑背景、洋红主色、青色辅助色 |
+| `light` | 光线较强的机房或桌面 | 浅灰背景、深色正文、高对比边框 |
 
-三种主题都保持 428×142 输出，并且都不显示虚构的网速、协商速率或 RPM。`single` 和
-`compact` 的 `overview`/`network` 页面使用各自布局；`thermal`/`storage` 保持统一的
-温度与存储信息结构，避免轮换时因为网口数量改变而产生跳动。
+三种主题都保持 428×142 输出，并且都不显示虚构的网速、协商速率或 RPM。所有页面的
+位置和信息层级完全一致，只改变颜色，避免切换主题后操作含义变化。
 
 ## Overview 布局
 
@@ -55,17 +54,22 @@ LAN 1 和 LAN 2 是固定位置，不随链路状态或接口排序交换。采�
 | 页面 | 显示内容 | 风扇字段 |
 | --- | --- | --- |
 | `overview` | 网口1/网口2、IP、CPU、内存、CPU 温度、运行时间 | `自动 PWM%` |
+| `cpu` | CPU 使用率、1/5/15 分钟负载、当前频率、governor、驱动 | 不显示 |
+| `memory` | 内存使用率、已用、可用和总量 | 不显示 |
 | `thermal` | CPU/PHY 温度、thermal policy | `MODE`、`LEVEL`、`PWM` |
+| `fan` | 内核控制模式、cooling level、PWM、policy | 完整显示；无 RPM |
 | `network` | 两个接口的 link、IPv4/IPv6、累计 RX/TX 计数 | 不显示 |
+| `traffic` | 双网口 RX/TX 累计总量、主链路和本地地址 | 不显示 |
 | `storage` | 可用温度传感器和存储设备状态 | 不显示 |
 
 页面轮换默认关闭，避免升级后屏幕突然改变。开启后，daemon 按配置顺序轮换页面；如果
-`screen` 不在 `rotation_screens` 中，会从列表第一项开始，不会因为配置组合而崩溃：
+`screen` 不在 `rotation_screens` 中，会从列表第一项开始。`fan` 和 `storage` 是数据可选页，
+缺少对应遥测时自动跳过；如果列表只有不可用的可选页，则安全回到 `overview`：
 
 ```sh
 e87nctl display rotation on
 e87nctl display rotation-seconds 3
-e87nctl display pages overview,network,thermal,storage
+e87nctl display pages overview,cpu,memory,thermal,fan,network,traffic,storage
 e87nctl display config
 ```
 
@@ -73,8 +77,8 @@ e87nctl display config
 页面切换周期，控制开启轮换后多久换到下一页。两者可以不同，例如数据每 2 秒刷新、页面
 每 3 秒切换。轮换关闭时，`screen` 决定固定页面。
 
-Thermal 页面把“风扇设置”表达为内核当前控制事实：`AUTO`、cooling level、PWM 百分比和
-policy。当前 Debian 实现仍由 `pwm-fan + thermal governor` 负责长期控制；
+Thermal/Fan 页面把“风扇设置”表达为内核当前控制事实：自动模式、cooling level、PWM
+百分比和 policy。当前 Debian 实现仍由 `pwm-fan + thermal governor` 负责长期控制；
 `e87nctl fan test LEVEL SECONDS` 只进行最多 30 秒的临时测试并恢复原状态，不安装第二个
 用户态风扇守护进程，也不在屏幕上伪造 RPM。
 
@@ -133,8 +137,8 @@ RGB565，`fonts-wqy-microhei` 已安装；`eth0`、`eth1` 两个网口均能被�
 本地 `SIOCGIFADDR` 的 `AF_INET` 权限，避免 systemd 沙箱导致 IPv4 采样失败后错误显示链路本地
 IPv6。修复后的服务连续检查为 `active`、`NRestarts=0`、`ExecMainStatus=0`。
 
-四个页面均从真实 `/dev/fb0` 读回并确认尺寸为 `428×142`：`overview`、`thermal`、`network`、
-`storage`。真实风扇状态为 `pwm-fan`、`step_wise`、`L1/3`、PWM `50%`；板上没有可靠的
+历史 `1.2.0-1` 的四个页面均从真实 `/dev/fb0` 读回并确认尺寸为 `428×142`：`overview`、
+`thermal`、`network`、`storage`。真实风扇状态为 `pwm-fan`、`step_wise`、`L1/3`、PWM `50%`；板上没有可靠的
 tachometer 输入，因此不显示 RPM。`e87nctl display off/on`、亮度 20%、页面切换和
 `e87nctl fan test 1 1` 均已完成，风扇测试恢复原档位。
 

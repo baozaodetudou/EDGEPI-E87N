@@ -25,17 +25,18 @@ e87nctl display config
 e87nctl display --help
 sudo e87nctl display brightness 20
 sudo e87nctl display screen overview
-sudo e87nctl display theme dual
+sudo e87nctl display theme dark
 sudo e87nctl display refresh 5
 sudo e87nctl display rotation on
 sudo e87nctl display rotation-seconds 3
-sudo e87nctl display pages overview,network,thermal,storage
+sudo e87nctl display pages overview,cpu,memory,thermal,fan,network,traffic,storage
 sudo e87nctl display screen thermal
 sudo e87nctl display off
 sudo e87nctl display on
 ```
 
-Screens: overview, thermal, network, storage. Themes: dual, single, compact.
+Screens: overview, cpu, memory, thermal, fan, network, traffic, storage.
+Themes: dark, aurora, light. Themes are colour skins; all pages keep the same layout.
 The fan remains automatic even with the display off. Configuration is
 `/etc/e87n/display.json`; service name is `e87n-display.service`. Unknown
 measurements are not successful hardware tests.

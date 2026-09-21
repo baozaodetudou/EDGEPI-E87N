@@ -22,19 +22,24 @@ import time
 from contextlib import ExitStack, contextmanager
 
 
-_SCREENS = ("overview", "thermal", "network", "storage")
-_THEMES = ("dual", "single", "compact")
+_SCREENS = ("overview", "cpu", "memory", "thermal", "fan", "network", "traffic", "storage")
+_THEMES = ("dark", "aurora", "light")
 _DEFAULT_CONFIG = {
     "enabled": True,
     "brightness_percent": 20,
     "screen": "overview",
     "refresh_seconds": 2,
-    "theme": "dual",
+    "theme": "dark",
     "rotation_enabled": False,
     "rotation_seconds": 3,
     "rotation_screens": list(_SCREENS),
 }
 _LEGACY_CONFIG_KEYS = frozenset(("enabled", "brightness_percent", "screen", "refresh_seconds"))
+# 1.2.x shipped three layout "themes" and four screens. 1.3 makes themes colour
+# skins and adds four pages, so a preserved conffile is remapped to the closest
+# new value at load time. This only rewrites known old strings; a genuinely
+# malformed value (wrong type, unknown name) still fails validation below.
+_LEGACY_THEMES = {"dual": "dark", "single": "light", "compact": "aurora"}
 _CONFIG_KEYS = frozenset(_DEFAULT_CONFIG)
 _CONFIG_DIR = "etc/e87n"
 _CONFIG_NAME = "display.json"
@@ -61,18 +66,27 @@ def _validate_config(config):
         config = dict(_DEFAULT_CONFIG, **config)
     elif keys != _CONFIG_KEYS:
         raise HardwareError("display config must contain exactly: " + ", ".join(_DEFAULT_CONFIG))
+    else:
+        config = dict(config)
+    # Remap a preserved 1.2 layout theme to its 1.3 colour skin. Old screen and
+    # rotation_screens names are a subset of the new set, so they stay valid and
+    # need no rewrite; only the theme vocabulary changed. A theme that is not a
+    # known old string is left untouched and validated strictly below.
+    theme = config["theme"]
+    if type(theme) is str and theme in _LEGACY_THEMES:
+        config["theme"] = _LEGACY_THEMES[theme]
     if type(config["enabled"]) is not bool:
         raise HardwareError("enabled must be a boolean")
     percent = config["brightness_percent"]
     if type(percent) is not int or not 0 <= percent <= 100:
         raise HardwareError("brightness_percent must be an integer in 0..100")
     if type(config["screen"]) is not str or config["screen"] not in _SCREENS:
-        raise HardwareError("screen must be overview, thermal, network or storage")
+        raise HardwareError("screen must be one of: " + ", ".join(_SCREENS))
     refresh = config["refresh_seconds"]
     if type(refresh) is not int or not 2 <= refresh <= 60:
         raise HardwareError("refresh_seconds must be an integer in 2..60")
     if type(config["theme"]) is not str or config["theme"] not in _THEMES:
-        raise HardwareError("theme must be dual, single or compact")
+        raise HardwareError("theme must be dark, aurora or light")
     if type(config["rotation_enabled"]) is not bool:
         raise HardwareError("rotation_enabled must be a boolean")
     rotation_seconds = config["rotation_seconds"]
