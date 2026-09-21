@@ -178,7 +178,7 @@ class ValidationTests(unittest.TestCase):
             ("fix", "id", b"simpledrm"), ("fix", "id", b"fb_nv3007-other"),
             ("var", "xres", 142), ("var", "yres", 428),
             ("var", "bits_per_pixel", 32), ("var", "grayscale", 1),
-            ("var", "nonstd", 1), ("var", "vmode", 256),
+            ("var", "nonstd", 2), ("var", "vmode", 256),
             ("fix", "type", 1), ("fix", "type_aux", 1), ("fix", "visual", 3),
             ("var", "xres_virtual", 427), ("var", "yres_virtual", 141),
             ("var", "xoffset", 1), ("var", "yoffset", 1),
@@ -196,6 +196,12 @@ class ValidationTests(unittest.TestCase):
                 setattr(fix if target == "fix" else var, field, value)
                 with self.assertRaises(display.DisplayError):
                     display.validate_framebuffer(fix, var)
+
+    def test_accepts_fbtft_fb_nonstd_ham_marker_with_rgb565_layout(self):
+        fix, var = screen_info()
+        var.nonstd = 1
+        layout = display.validate_framebuffer(fix, var)
+        self.assertEqual((layout.red_offset, layout.green_offset, layout.blue_offset), (11, 5, 0))
 
     def test_reject_bad_or_overlapping_bitfields(self):
         for name, member, value in (

@@ -5,9 +5,17 @@
 `packaging/e87n-display/VERSION`。镜像启动器将打包脚本、`packaging/` 与
 `board-support/` 按仓库相对结构复制到 `/tmp/overlay/e87n-package/`，customize 在
 目标 chroot 中调用该脚本，再通过 APT 安装产物。当前源码已经接入预装流程，
-并启用 LCD/背光节点及显示服务；包版本当前为 `1.1.0-1`，以 VERSION 文件为准。
+并启用 LCD/背光节点及显示服务；包版本当前为 `1.1.1-1`，以 VERSION 文件为准。
 独立 deb 用于升级和重新安装，不表示基础镜像默认无屏幕。
 candidate3 属于此前的 headless 配置，其验收不能替代当前显示配置的重建与实机测试。
+
+### NV3007 framebuffer 兼容性
+
+Linux fbtft 的 `fb_nv3007` 会在 `fb_var_screeninfo.nonstd` 中返回
+`FB_NONSTD_HAM`（值为 `1`）。这是 fbtft 的兼容性标记；在 E87N 上实际像素仍是
+标准 16-bit RGB565（R11/G5/B0），并不表示需要按 HAM 格式解码。显示程序只接受
+该已知标记，仍严格校验 framebuffer 身份、428×142 几何、truecolor、RGB565 位域、
+stride、偏移和 framebuffer 内存边界。
 
 ## 构建接口
 
@@ -16,11 +24,11 @@ candidate3 属于此前的 headless 配置，其验收不能替代当前显示�
 
 ```sh
 ./scripts/build-display-deb.sh --output-dir ./output/debs
-./scripts/build-display-deb.sh --output-dir ./output/debs --version 1.1.0-1
+./scripts/build-display-deb.sh --output-dir ./output/debs --version 1.1.1-1
 ```
 
 产物严格命名为 `e87n-display_VERSION_all.deb`，例如
-`output/debs/e87n-display_1.1.0-1_all.deb`。标准输出包含构建进度，调用方应按版本
+`output/debs/e87n-display_1.1.1-1_all.deb`。标准输出包含构建进度，调用方应按版本
 构造文件名，不能将整个 stdout 当作路径。版本须为合法 Debian 版本，发布新内容时
 递增版本；可用 `dpkg --compare-versions` 检查先后。构建先写独立临时目录，成功后
 替换同名产物；失败不覆盖原产物。`dpkg-deb --root-owner-group` 固定包内 root:root
@@ -55,7 +63,7 @@ NOTICE 或 docs；许可证声明位于 packaging 内。没有风扇控制守护
 在已启动的目标 Debian 系统安装或升级：
 
 ```sh
-sudo apt-get install ./e87n-display_1.1.0-1_all.deb
+sudo apt-get install ./e87n-display_1.1.1-1_all.deb
 dpkg-query -W -f='${Package} ${Version} ${Status}\n' e87n-display
 dpkg-query -L e87n-display
 systemctl status e87n-display.service
@@ -89,7 +97,7 @@ disable/mask 的选择，禁用且未运行的服务不会被升级启动。手�
 
 ```sh
 sudo apt-get -y -o Dpkg::Options::=--force-confdef \
-  -o Dpkg::Options::=--force-confold install ./e87n-display_1.1.0-1_all.deb
+  -o Dpkg::Options::=--force-confold install ./e87n-display_1.1.1-1_all.deb
 sudo apt-get remove e87n-display  # 停止显示；保留配置及服务启用状态记录
 sudo apt-get purge e87n-display   # 删除包的 conffile 与 helper 状态
 ```

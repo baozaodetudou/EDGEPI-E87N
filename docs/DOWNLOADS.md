@@ -14,7 +14,7 @@
 ```text
 文件名：Armbian-trixie-6.18.52-e87n-679b7d5-uboot-firmware.tar
 SHA-256：efef220d81ad7f97155cc82d9246c3e1443ce8e4b9fa544002e39e050c2cc35d
-显示包：e87n-display_1.1.0-1_all.deb
+显示包：e87n-display_1.1.1-1_all.deb
 显示包 SHA-256：cc8bf0e71ae852c1e284c127ed00ee0460a0f731f4d0da99d390a05145327a12
 QEMU 验收：PASS
 硬件验收：未完成

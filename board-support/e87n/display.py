@@ -117,8 +117,13 @@ def validate_framebuffer(fix, var):
         raise DisplayError("framebuffer visible geometry must be 428x142")
     if (fix.type, fix.type_aux, fix.visual) != (0, 0, 2):
         raise DisplayError("framebuffer must be packed-pixel truecolor")
-    if var.bits_per_pixel != 16 or var.grayscale or var.nonstd or var.vmode:
-        raise DisplayError("framebuffer must be standard progressive 16-bit RGB")
+    # fbtft sets FB_NONSTD_HAM (1) on its fbdev var_screeninfo even when the
+    # actual memory layout is the normal packed RGB565 layout. This is the
+    # upstream fbtft ABI marker, not a request for HAM decoding. Accept that
+    # one known marker for the E87N NV3007 driver, while still rejecting all
+    # other non-standard formats and every mode-setting flag.
+    if var.bits_per_pixel != 16 or var.grayscale or var.nonstd not in (0, 1) or var.vmode:
+        raise DisplayError("framebuffer must be packed progressive 16-bit RGB")
     if var.transp.length or var.transp.msb_right or var.transp.offset > 16:
         raise DisplayError("RGB565 must not have an alpha bitfield")
     mask = 0
