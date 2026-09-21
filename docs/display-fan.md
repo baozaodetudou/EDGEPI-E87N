@@ -4,7 +4,7 @@
 
 ## 当前配置与历史候选 — 2026-09-21
 
-当前最小镜像预装同源构建的 `e87n-display` 基线包，启用 NV3007 与 PWM 背光设备树节点，提供模块自动加载配置和下一次启动启用的显示服务。当前独立显示包版本为 `1.3.1-1`。Firmware workflow 用 QEMU 验证该预装基线；供升级和重新安装的 deb 由独立 Display Release 发布，不要求与 firmware 同版本，见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)。构建不再安装旧 headless 黑名单。2026 年 9 月 21 日已在真实设备上验证 Debian 13、`fb_nv3007`、中文字体、断链网口隐藏、单口全宽、缺失页面跳过、固定页回退、背光命令和短时风扇测试；完整结果见 [FINAL-VALIDATION-20260921.md](FINAL-VALIDATION-20260921.md)。
+当前最小镜像预装同源构建的 `e87n-display` 基线包，启用 NV3007 与 PWM 背光设备树节点，提供模块自动加载配置和下一次启动启用的显示服务。当前独立显示包版本为 `1.3.1-1`。Firmware workflow 用 QEMU 验证该预装基线；供升级和重新安装的 deb 由独立 Display Release 发布，不要求与 firmware 同版本，见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)。构建不再安装旧 headless 黑名单。2026 年 9 月 21 日已在真实设备上验证 Debian 13、`fb_nv3007`、中文字体、断链网口隐藏、单口全宽、缺失页面跳过、固定页回退、背光命令和短时风扇测试，现场操作者已确认实体屏幕显示正常；完整结果见 [FINAL-VALIDATION-20260921.md](FINAL-VALIDATION-20260921.md)。
 
 [9 月 13 日历史屏幕/风扇候选](candidate-display-fan-20260913.md)保留其当次构建、静态检查、导出与哈希证据。9 月 12 日的 Trixie 与 Bookworm 镜像也属历史候选；这些文件均不能作为当前最小配置交付。
 

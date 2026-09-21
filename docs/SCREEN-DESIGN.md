@@ -143,8 +143,9 @@ journalctl -u e87n-display.service -b --no-pager
 `e87n-display 1.3.1-1` 已安装到 `192.168.20.201`。实机快照中 `eth0` 在线，`eth1` 为
 `carrier=0` 且仍有 link-local IPv6 和历史计数；实际渲染只保留全宽 `网口1 / eth0`。
 风扇页不显示内部值 `kernel-thermal`。当前没有存储温度，因此 7 个可用页面在三主题下共
-21 次从真实 `/dev/fb0` 读回完整且不同的帧；固定 `storage` 正确回退 `overview`。详细哈希、
-测试数量和边界见 [真实板卡验收记录](FINAL-VALIDATION-20260921.md)。
+21 次从真实 `/dev/fb0` 读回完整且不同的帧；固定 `storage` 正确回退 `overview`。现场操作
+者随后确认实体屏幕显示正常。该确认没有附带照片或仪器级颜色、亮度测量；详细哈希、测试
+数量和边界见 [真实板卡验收记录](FINAL-VALIDATION-20260921.md)。
 
 ### 历史证据
 
