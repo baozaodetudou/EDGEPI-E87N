@@ -21,6 +21,9 @@ def load_config(path=CONFIG_PATH):
         raise ValueError("kernel package release does not match the source version/family")
     if config["release"] != "trixie" or config["architecture"] != "arm64":
         raise ValueError("this profile requires Debian Trixie ARM64")
+    if re.fullmatch(r"20[0-9]{2}\.(?:0[1-9]|1[0-2])\.[1-9][0-9]*",
+                    config.get("firmware_version", "")) is None:
+        raise ValueError("firmware_version must use YYYY.MM.REVISION")
     return config
 
 

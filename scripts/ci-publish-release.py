@@ -13,6 +13,8 @@ import sys
 
 from build_config import BUILD, TARGET
 from factory_firmware import FORMAT
+from release_identity import (display_filename, display_version, image_filename,
+                              release_tag, release_title)
 
 simulation = import_module("ci-simulation")
 
@@ -125,10 +127,13 @@ def validate_assets(directory, source_commit, kind):
     images = {name for name in files if name.endswith(".tar")}
     debs = {name for name in files if re.fullmatch(r"e87n-display_.+_all\.deb", name)}
     expected_payloads = images | debs
+    expected_deb = display_filename()
     if kind == "image":
-        require(len(images) == len(debs) == 1, "Image staging requires one firmware tar and one tested display package")
+        require(images == {image_filename()} and debs == {expected_deb},
+                "Image staging requires the versioned firmware tar and current tested display package")
     else:
-        require(not images and len(debs) == 1, "Display staging requires exactly one display package")
+        require(not images and debs == {expected_deb},
+                "Display staging requires exactly the current versioned display package")
     require(set(files) == FIXED[kind] | expected_payloads,
             "Missing, duplicate, or unexpected release assets")
     require(all(files[name][1] > 0 for name in expected_payloads), "Empty release payload")
@@ -147,6 +152,8 @@ def validate_assets(directory, source_commit, kind):
             and isinstance(metadata.get("target"), dict) and
             all(metadata["target"].get(k) == v for k, v in TARGET.items()) and
             metadata.get("collection_errors") == [], "Build metadata is not a successful current-source target")
+    require(metadata.get("display_version_source") == display_version(),
+            "Build metadata display version mismatch")
     require(kind != "image" or metadata.get("image_static_audit") == "passed", "Image audit has not passed")
     require(kind != "display" or metadata.get("image_static_audit") == "not applicable",
             "Display metadata has an invalid image audit state")
@@ -246,10 +253,9 @@ def publish(args, files):
                  (args.kind == "image" and name.endswith(".tar")) or
                  (args.kind == "display" and re.fullmatch(r"e87n-display_.+_all\.deb", name))}
     require(len(downloads) == 1, "Release must contain exactly one public payload")
-    title_kind = "firmware" if args.kind == "image" else "display"
     try:
         gh("release", "create", args.tag, "--repo", args.repository, "--target", args.source_commit,
-           "--title", f"E87N {title_kind} {args.tag}", "--notes-file", files["RELEASE-NOTES.md"][0],
+           "--title", release_title(args.kind), "--notes-file", files["RELEASE-NOTES.md"][0],
            "--draft", "--prerelease", "--latest=false")
         release_id = check_release(find_created_release(args), args, True)
         check_remote_assets(args, release_id, {})  # Never adopt or overwrite preexisting assets.
@@ -276,6 +282,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         require(safe(args.tag), "Invalid release tag")
+        require(args.tag == release_tag(args.kind),
+                "Release tag does not match the current channel version")
         require(len(args.repository.split("/")) == 2 and all(safe(p) for p in args.repository.split("/")), "Invalid repository")
         require(re.fullmatch(SHA, args.source_commit), "Invalid source commit")
         args.source_commit = args.source_commit.lower()

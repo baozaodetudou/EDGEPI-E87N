@@ -2,12 +2,13 @@
 
 ## 从哪里下载
 
-正式用户产物只从仓库 [Releases](https://github.com/baozaodetudou/EDGEPI-E87N/releases) 下载。
+公开用户产物只从仓库 [Releases](https://github.com/baozaodetudou/EDGEPI-E87N/releases) 下载。
+当前两个通道均标记为 Pre-release；使用前仍需按本页核对附件、SHA-256 和验收边界。
 发布分为两个独立通道，每个 Release 只上传一个项目二进制附件：
 
 | Release 通道 | 下载文件 | 使用场景 |
 | --- | --- | --- |
-| Firmware Release | `*-uboot-firmware.tar` | 新装或升级整个 Debian 系统 |
+| Image Release | `edgepi-e87n-debian_<firmware_version>_arm64-uboot-firmware.tar` | 新装或升级整个 Debian 系统 |
 | Display Release | `e87n-display_<version>_all.deb` | 已运行 Debian 上单独升级小屏程序 |
 
 Firmware 与 Display Release 不要求 tag、版本号或发布日期一致。固件内已经预装并经过 QEMU
@@ -16,6 +17,10 @@ Firmware 与 Display Release 不要求 tag、版本号或发布日期一致。�
 
 不要从源码页下载 `Source code (zip)` / `Source code (tar.gz)` 当作系统镜像，也不要把
 Actions 的中间 artifact 当作最终 Release 附件。
+
+Image tag 为 `e87n-image-v<firmware_version>`，Display tag 为
+`e87n-display-v<display_version>`。历史上带 Actions run ID 的 tag 以及同时包含 TAR/deb 的
+Release 仅用于追溯；新 Release 每个通道只公开一个项目附件。
 
 ## 下载后先校验
 
@@ -51,7 +56,7 @@ Display 附件，反之亦然。`SHA256SUMS`、元数据和完整日志只保留
 
 | 文件 | 可以做什么 | 不可以做什么 |
 | --- | --- | --- |
-| `*-uboot-firmware.tar` | 原厂 U-Boot Web plain firmware 入口 | 不用于 LuCI、OpenWrt `sysupgrade`、SIMG/GPT/FIP 入口 |
+| `edgepi-e87n-debian_*_arm64-uboot-firmware.tar` | 原厂 U-Boot Web plain firmware 入口 | 不用于 LuCI、OpenWrt `sysupgrade`、SIMG/GPT/FIP 入口 |
 | `e87n-display_*.deb` | 已启动 Debian 中安装/升级屏幕服务 | 不能单独启动设备，不能替代内核和 DTB |
 | `.img` / `.img.xz` | 构建过程中的 GPT 中间产物 | 不是当前公开的 U-Boot 刷写附件 |
 | Actions artifact | 构建日志、诊断和审计证据 | 不要从失败 run 中挑文件刷写 |

@@ -1,6 +1,6 @@
 # E87N 原厂 U-Boot 固件格式与就绪条件
 
-当前交付格式为 `<basename>-uboot-firmware.tar`：面向这台 E87N 原厂 U-Boot Web 恢复页 plain firmware（Web 类型 `fw`）的**未压缩 USTAR**。包内运行的是 Debian 13 Trixie / Armbian；`sysupgrade-` 目录名只是厂商解析器约定，不表示采用 OpenWrt rootfs，也不表示可用 LuCI sysupgrade 安装。
+当前公开交付文件名为 `edgepi-e87n-debian_<firmware_version>_arm64-uboot-firmware.tar`：面向这台 E87N 原厂 U-Boot Web 恢复页 plain firmware（Web 类型 `fw`）的**未压缩 USTAR**。包内运行的是 Debian 13 Trixie / Armbian；`sysupgrade-` 目录名只是厂商解析器约定，不表示采用 OpenWrt rootfs，也不表示可用 LuCI sysupgrade 安装。
 
 Firmware Release 只公开这一个 TAR。固件 rootfs 内预装构建时同源生成、并随固件完成 QEMU
 验证的 `e87n-display` 基线包，但不会在 Firmware Release 中额外发布 deb。后续显示程序由
@@ -14,7 +14,7 @@ candidate3 已完成 Debian 13.7 / Linux 6.18.52 的完整构建、最终 TAR �
 
 ## 历史 R4 记录
 
-**R4 已生成，对同一 TAR 的独立最终审计 EXIT 0，随后以不覆盖已有文件的方式暴露最终文件。** R4 重新打包历史 Actions 34737922588 的原始 RAW，修正 DTB 的 1 GiB/保留区及 bootargs（含 902 等效修正），没有完整重编 Armbian 或内核。主机导出及 SHA-256 比对已完成，未来新源码完整构建的手动工作流未 dispatch，远端发布未确认。V3 因内核地址修正已废弃。板上 RAM 测试、备份、可恢复控制通道及硬件验收仍未完成；用户“完全准备好再刷”的条件尚未满足。
+**R4 已生成，对同一 TAR 的独立最终审计 EXIT 0，随后以不覆盖已有文件的方式暴露最终文件。** R4 重新打包历史 Actions 34737922588 的原始 RAW，修正 DTB 的 1 GiB/保留区及 bootargs（含 902 等效修正），没有完整重编 Armbian 或内核。主机导出及 SHA-256 比对已完成；“手动工作流未 dispatch、远端发布未确认”是 R4 当时的历史状态，截至 2026 年 9 月 21 日已有后续远端 Release。V3 因内核地址修正已废弃。板上 RAM 测试、备份、可恢复控制通道及硬件验收仍未完成；用户“完全准备好再刷”的条件尚未满足。
 
 | 本轮阶段结果 | 已报告结果 |
 | --- | --- |
@@ -48,7 +48,7 @@ CONTROL：875 字节
 
 完整 Linux `ci-regressions.sh` 随后在磁盘临时目录通过全部套件，`regressions-disk.log` 记录 EXIT 0；此前输入传输缺少 docs、AppleDouble 元数据和 `/tmp` 满导致的失败已解决，失败日志仍保留。factory 24 项、root adapter 24 项通过，静态 CI 85 项再次通过；新增 runtime/root preparer 两个编译检查目标也已复验通过。
 
-主机导出及 SHA-256 比对已完成，尚不声明导出/交付完成。未来手动工作流将从新源码完整构建，**尚未 dispatch**；本地 TAR 与审计完成不代表新 GitHub job、远端 Release 或板卡验收完成。
+主机导出及 SHA-256 比对已完成。这里“未来手动工作流尚未 dispatch”仅保留为 R4 当时的历史结论；截至 2026 年 9 月 21 日已有后续 GitHub 构建与 Release。本地 R4 TAR 与审计仍不代表后续 Release 或板卡验收完成。
 
 ## 输入与容器
 
@@ -149,4 +149,4 @@ p1 的 `0x80000` 字节单环境只读副本已离线验证 CRC32。未写 `/etc
 4. 完成独立的板上 RAM/诊断启动验证，再评估正常 TAR 安装。诊断 RAM 启动必须另备仅驻留 RAM 的 rootfs 或隔离的测试 rootfs，并核对根设备、自动挂载和扩容策略，防止访问或写入原 eMMC。生产 FIT 的原始 initrd 会按原 `.img` 的 root UUID 寻找磁盘根文件系统；它不是独立 RAM 测试系统。不能上传生产 FIT/initramfs 后就假定系统会仅在 RAM 中运行，普通 Web firmware 上传还会进入安装写入路径。
 5. 控制通道、物理恢复路径、备份、RAM 测试和最终产物验证全部完成后，才评估实际刷写；之后仍需另行验收 Debian 首启、DHCP/factory MAC、p5 扩容、屏幕风扇与重启/断电恢复。
 
-当前没有进行板卡重启、刷写、完整备份或串口连接，也没有实测可恢复的 U-Boot Web/网络控制通道或确认物理恢复路径。R4 本地打包/独立静态审计及完整 Linux regressions 已通过；新增两个编译检查目标的再验证、主机导出复制仍待结果，未来工作流未 dispatch，远端发布未确认。
+当前没有进行板卡重启、刷写、完整备份或串口连接，也没有实测可恢复的 U-Boot Web/网络控制通道或确认物理恢复路径。R4 本地打包/独立静态审计及完整 Linux regressions 已通过；后续构建和远端 Release 已在 2026 年 9 月 21 日出现，但不能补足 R4 的控制通道、恢复和实机验收缺口。

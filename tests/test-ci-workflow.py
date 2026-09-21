@@ -149,13 +149,15 @@ class SplitWorkflowPolicy(unittest.TestCase):
             (root / "userpatches/config").mkdir(parents=True)
             (root / "packaging/e87n-display").mkdir(parents=True)
             shutil.copyfile(REPO / "scripts/build_config.py", root / "scripts/build_config.py")
+            shutil.copyfile(REPO / "scripts/release_identity.py", root / "scripts/release_identity.py")
             config = {**BUILD, "kernel_version": "6.18.99",
-                      "kernel_release": "6.18.99-current-" + BUILD["linux_family"]}
+                      "kernel_release": "6.18.99-current-" + BUILD["linux_family"],
+                      "firmware_version": "2026.10.2"}
             (root / "userpatches/config/e87n-build.json").write_text(json.dumps(config))
             (root / "packaging/e87n-display/VERSION").write_text("1.2.3+git~rc1\n")
             mocks = root / "mocks.sh"
             mocks.write_text('''python3() {
-    if [[ $1 == scripts/build_config.py ]]; then
+    if [[ $1 == scripts/build_config.py || $1 == scripts/release_identity.py ]]; then
         command "$E87N_TEST_PYTHON" "$@"
         return $?
     fi
@@ -170,10 +172,10 @@ export -f python3
                         "GITHUB_RUN_ID": "34737922588", "GITHUB_RUN_ATTEMPT": "2",
                         "GIT_TERMINAL_PROMPT": "0", "E87N_TEST_PYTHON": sys.executable}
             expected = {
-                "image": ("e87n-trixie-6.18.99-34737922588-2",
-                          "e87n-trixie-6.18.99-candidate-34737922588-2"),
-                "display": ("e87n-display-1.2.3.plus.git.tilde.rc1-34737922588-2",
-                            "e87n-display-1.2.3.plus.git.tilde.rc1-candidate-34737922588-2"),
+                "image": ("e87n-image-v2026.10.2",
+                          "e87n-image-v2026.10.2-candidate-34737922588-2"),
+                "display": ("e87n-display-v1.2.3.plus.git.tilde.rc1",
+                            "e87n-display-v1.2.3.plus.git.tilde.rc1-candidate-34737922588-2"),
             }
             for kind, (tag, artifact) in expected.items():
                 step = next(item for item in self.workflow(kind)["jobs"]["validate"]["steps"]
@@ -276,7 +278,7 @@ class Fixtures(unittest.TestCase):
         (self.root / "scripts").mkdir()
         for name in ("ci-build.sh", "ci-build-ramdiag.sh", "ci-collect-artifacts.py",
                      "ci-prepare-runner.sh", "ci-validate.sh", "ci-simulation.py",
-                     "factory_firmware.py", "build_config.py"):
+                     "factory_firmware.py", "build_config.py", "release_identity.py"):
             shutil.copyfile(REPO / "scripts" / name, self.root / "scripts" / name)
         shutil.copytree(REPO / "scripts/ramdiag", self.root / "scripts/ramdiag",
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))

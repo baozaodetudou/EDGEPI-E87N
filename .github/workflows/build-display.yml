@@ -32,7 +32,7 @@ jobs:
         with:
           persist-credentials: false
           clean: false
-      - name: Generate display release tag and check manual main-branch build
+      - name: Resolve display release identity and check manual main-branch build
         id: release_tag
         env:
           GH_TOKEN: ${{ github.token }}
@@ -41,20 +41,9 @@ jobs:
             printf 'Only manual main-branch builds may publish.\n' >&2
             exit 1
           fi
-          display_version=$(< packaging/e87n-display/VERSION)
-          if ! [[ "$display_version" =~ ^[0-9][A-Za-z0-9.+~-]*$ ]]; then
-            printf 'Invalid display package version: %s\n' "$display_version" >&2
-            exit 1
-          fi
-          # Debian '+' and '~' are not accepted by the release tag allowlist.
-          safe_version=${display_version//+/.plus.}
-          safe_version=${safe_version//\~/.tilde.}
-          if (( ${#safe_version} > 48 )) || ! [[ "$safe_version" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
-            printf 'Display package version cannot be represented safely in a release tag.\n' >&2
-            exit 1
-          fi
-          release_tag="e87n-display-${safe_version}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          display_artifact="e87n-display-${safe_version}-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          release_tag=$(python3 scripts/release_identity.py tag --kind display)
+          display_artifact=$(python3 scripts/release_identity.py artifact --kind display \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT")
           python3 scripts/ci-publish-release.py preflight --kind display \
             --repository "$GITHUB_REPOSITORY" --source-commit "$GITHUB_SHA" --tag "$release_tag"
           printf 'release_tag=%s\n' "$release_tag" >> "$GITHUB_OUTPUT"

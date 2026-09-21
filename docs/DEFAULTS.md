@@ -1,6 +1,6 @@
 # 最小系统默认配置
 
-本配置仅用于本仓库新构建的 Debian 13 Trixie 显示/风扇最小镜像，不修改设备现有 OpenWrt。版本唯一来源为 [e87n-build.json](../userpatches/config/e87n-build.json)：当前审查目标为 Debian 13.7、Linux 6.18.52 LTS，包内核 release 为 `6.18.52-current-edgepi-e87n`。历史同名镜像不会自动更新。
+本配置仅用于本仓库新构建的 Debian 13 Trixie 显示/风扇最小镜像，不修改设备现有 OpenWrt。镜像构建输入和固件发布版本来自 [e87n-build.json](../userpatches/config/e87n-build.json)：当前 `firmware_version` 为 `2026.09.1`，审查目标为 Debian 13.7、Linux 6.18.52 LTS，包内核 release 为 `6.18.52-current-edgepi-e87n`。独立显示包版本来自 `packaging/e87n-display/VERSION`；历史同名镜像不会自动更新。
 
 | 项目 | 默认值 |
 | --- | --- |
@@ -31,7 +31,8 @@ apt install --no-install-recommends curl
 温度与风扇由内核管理，显示服务不写风扇控制节点。
 
 Firmware workflow 会从当前源码构建并预装一个同源 `e87n-display` 基线包，QEMU 使用该
-基线验证服务、依赖和包生命周期；Firmware Release 只发布 `*-uboot-firmware.tar`。Display
+基线验证服务、依赖和包生命周期；Image Release 只发布
+`edgepi-e87n-debian_<firmware_version>_arm64-uboot-firmware.tar`。Display
 workflow 独立构建和发布 `e87n-display_<version>_all.deb`，可在兼容固件上高频升级而无需
 重建固件。真实屏幕亮度、双网口协商速率、温度精度和风扇散热仍应在目标板上复核。
 

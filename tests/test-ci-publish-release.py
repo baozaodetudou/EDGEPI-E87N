@@ -21,7 +21,8 @@ SPEC = importlib.util.spec_from_file_location("publisher", SCRIPT)
 publisher = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(publisher)
 fixture_report = import_module("test-ci-simulation").fixture_report
-SOURCE, TAG, REPOSITORY = "a1" * 20, "e87n-v1.0", "owner/repo"
+SOURCE, TAG, REPOSITORY = "a1" * 20, publisher.release_tag("image"), "owner/repo"
+IMAGE, DEB = publisher.image_filename(), publisher.display_filename()
 SECRET = "ghp_fixture_never_log_this"
 
 
@@ -32,11 +33,11 @@ def response(code=200, data=None, *, raw=None, protocol="HTTP/2.0", newline="\n"
 
 
 class FakeGh:
-    def __init__(self, test):
-        self.test, self.calls, self.overrides = test, [], {}
+    def __init__(self, test, tag=TAG):
+        self.test, self.tag, self.calls, self.overrides = test, tag, [], {}
         self.created = self.published = self.tag_exists = False
         self.fail = None
-        self.release = {"id": 42, "tag_name": TAG, "draft": True, "prerelease": True,
+        self.release = {"id": 42, "tag_name": self.tag, "draft": True, "prerelease": True,
                         "target_commitish": SOURCE, "published_at": None}
         self.other_releases, self.assets = [], []
         self.after_upload = lambda assets: None
@@ -70,9 +71,9 @@ class FakeGh:
                 return override() if callable(override) else override
             if endpoint == f"commits/{SOURCE}":
                 return response(data={"sha": SOURCE})
-            if endpoint == f"git/ref/tags/{TAG}":
-                return response(data={"ref": f"refs/tags/{TAG}", "object": self.tag_object}) if self.tag_exists else response(404, {})
-            if endpoint == f"releases/tags/{TAG}":
+            if endpoint == f"git/ref/tags/{self.tag}":
+                return response(data={"ref": f"refs/tags/{self.tag}", "object": self.tag_object}) if self.tag_exists else response(404, {})
+            if endpoint == f"releases/tags/{self.tag}":
                 return response(data=self.release) if self.published else response(404, {})
             if endpoint.startswith("releases?per_page=100&page="):
                 page = int(endpoint.rsplit("=", 1)[1])
@@ -85,7 +86,7 @@ class FakeGh:
             self.test.fail("Unexpected API endpoint: " + endpoint)
         self.test.assertEqual(command[1], "release")
         action = command[2]
-        self.test.assertEqual(command[3], TAG)
+        self.test.assertEqual(command[3], self.tag)
         self.test.assertEqual(command[command.index("--repo") + 1], REPOSITORY)
         self.test.assertNotIn("--clobber", command)
         if action == "create":
@@ -123,7 +124,7 @@ class PublisherTests(unittest.TestCase):
         self.assets.mkdir()
         self.kind = "image"
         self.build_assets(self.kind)
-        self.fake = FakeGh(self)
+        self.fake = FakeGh(self, publisher.release_tag(self.kind))
         self.output, self.errors = io.StringIO(), io.StringIO()
         self.addCleanup(mock.patch.stopall)
         mock.patch.object(publisher.subprocess, "run", side_effect=lambda *args, **kwargs: self.fake(*args, **kwargs)).start()
@@ -132,7 +133,7 @@ class PublisherTests(unittest.TestCase):
     def metadata(self, kind):
         data = {"kind": kind, "build_step_outcome": "success", "source_commit": SOURCE,
                 "run_id": "123", "run_attempt": "1", "target": dict(publisher.TARGET),
-                "collection_errors": [],
+                "collection_errors": [], "display_version_source": publisher.display_version(),
                 "image_static_audit": "passed" if kind == "image" else "not applicable"}
         data.update({key: publisher.BUILD[key] for key in
                      ("armbian_commit", "kernel_commit", "kernel_source", "kernel_release")})
@@ -147,11 +148,11 @@ class PublisherTests(unittest.TestCase):
         self.kind = kind
         for name in ("build-evidence.tar.xz", "RELEASE-NOTES.md"):
             (self.assets / name).write_bytes(("fixture " + name).encode())
-        deb = self.assets / "e87n-display_1.2.3_all.deb"
+        deb = self.assets / DEB
         deb.write_bytes(b"display package")
         (self.assets / f"{kind}-build-metadata.json").write_text(json.dumps(self.metadata(kind)))
         if kind == "image":
-            firmware = self.assets / "e87n-trixie-uboot-firmware.tar"
+            firmware = self.assets / IMAGE
             firmware.write_bytes(b"firmware tar")
             (self.assets / "kernel-packages.tar.xz").write_bytes(b"kernel packages")
             (self.assets / "simulation-result.json").write_text(json.dumps(fixture_report(
@@ -165,12 +166,12 @@ class PublisherTests(unittest.TestCase):
 
     def reset_channel(self, kind):
         self.build_assets(kind)
-        self.fake = FakeGh(self)
+        self.fake = FakeGh(self, publisher.release_tag(kind))
         self.output, self.errors = io.StringIO(), io.StringIO()
 
     def run_cli(self, command="publish", kind=None, **values):
         options = {"kind": self.kind if kind is None else kind, "repository": REPOSITORY,
-                   "source-commit": SOURCE, "tag": TAG}
+                   "source-commit": SOURCE, "tag": publisher.release_tag(self.kind)}
         if command == "publish":
             options["assets"] = str(self.assets)
         options.update(values)
@@ -195,8 +196,7 @@ class PublisherTests(unittest.TestCase):
                 self.assertEqual(len(self.fake.calls), 5)
 
     def test_each_kind_publishes_exactly_one_public_payload(self):
-        expected = {"image": "e87n-trixie-uboot-firmware.tar",
-                    "display": "e87n-display_1.2.3_all.deb"}
+        expected = {"image": IMAGE, "display": DEB}
         for kind, payload in expected.items():
             with self.subTest(kind=kind):
                 self.reset_channel(kind)
@@ -206,14 +206,13 @@ class PublisherTests(unittest.TestCase):
                 upload = next(call for call in self.fake.calls if call[1:3] == ["release", "upload"])
                 self.assertEqual(upload[upload.index("--") + 1:], [str(self.assets / payload)])
                 create = next(call for call in self.fake.calls if call[1:3] == ["release", "create"])
-                self.assertIn("firmware" if kind == "image" else "display",
-                              create[create.index("--title") + 1])
+                self.assertEqual(create[create.index("--title") + 1], publisher.release_title(kind))
 
     def test_image_staging_requires_tested_deb_but_never_uploads_it(self):
         files = publisher.validate_assets(self.assets, SOURCE, "image")
-        self.assertIn("e87n-display_1.2.3_all.deb", files)
+        self.assertIn(DEB, files)
         self.assertEqual(self.run_cli(), 0, self.errors.getvalue())
-        self.assertEqual({asset["name"] for asset in self.fake.assets}, {"e87n-trixie-uboot-firmware.tar"})
+        self.assertEqual({asset["name"] for asset in self.fake.assets}, {IMAGE})
 
     def test_display_staging_rejects_image_payload_and_evidence(self):
         self.reset_channel("display")
@@ -244,6 +243,7 @@ class PublisherTests(unittest.TestCase):
                      {**original, "build_step_outcome": "failure"},
                      {**original, "source_commit": "b" * 40},
                      {**original, "collection_errors": ["failed"]},
+                     {**original, "display_version_source": "9.9-1"},
                      {**original, "target": {**publisher.TARGET, "debian": "12"}},
                      {**original, "kernel_commit": "wrong"},
                      {**original, "image_static_audit": "not applicable" if kind == "image" else "passed"}]
@@ -286,20 +286,21 @@ class PublisherTests(unittest.TestCase):
     def test_invalid_inputs_and_kind_make_no_subprocess_calls(self):
         for key, values in {
             "kind": ["", "firmware", "image;id"],
-            "tag": ["", "-x", "x/y", "x..y", "x.lock", "x;touch pwned", "x\n"],
+            "tag": ["", "-x", "x/y", "x..y", "x.lock", "x;touch pwned", "x\n",
+                    publisher.release_tag("display"), "e87n-image-v2026.09.1-run-123"],
             "repository": ["owner", "owner/repo/other", "../repo", "owner/repo?x=1"],
             "source-commit": ["a" * 39, "g" * 40, SOURCE + ";id", "--help"],
         }.items():
             for value in values:
                 with self.subTest(key=key, value=value):
-                    self.fake = FakeGh(self)
+                    self.fake = FakeGh(self, publisher.release_tag(self.kind))
                     self.output, self.errors = io.StringIO(), io.StringIO()
                     self.assertNotEqual(self.run_cli("preflight", **{key: value}), 0)
                     self.assertEqual(self.fake.calls, [])
-        self.fake = FakeGh(self)
+        self.fake = FakeGh(self, publisher.release_tag(self.kind))
         self.output, self.errors = io.StringIO(), io.StringIO()
         self.assertNotEqual(self.run_cli(assets=None), 0)
-        self.fake = FakeGh(self)
+        self.fake = FakeGh(self, publisher.release_tag(self.kind))
         self.output, self.errors = io.StringIO(), io.StringIO()
         self.assertNotEqual(self.run_cli("preflight", assets=str(self.assets)), 0)
         self.assertEqual(self.fake.calls, [])
@@ -308,11 +309,11 @@ class PublisherTests(unittest.TestCase):
         self.fake.fail = "auth"
         self.assertNotEqual(self.run_cli(), 0)
         self.assertEqual(len(self.fake.calls), 1)
-        self.fake = FakeGh(self)
+        self.fake = FakeGh(self, publisher.release_tag(self.kind))
         self.fake.overrides[f"commits/{SOURCE}"] = response(503, {})
         self.assertNotEqual(self.run_cli(), 0)
         self.assertEqual(self.actions(), [])
-        self.fake = FakeGh(self)
+        self.fake = FakeGh(self, publisher.release_tag(self.kind))
         with mock.patch.object(publisher.subprocess, "run", side_effect=FileNotFoundError(SECRET)):
             self.assertNotEqual(self.run_cli(), 0)
 
@@ -331,7 +332,7 @@ class PublisherTests(unittest.TestCase):
     def test_partial_remote_failures_preserve_draft_and_never_clobber(self):
         for stage, actions in (("create", ["create"]), ("upload", ["create", "upload"]),
                                ("edit", ["create", "upload", "edit"])):
-            self.fake = FakeGh(self)
+            self.fake = FakeGh(self, publisher.release_tag(self.kind))
             self.fake.fail = stage
             with self.subTest(stage=stage):
                 self.assertNotEqual(self.run_cli(), 0)
@@ -346,7 +347,7 @@ class PublisherTests(unittest.TestCase):
                      lambda assets: assets.append(dict(assets[0])),
                      lambda assets: assets[0].update(name="unexpected")]
         for mutation in mutations:
-            self.fake = FakeGh(self)
+            self.fake = FakeGh(self, publisher.release_tag(self.kind))
             self.fake.after_upload = mutation
             with self.subTest(mutation=mutation):
                 self.assertNotEqual(self.run_cli(), 0)
@@ -358,29 +359,24 @@ class PublisherTests(unittest.TestCase):
                        lambda: self.fake.release.update(published_at=None),
                        lambda: self.fake.release.update(prerelease=False),
                        lambda: self.fake.tag_object.update(sha="b" * 40)):
-            self.fake = FakeGh(self)
+            self.fake = FakeGh(self, publisher.release_tag(self.kind))
             self.fake.after_edit = mutate
             with self.subTest(mutate=mutate):
                 self.assertNotEqual(self.run_cli(), 0)
                 self.assertEqual(self.actions(), ["create", "upload", "edit"])
 
-    def test_symlink_hardlink_and_display_tilde_version(self):
+    def test_symlink_and_hardlink_payloads_are_rejected(self):
         link = self.root / "alias"
         link.symlink_to(self.assets, target_is_directory=True)
         self.assertNotEqual(self.run_cli(assets=str(link)), 0)
         path = self.assets / "linked-uboot-firmware.tar"
-        path.symlink_to(self.assets / "e87n-trixie-uboot-firmware.tar")
+        path.symlink_to(self.assets / IMAGE)
         self.assertNotEqual(self.run_cli(), 0)
         path.unlink()
-        os.link(self.assets / "e87n-trixie-uboot-firmware.tar", path)
+        os.link(self.assets / IMAGE, path)
         self.assertNotEqual(self.run_cli(), 0)
         self.assertEqual(self.fake.calls, [])
         path.unlink()
-        self.reset_channel("display")
-        source = self.assets / "e87n-display_1.2.3_all.deb"
-        source.rename(self.assets / "e87n-display_1.2.3~rc1_all.deb")
-        self.manifest()
-        self.assertEqual(self.run_cli(), 0, self.errors.getvalue())
 
 
 if __name__ == "__main__":

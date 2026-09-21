@@ -33,7 +33,7 @@ jobs:
         with:
           persist-credentials: false
           clean: false
-      - name: Generate image release tag and check manual main-branch build
+      - name: Resolve image release identity and check manual main-branch build
         id: release_tag
         env:
           GH_TOKEN: ${{ github.token }}
@@ -42,12 +42,9 @@ jobs:
             printf 'Only manual main-branch builds may publish.\n' >&2
             exit 1
           fi
-          # Include the attempt so a GitHub Actions re-run never collides with
-          # a draft/tag left behind by an earlier attempt of the same run.
-          release=$(python3 scripts/build_config.py release)
-          kernel_version=$(python3 scripts/build_config.py kernel_version)
-          release_tag="e87n-${release}-${kernel_version}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          image_artifact="e87n-${release}-${kernel_version}-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          release_tag=$(python3 scripts/release_identity.py tag --kind image)
+          image_artifact=$(python3 scripts/release_identity.py artifact --kind image \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT")
           python3 scripts/ci-publish-release.py preflight --kind image \
             --repository "$GITHUB_REPOSITORY" --source-commit "$GITHUB_SHA" --tag "$release_tag"
           printf 'release_tag=%s\n' "$release_tag" >> "$GITHUB_OUTPUT"

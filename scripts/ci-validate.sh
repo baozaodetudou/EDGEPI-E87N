@@ -18,7 +18,7 @@ done
 actionlint .github/workflows/*.yml
 for script in scripts/ci-*.sh; do bash -n "$script"; done
 shellcheck scripts/ci-*.sh
-python3 -B - scripts/ci-*.py scripts/build_config.py tests/test-build-config.py scripts/build-factory-firmware.py \
+python3 -B - scripts/ci-*.py scripts/build_config.py scripts/release_identity.py tests/test-build-config.py scripts/build-factory-firmware.py \
 	scripts/verify-factory-firmware.py scripts/factory_firmware.py \
 	scripts/prepare-factory-rootfs.py board-support/factory-boot/factory_boot.py \
 	scripts/ramdiag/*.py testing/validate.py tests/test-ci-*.py tests/test-ramdiag.py \

@@ -16,6 +16,11 @@ candidate3 属于此前的 headless 配置，其验收不能替代当前显示�
 Release 与 Firmware Release 使用相同 tag、run、版本或 SHA-256。兼容的显示更新可以独立
 高频发布，无需重建固件。
 
+正式 Display tag 固定为 `e87n-display-v<version>`，不包含 Actions run ID。同一 Debian
+版本只能发布一次；源码或包内容变化时必须先递增 `packaging/e87n-display/VERSION`，否则
+preflight 会因 tag/Release 已存在而拒绝发布。run/attempt 仅用于 Actions 候选 artifact 和
+构建证据绑定。
+
 ### NV3007 framebuffer 兼容性
 
 Linux fbtft 的 `fb_nv3007` 会在 `fb_var_screeninfo.nonstd` 中返回

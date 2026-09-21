@@ -2,7 +2,7 @@
 
 默认网络以 [DEFAULTS.md](DEFAULTS.md) 为准：两个有线网口通过 networkd/netplan 请求 DHCP，没有固定管理 IP、DHCP 服务器、LAN/WAN 分工、网桥或 NAT 预设。`/etc/netplan/10-e87n-dhcp.yaml` 匹配 `e*` 接口，启用 IPv4/IPv6 DHCP 与 IPv6 RA；DNS 使用 systemd-resolved，时间同步使用 systemd-timesyncd。
 
-新 [U-Boot TAR 固件](UBOOT-FIRMWARE.md)保留原 eMMC p2 factory，由首启 helper 在 DHCP 前恢复 MAC。root adapter 24 项、加强后 factory 24 项与完整 Linux regressions 已通过，R4 本地打包/独立静态审计 EXIT 0；它重新打包历史 RAW，没有完整重编内核。**实际首启时序、两个物理端口与跨重启稳定性仍待验收**。V3 已废弃，新增两个编译检查目标的再验证及主机导出复制仍待结果，未来新源码工作流未 dispatch。
+新 [U-Boot TAR 固件](UBOOT-FIRMWARE.md)保留原 eMMC p2 factory，由首启 helper 在 DHCP 前恢复 MAC。root adapter 24 项、加强后 factory 24 项与完整 Linux regressions 已通过，R4 本地打包/独立静态审计 EXIT 0；它重新打包历史 RAW，没有完整重编内核。**实际首启时序、两个物理端口与跨重启稳定性仍待验收**。V3 已废弃；后续工作流和远端 Release 已在 2026 年 9 月 21 日出现，但不替代本节要求的物理网口与跨重启验收。
 
 原 OpenWrt 已只读确认 eth0/of_node 为 mac0、eth1/of_node 为 mac1。这为当前原系统的端口映射提供证据，不证明新内核枚举、alias 命名或 helper 恢复 MAC 已实测。
 

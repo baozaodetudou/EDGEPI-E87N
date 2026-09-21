@@ -19,6 +19,7 @@ from urllib.parse import quote
 
 from build_config import BUILD, TARGET
 from factory_firmware import FORMAT
+from release_identity import display_filename, image_filename, release_tag, release_title
 
 simulation = import_module("ci-simulation")
 
@@ -196,7 +197,7 @@ def validate(root, kind, args, version):
         require(any(line.strip() == "PASS" or line.startswith(("PASS:", "PASS ")) for line in audit.splitlines()),
                 "factory firmware audit log is missing PASS")
         tested = [n for n in files if n.startswith("packages/simulation/")]
-        require(tested == [f"packages/simulation/e87n-display_{version}_all.deb"],
+        require(tested == [f"packages/simulation/{display_filename(version=version)}"],
                 "expected one versioned simulation display package")
         require((root / tested[0]).stat().st_size > 0, "empty simulation display package")
         require("validation/qemu/result.json" in files, "missing simulation evidence")
@@ -205,7 +206,8 @@ def validate(root, kind, args, version):
             firmware_sha256=hashes[images[0]], display_sha256=hashes[tested[0]],
             source_commit=args.source_commit, run_id=args.run_id, run_attempt=args.run_attempt)
     else:
-        require(packages == [f"packages/display/e87n-display_{version}_all.deb"], "expected one standalone versioned display payload")
+        require(packages == [f"packages/display/{display_filename(version=version)}"],
+                "expected one standalone versioned display payload")
     hashes["SHA256SUMS"] = hashlib.sha256(manifest.encode("utf-8")).hexdigest()
     return root, hashes, images, packages
 
@@ -227,11 +229,13 @@ def copy_file(source, checksum, target):
 
 def firmware_notes(args, artifact, version):
     _, hashes, images, _ = artifact
-    image_name = Path(images[0]).name
-    tested_display = f"packages/simulation/e87n-display_{version}_all.deb"
+    image_name = image_filename()
+    tested_display = f"packages/simulation/{display_filename(version=version)}"
     base = "https://github.com/" + args.repository
     download_base = base + "/releases/download/" + quote(args.tag, safe="")
-    return f"""# E87N firmware {args.tag} — experimental release
+    return f"""# {release_title("image")} — experimental release
+
+Release tag: `{args.tag}`
 
 ## 下载 / Download
 
@@ -298,7 +302,9 @@ def display_notes(args, artifact, version):
     package_name = Path(packages[0]).name
     base = "https://github.com/" + args.repository
     download_base = base + "/releases/download/" + quote(args.tag, safe="")
-    return f"""# E87N display {version}
+    return f"""# {release_title("display", version=version)}
+
+Release tag: `{args.tag}`
 
 ## 下载 / Download
 
@@ -342,6 +348,8 @@ def main():
                            (args.repository, r"[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9][A-Za-z0-9._-]{0,99}")):
         require(re.fullmatch(pattern, value) is not None, "invalid release argument: " + repr(value))
     require(".." not in args.tag and not args.tag.endswith((".", ".lock")), "unsafe release tag")
+    require(args.tag == release_tag(args.kind),
+            "release tag does not match the current channel version")
     output = checked_path(args.output)
     require(not output.exists(), "output already exists; refusing to overwrite")
     artifact_root = checked_path(args.artifact)
@@ -352,8 +360,8 @@ def main():
     output.mkdir(parents=True, exist_ok=False)
     root, hashes, images, packages = artifact
     if args.kind == "image":
-        tested_display = f"packages/simulation/e87n-display_{version}_all.deb"
-        for name, target in ((images[0], Path(images[0]).name),
+        tested_display = f"packages/simulation/{display_filename(version=version)}"
+        for name, target in ((images[0], image_filename()),
                              (tested_display, Path(tested_display).name),
                              ("build-metadata.json", "image-build-metadata.json"),
                              ("validation/qemu/result.json", "simulation-result.json")):

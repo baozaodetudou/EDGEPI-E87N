@@ -5,6 +5,7 @@
   "release": "trixie",
   "debian_version": "13",
   "debian_point": "13.7",
+  "firmware_version": "2026.09.1",
   "kernel_version": "6.18.52",
   "kernel_series": "6.18",
   "kernel_source": "https://github.com/frank-w/BPI-Router-Linux.git",

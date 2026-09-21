@@ -25,7 +25,7 @@
 | R4（本地生成/审计完成） | `Armbian-trixie-6.18.51-e87n-r4-uboot-firmware.tar`，793057280 字节；独立最终审计 EXIT 0，root 735 MiB / 770703360 字节 |
 | 完整 Linux regressions | `ci-regressions.sh` 全部套件通过，`regressions-disk.log` EXIT 0；原传输与 tmpfs 故障日志保留 |
 | 静态 CI | 85 项再次通过；新增 runtime/root preparer 两个编译检查目标也已复验通过 |
-| 导出与发布 | 主机导出及 SHA-256 比对已完成；未来新源码完整构建工作流未 dispatch，远端 Release 未确认 |
+| 导出与发布 | R4 主机导出及 SHA-256 比对已完成；“远端未确认”是当时记录。截至 2026 年 9 月 21 日已有后续 run-id tag Release；新版本改用独立 Image/Display 固定版本 tag |
 | 实体设备 | Debian 13 实机已启动；屏幕、中文、双网口、温度、PWM 风扇和显示命令通过。完整 eMMC 备份、板上 RAM 测试、断电恢复和长时间散热压力测试仍未完成 |
 
 R4 SHA-256：`b3587a5377edf7c95f0d620eb038e67643287ac75629f20cc1b071e5dfa47545`。源 RAW SHA-256：`289f766db8e0a74993e36a4a776abf39a1b380d56333b8875e1586864b05f5c9`，对应历史 Actions 34737922588；本轮未完整重编 Armbian/内核，DTB 内存/bootargs 包含 902 等效修正。实际 Image 头 `text_offset=0`、有效 `image_size=0x1690000`（23658496 字节）、`flags=0xa`；FIT load/entry `0x40000000`（2 MiB 对齐），DTB 为 1 GiB，已纳入 R4 独立审计。约束见 [Linux ARM64 booting](https://docs.kernel.org/arch/arm64/booting.html)与[固件记录](UBOOT-FIRMWARE.md)。第 4 次组装/复制比较成功后，首次审计遇 `/tmp` tmpfs ENOSPC；改用磁盘 `RUNNER_TEMP` / `/var/tmp` 对同一 TAR 复验全部通过，再以不覆盖已有文件方式暴露 R4。失败记录保留。用户要求完全准备好再刷：板上 RAM 测试、备份、串口或已经实测可恢复的 U-Boot Web/网络控制通道及物理恢复路径仍未完成，优先评估网络 U-Boot。

@@ -17,6 +17,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "scripts"))
 from build_config import BUILD, TARGET
 from factory_firmware import FORMAT
+from release_identity import image_filename, release_tag
 
 fixture_report = import_module("test-ci-simulation").fixture_report
 
@@ -33,7 +34,8 @@ class ReleasePreparation(unittest.TestCase):
         self.output = self.root / "release"
         self.put("scripts/ci-prepare-release.py", (REPO / "scripts/ci-prepare-release.py").read_bytes())
         for prefix in ("", "image-job/", "display-job/"):
-            for name in ("scripts/build_config.py", "userpatches/config/e87n-build.json",
+            for name in ("scripts/build_config.py", "scripts/release_identity.py",
+                         "userpatches/config/e87n-build.json",
                          "scripts/ci-simulation.py", "scripts/factory_firmware.py", "testing/validate.py"):
                 self.put(prefix + name, (REPO / name).read_bytes())
         self.put("packaging/e87n-display/VERSION", VERSION)
@@ -102,9 +104,10 @@ class ReleasePreparation(unittest.TestCase):
         self.manifest(kind)
 
     def run_cli(self, kind="image", **overrides):
+        tag_kind = kind if kind in ("image", "display") else "image"
         args = {"kind": kind, "artifact": str(self.root / kind),
                 "output": str(self.output), "source-commit": COMMIT, "run-id": "34737922588",
-                "run-attempt": "1", "tag": "e87n-test-" + BUILD["kernel_version"],
+                "run-attempt": "1", "tag": release_tag(tag_kind),
                 "repository": "baozaodetudou/EDGEPI-E87N"}
         args.update(overrides)
         return subprocess.run([sys.executable, str(self.root / "scripts/ci-prepare-release.py"),
@@ -132,10 +135,10 @@ class ReleasePreparation(unittest.TestCase):
         result = self.run_cli("image")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual({p.name for p in self.output.iterdir()}, {
-            "candidate-uboot-firmware.tar", DEB, "image-build-metadata.json",
+            image_filename(), DEB, "image-build-metadata.json",
             "kernel-packages.tar.xz", "build-evidence.tar.xz", "SHA256SUMS",
             "RELEASE-NOTES.md", "simulation-result.json"})
-        self.assertEqual(payload, (self.output / "candidate-uboot-firmware.tar").read_bytes())
+        self.assertEqual(payload, (self.output / image_filename()).read_bytes())
         self.assertEqual((self.root / "image/packages/simulation" / DEB).read_bytes(),
                          (self.output / DEB).read_bytes())
         self.assert_manifest(7)
@@ -147,9 +150,9 @@ class ReleasePreparation(unittest.TestCase):
             self.assertTrue(all(name.startswith("image/") for name in bundle.getnames()))
             self.assertIn("image/validation/qemu/result.json", bundle.getnames())
         notes = (self.output / "RELEASE-NOTES.md").read_text()
-        base = "/releases/download/e87n-test-" + BUILD["kernel_version"] + "/"
+        base = "/releases/download/" + release_tag("image") + "/"
         self.assertEqual(notes.count(base), 1)
-        self.assertIn(base + "candidate-uboot-firmware.tar", notes)
+        self.assertIn(base + image_filename(), notes)
         self.assertIn(DEB, notes)
         self.assertIn("not a second Release download", notes)
         self.assertIn("1.2.0-1", notes)

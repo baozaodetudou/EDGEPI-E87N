@@ -30,7 +30,7 @@
 | 用户空间与固件 | `board-support/`、`packaging/e87n-display/`、`scripts/build-display-deb.sh`、`userpatches/customize-image.sh`、`firmware/`；PHY 固件安装前检查 SHA-256 与大小 |
 | 额外存储模块 | `E87N_EXTRA_STORAGE=no`；只有显式设为 `yes` 才请求额外 DM/RAID 等模块 |
 
-这些 pin 固定框架和内核源码，不构成逐字节可复现的整个系统快照。`customize-image.sh` 从 Debian 签名软件源更新软件包，安装 SSH/网络/时间与 locale 基础依赖，并构建、预装 `e87n-display`。Firmware workflow 固定 `SOURCE_DATE_EPOCH=0`，核对预装基线包与 QEMU 实际测试包的 SHA-256；该基线只属于固件验收，不作为 Firmware Release 的独立附件。Display workflow 另行构建、测试并发布可升级的 deb，版本和发布节奏独立。显示包依赖 `python3`、`python3-pil`、`fonts-dejavu-core` 和 `fonts-wqy-microhei`，独立版本与升级方法见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)。
+这些 pin 固定框架和内核源码，不构成逐字节可复现的整个系统快照。低频镜像发布版本由同一配置中的 `firmware_version` 管理，正式 tag 为 `e87n-image-v<firmware_version>`；任何公开镜像内容变化都必须递增该值。`customize-image.sh` 从 Debian 签名软件源更新软件包，安装 SSH/网络/时间与 locale 基础依赖，并构建、预装 `e87n-display`。Firmware workflow 固定 `SOURCE_DATE_EPOCH=0`，核对预装基线包与 QEMU 实际测试包的 SHA-256；该基线只属于固件验收，不作为 Firmware Release 的独立附件。Display workflow 另行构建、测试并发布可升级的 deb，版本和发布节奏独立。显示包依赖 `python3`、`python3-pil`、`fonts-dejavu-core` 和 `fonts-wqy-microhei`，独立版本与升级方法见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)。
 
 重建特定候选时，应保留该候选的仓库输入、框架兼容修补、最终内核配置、构建参数、主机/容器版本、包版本、日志和校验清单。候选记录中的冻结输入归档和 release 整理属于当次人工交付步骤，`build.sh` 不会自动生成同样的 release 目录或证明新镜像与旧镜像哈希相同。
 
@@ -211,6 +211,6 @@ sudo -n python3 scripts/verify-factory-firmware.py /path/to/candidate-uboot-firm
 
 实际 ARM64 Image 头的 `text_offset=0`、有效 `image_size=0x1690000`（23658496 字节）、`flags=0xa` 决定 R4 FIT 的 kernel load/entry 改为 **`0x40000000`**（2 MiB 对齐 RAM 基址），配合 1 GiB DTB。新审计显式核对对齐与 image_size 范围，拒绝非法 Image 头、FIT loadables、非空 FIT reservation map 和额外 init 参数，要求 root 使用 4 KiB ext4 块；不能沿用 V3 审计结论。依据见 [Linux ARM64 booting](https://docs.kernel.org/arch/arm64/booting.html)，旧地址/重定位差异见[固件契约](UBOOT-FIRMWARE.md)。
 
-本次 R4 最终验证已对同一 TAR 独立重跑全部检查并 EXIT 0，随后以不覆盖已有文件的方式暴露产物；主机导出及 SHA-256 比对已完成。源 RAW SHA-256 为 `289f766db8e0a74993e36a4a776abf39a1b380d56333b8875e1586864b05f5c9`，不是本轮完整新内核编译。完整 Linux regressions 的 `regressions-disk.log` EXIT 0，此前缺 docs/AppleDouble 与 tmpfs 满失败均已解决并保留日志；新增两个编译检查目标也已复验通过。未来新源码工作流未 dispatch，远端发布未确认。刷写前仍需完成板上 RAM 测试、独立备份，并确认串口或已经实测可恢复的 U-Boot Web/网络控制通道及物理恢复路径，当前均未实测。
+本次 R4 最终验证已对同一 TAR 独立重跑全部检查并 EXIT 0，随后以不覆盖已有文件的方式暴露产物；主机导出及 SHA-256 比对已完成。源 RAW SHA-256 为 `289f766db8e0a74993e36a4a776abf39a1b380d56333b8875e1586864b05f5c9`，不是本轮完整新内核编译。完整 Linux regressions 的 `regressions-disk.log` EXIT 0，此前缺 docs/AppleDouble 与 tmpfs 满失败均已解决并保留日志；新增两个编译检查目标也已复验通过。这里“远端发布未确认”只描述 R4 当时状态；截至 2026 年 9 月 21 日仓库已有后续远端 Release，当前发布规则以 [GITHUB-ACTIONS.md](GITHUB-ACTIONS.md) 为准。刷写前仍需完成板上 RAM 测试、独立备份，并确认串口或已经实测可恢复的 U-Boot Web/网络控制通道及物理恢复路径，当前均未实测。
 
 正常 TAR/FIT 的 initrd 会按原 `.img` root UUID 挂载磁盘根文件系统，不是独立 RAM 诊断系统。刷写前诊断需另备仅驻留 RAM 或隔离的测试 rootfs，并确认不会挂载/扩容原 eMMC，详见[首启准备](first-boot.md)。满足用户“完全准备好再刷”的条件前不刷写，本文不提供设备写入步骤。

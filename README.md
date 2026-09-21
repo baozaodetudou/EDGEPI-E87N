@@ -31,12 +31,21 @@
 
 - **Firmware workflow / Release**：完成检查、镜像编译、U-Boot 固件转换与审计，并用
   固件构建时同源生成的基线 `e87n-display` 包执行 QEMU 验收；成功后只公开一个
-  `*-uboot-firmware.tar`。
+  `edgepi-e87n-debian_<firmware_version>_arm64-uboot-firmware.tar`。
 - **Display workflow / Release**：独立构建并验证显示包的安装、升级和卸载生命周期；成功后
   只公开一个 `e87n-display_<version>_all.deb`。
 
 固件仍预装并验证构建时的 display 基线版本，但后续 display 可以按自己的版本和节奏高频
 发布，无需重建或重新刷写固件。两个通道不要求使用相同 tag、版本号、run 或发布日期。
+
+| 通道 | 版本来源 | Tag | 唯一项目附件 |
+| --- | --- | --- | --- |
+| Image | `e87n-build.json` 的 `firmware_version` | `e87n-image-v<firmware_version>` | `edgepi-e87n-debian_<firmware_version>_arm64-uboot-firmware.tar` |
+| Display | `packaging/e87n-display/VERSION` | `e87n-display-v<display_version>` | `e87n-display_<display_version>_all.deb` |
+
+正式 tag 不再包含 Actions run ID。同一版本只能发布一次；镜像内容变化必须递增
+`firmware_version`，显示包内容变化必须递增 Debian 包版本。历史 run-id tag 和早期双附件
+Release 保留用于追溯，不应作为当前命名模板。
 
 - [Firmware workflow](https://github.com/baozaodetudou/EDGEPI-E87N/actions/workflows/build-e87n.yml)
 - [Display workflow](https://github.com/baozaodetudou/EDGEPI-E87N/actions/workflows/build-display.yml)
@@ -47,7 +56,7 @@
 选择与任务对应的 Release：
 
 1. 新装或升级整个系统时，进入 **Firmware Release**，只下载
-   `*-uboot-firmware.tar`。
+   `edgepi-e87n-debian_<firmware_version>_arm64-uboot-firmware.tar`。
 2. 已运行 Debian、只升级屏幕程序时，进入 **Display Release**，只下载
    `e87n-display_<version>_all.deb`。
 
@@ -118,8 +127,10 @@ systemctl restart e87n-display.service
 
 ## 从源码构建
 
-版本唯一来源是 [`userpatches/config/e87n-build.json`](userpatches/config/e87n-build.json)，
-当前目标为 Debian 13 / Linux 6.18.52。构建入口：
+镜像构建输入和低频固件版本来自
+[`userpatches/config/e87n-build.json`](userpatches/config/e87n-build.json)，当前
+`firmware_version` 为 `2026.09.1`，目标为 Debian 13 / Linux 6.18.52。独立显示包版本来自
+[`packaging/e87n-display/VERSION`](packaging/e87n-display/VERSION)。构建入口：
 
 ```sh
 python3 scripts/build_config.py
