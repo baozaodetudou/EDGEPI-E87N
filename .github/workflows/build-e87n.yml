@@ -1,4 +1,6 @@
-name: E87N experimental release
+name: E87N Debian 13 手动构建与发布
+
+run-name: "E87N release · 手动构建 #${{ github.run_number }}"
 
 on:
   workflow_dispatch:

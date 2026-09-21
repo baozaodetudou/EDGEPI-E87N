@@ -30,8 +30,9 @@ apt install --no-install-recommends curl
 仓库保留的 headless 文件及审计选项用于旧配置，不是当前默认。
 温度与风扇由内核管理，显示服务不写风扇控制节点。
 
-candidate3 的软件验收属于旧 headless 配置。当前预装显示的新配置需要独立构建与
-同产物验收；启用驱动或服务不等于屏幕、背光、温度精度和风扇散热已在实机验证。
+GitHub Actions 会对当前 main 重新构建预装显示配置，并把同一版本的 `e87n-display` 作为
+独立附件发布。QEMU 能验证服务、依赖和包生命周期；真实屏幕亮度、双网口协商速率、温度
+精度和风扇散热仍应在目标板上复核。
 
 不预装桌面、Web 管理后台、Docker、LuCI 或额外 RAID/LVM 管理套件；没有 DHCP 服务器、NAT、LAN/WAN 角色划分。根据用途再安装软件，避免镜像承担未使用的后台服务。内核仍保留正常 Linux 底层和板级驱动；额外存储模块为[可选构建项](OPTIONAL-STORAGE.md)。
 

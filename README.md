@@ -1,94 +1,135 @@
-# EdgePi E87N Armbian / Debian
+# EdgePi E87N · Debian 13 / Armbian
 
-为 EdgePi E87N（MediaTek MT7987A、1 GiB RAM、eMMC）制作的非官方最小 Debian/Armbian 系统。
-当前重构目标为 **Debian 13.7 Trixie + Linux 6.18.52 LTS**，采用持续维护的
-[Frank-W MT7987 内核](https://github.com/frank-w/BPI-Router-Linux/tree/6.18-main)，
-通过 Armbian 框架构建，保留 E87N 自身的设备树和原厂 U-Boot 分区契约。
+面向 EdgePi E87N 的最小化 ARM64 Debian 系统工程。项目以 Debian 13 Trixie 为用户空间，
+以 Linux 6.18 LTS 为内核基础，通过 Armbian 构建框架生成系统，并使用原厂 U-Boot 的
+`firmware` 接口交付可刷写固件。
 
-2026-09-20 的 candidate3（旧 headless 配置）已完成完整编译、最终 U-Boot TAR 审计和同产物 Docker/QEMU 验收。
-该候选为 Debian 13.7 / Linux 6.18.52；QEMU 已验证 systemd、SSH、DHCP、DNS、APT、重启、持久化和独立显示包生命周期。
-当前源码已改为预装显示包并启用 LCD/背光；新配置须重新构建、审计并执行同产物模拟验收，不能沿用 candidate3 的通过结论。
-MT7987 实机启动、双网口、eMMC、USB/NVMe、温控、风扇、屏幕和真实 U-Boot 交接仍需上板验收。
-详细结果见[最终验收记录](docs/FINAL-VALIDATION-20260920.md)、[路线复核](docs/PORTING-REVIEW-20260920.md)与[验收标准](docs/REFACTOR-ACCEPTANCE.md)。
+> 这是社区维护的 E87N 适配项目，不是官方 Armbian 板卡支持。刷写前请确认设备仍可进入
+> 原厂 U-Boot Web 恢复页面，并先核对发布附件的 SHA-256。
 
-## 系统配置
+## 你会得到什么
 
-| 项目 | 默认值 |
+| 内容 | 默认行为 |
 | --- | --- |
-| 用户空间 | Debian 13 ARM64，systemd 管理服务 |
-| 登录 | `root`，公开初始密码 `doumao`，SSH 22，允许 root 密码登录 |
-| 网络 | 两个有线口请求 DHCP；不预设路由、NAT 或 LAN/WAN 角色 |
-| 软件管理 | Debian 签名源、`apt update`、`apt install` |
-| 时区与编码 | `Asia/Shanghai`、`zh_CN.UTF-8` |
-| 首次启动 | 自动生成独立 SSH host keys；没有强制创建用户向导 |
-| 默认体积 | 命令行系统，不预装桌面、LuCI、Docker 服务或 RAID/LVM 管理套件 |
-| 风扇 | 由内核温控；QEMU 只能验证系统集成，实机转速/温度仍待完成 |
-| 小屏 | 预装 `e87n-display`，启用 NV3007/背光节点、模块自动加载配置及显示服务；同一包独立发布用于升级，实机显示仍待完成 |
+| 系统 | Debian 13 Trixie ARM64，systemd 管理服务 |
+| 内核 | `6.18.52-current-edgepi-e87n`，配置与源码提交固定 |
+| 登录 | `root` / `doumao`，SSH 允许密码登录；首次登录后立即修改密码 |
+| 网络 | 双有线网口默认 DHCP，不预设 WAN/LAN、NAT 或固定 IP |
+| 软件 | 可正常执行 `apt update`、`apt install`，保持命令行最小体积 |
+| 本地化 | 时区 `Asia/Shanghai`，locale `zh_CN.UTF-8` |
+| 风扇 | Linux 内核 `pwm-fan` / thermal governor 控制，用户空间只读取状态 |
+| 小屏 | NV3007 framebuffer、背光和 `e87n-display.service`；显示包可独立升级 |
 
-镜像使用独立的 `linux-image-current-edgepi-e87n` 和 `linux-dtb-current-edgepi-e87n`
-包名，避免通用 Filogic 软件包替换本板内核。内核/DTB 保持锁定；板级升级要求成套
-重建并验证 FIT、rootfs、模块和固件，不能仅更新 `/boot` 就认为 p4 启动镜像同步。
+默认镜像不安装桌面、LuCI、Docker、DHCP 服务、NAT、RAID/LVM 管理套件或其他不必要的
+后台组件。它是一个可通过 SSH 管理的基础 Debian 系统，不是 OpenWrt 发行版。
 
-## 构建与版本来源
+## 快速开始
 
-唯一版本清单位于 [e87n-build.json](userpatches/config/e87n-build.json)，包含发行版、
-内核版本、完整内核提交、Armbian 提交和包名。构建采用固定提交，不随远端分支自动变化。
-Debian 软件包从签名源获取更新；这不等于全部软件包的逐字节快照重现。
+### 获取产物
+
+维护者在 GitHub Actions 中手动点击一次 **Run workflow**，流程会自动完成检查、编译、
+镜像审计、U-Boot 固件转换、同产物 QEMU 验收，并发布一个新的 GitHub Pre-release。
+不需要填写版本号、tag 或其他参数。
+
+- [Actions 手动构建入口](https://github.com/baozaodetudou/EDGEPI-E87N/actions/workflows/build-e87n.yml)
+- [Releases 下载入口](https://github.com/baozaodetudou/EDGEPI-E87N/releases)
+- [完整 Actions 说明](docs/GITHUB-ACTIONS.md)
+- [下载、校验与刷写边界](docs/DOWNLOADS.md)
+
+每个成功 Release 默认只有两个用户需要下载的附件：
+
+1. `*-uboot-firmware.tar`：原厂 U-Boot Web 页面使用的 Debian 系统固件。
+2. `e87n-display_<版本>_all.deb`：可在已经启动的 Debian 上独立安装/升级的屏幕控制包。
+
+源码压缩包、GPT `.img`、`.img.xz`、Actions artifact 和内核调试包不是同一种交付物，
+请按[下载说明](docs/DOWNLOADS.md)区分。
+
+### 刷入系统
+
+固件面向 E87N 原厂 U-Boot Web 恢复页的 `firmware` / plain firmware 入口。刷写前必须：
+
+- 确认设备可以稳定进入 U-Boot Web 页面；
+- 下载后执行 `sha256sum --check SHA256SUMS` 或按 Release 正文核对摘要；
+- 保持设备有明确的断电和恢复路径；
+- 不要把固件 TAR 上传到 LuCI、OpenWrt `sysupgrade`、SIMG、GPT 或 FIP 输入框。
+
+详细流程见 [U-Boot 固件契约](docs/UBOOT-FIRMWARE.md) 和 [首次启动](docs/first-boot.md)。
+
+### 首次登录
+
+从路由器 DHCP 租约中找到设备地址，然后执行：
+
+```sh
+ssh root@<设备IP>
+passwd
+systemctl status ssh --no-pager
+apt update
+```
+
+常用 E87N 检查命令：
+
+```sh
+e87nctl status
+e87nctl doctor
+e87nctl fan status
+e87nctl display config
+systemctl status e87n-display.service --no-pager
+journalctl -u e87n-display.service -b --no-pager
+```
+
+## 屏幕与双网口界面
+
+当前小屏的硬件链路已经按原始 E87N OpenWrt 项目适配：NV3007、428×142、RGB565、270°
+旋转、PWM 背光和独立 Debian 服务。`e87n-display` 提供 overview、thermal、network、
+storage 四个页面；显示程序不会接管风扇，只读取内核暴露的状态。
+
+下一版界面按双网口设备重新设计：两个网口将分别显示 link、协商速率和 IP，右侧显示
+CPU、内存、温度和风扇，布局以小屏可读性为第一优先级。设计规范和当前实现边界见
+[屏幕设计与功能说明](docs/SCREEN-DESIGN.md)。
+
+## 从源码构建
+
+版本唯一来源是 [`userpatches/config/e87n-build.json`](userpatches/config/e87n-build.json)，
+当前目标为 Debian 13 / Linux 6.18.52。构建入口：
 
 ```sh
 python3 scripts/build_config.py
-./build.sh build
+./build.sh
 ```
 
-上述入口生成 Armbian 中间镜像。完整交付还须经过镜像审计、厂商布局转换、最终 TAR
-审计和模拟启动测试，详见[容器验证](docs/CONTAINER-TESTING.md)及[验收标准](docs/REFACTOR-ACCEPTANCE.md)。
-构建主机需要 Linux 或 macOS Docker；不要在目标设备上执行构建脚本。
+Linux 主机需要 Armbian 所需的 sudo、loop、挂载和镜像工具。macOS 建议使用 Docker；
+完整依赖、缓存策略、产物位置和固件转换见 [构建指南](docs/BUILDING.md)。
 
-Docker 构建环境定义在 [containers/build/Dockerfile](containers/build/Dockerfile)。
-QEMU 在 Docker 内用本次生产内核、initrd 和最终 rootfs 副本启动 systemd，验证
-SSH、DHCP、DNS、APT、时区/编码、重启及包安装。容器本身共用宿主内核，单纯 chroot
-或 `uname` 不算目标内核启动测试。QEMU `virt` 不模拟 MT7987 外设，报告必须保留此限制。
+## 项目结构
 
-构建记录包含实际源码摘要、内核/config 哈希、包版本、DTB/initrd/模块/PHY 固件和 root
-UUID，使模拟测试和发布附件能够对应同一产物。
-
-## 手动构建与下载
-
-唯一 GitHub Actions 工作流为 [E87N experimental release](https://github.com/baozaodetudou/EDGEPI-E87N/actions/workflows/build-e87n.yml)。
-手动选择 `main` 并点击 Run workflow，不需要填写输入；push、tag push 和定时任务不触发。
-工作流生成包含版本、run ID、attempt 的唯一 tag，只有全部构建和模拟验收门禁通过才发布。
-
-[Releases](https://github.com/baozaodetudou/EDGEPI-E87N/releases) 的交付文件为：
-
-- `*-uboot-firmware.tar`：原厂 U-Boot plain firmware 封装；内含 FIT、Debian ext4 rootfs 和构建记录。
-- `e87n-display_<版本>_all.deb`：可独立安装、升级的小屏软件包。
-
-SHA-256 写入 Release 正文；内核配套包、元数据、校验清单及构建/验证证据保留在对应 Actions artifacts。
-
-源码 zip/tar.gz 不是系统镜像。完整 GPT `.img` 是中间产物，不能直接通过原厂 Web
-固件入口写入 eMMC。固件封装使用 `sysupgrade-` 目录约定，用户空间依然是 Debian。
-本地 candidate3 的旧配置软件验收记录不代表当前显示配置已发布 GitHub Release 或完成实机刷写；[下载记录](docs/DOWNLOADS.md)中的 6.18.51 文件均为历史产物。
-
-## 使用与维护
-
-新系统通过验收并安装后，从路由器 DHCP 租约获取 IP：
-
-```sh
-ssh root@"<设备IP>"
-passwd
-systemctl status ssh
-apt update
-apt install --no-install-recommends curl
+```text
+board-support/                 E87N 用户空间、systemd、网络和工厂启动适配
+packaging/e87n-display/        独立屏幕 Debian 包的元数据和维护脚本
+userpatches/                   Armbian 配置、内核配置和 E87N 内核补丁
+scripts/                       构建、审计、固件转换、发布和校验工具
+tests/                         单元、静态审计、包生命周期和 CI 契约测试
+docs/                          构建、刷写、网络、屏幕、验证和发布文档
+.github/workflows/             唯一的手动构建与 Release 工作流
 ```
 
-新镜像预装 `e87nctl`，可配置页面、亮度和刷新周期；按[屏幕包说明](docs/DISPLAY-PACKAGE.md)独立升级或重新安装。
-没有真实转速反馈时显示 `--`，不把 PWM 百分比伪装为 RPM。显示、背光和风扇的实机效果仍需单独验收。
+## 重要边界
 
-- [默认配置](docs/DEFAULTS.md)、[网络说明](docs/NETWORKING.md)、[显示包](docs/DISPLAY-PACKAGE.md)
-- [厂商固件契约](docs/UBOOT-FIRMWARE.md)、[工厂布局适配](board-support/factory-boot/README.md)
-- [构建指南](docs/BUILDING.md)、[旧 README](docs/README-LEGACY-20260920.md)
+- 成功构建、静态审计和 QEMU 验收不等于所有 MT7987 外设都完成上板验收。
+- QEMU 不模拟 E87N 的真实 SPI 屏幕、双网口 PHY、风扇转速和原厂 U-Boot 交接。
+- 默认密码是公开的，只适合可信内网首次登录；请立即执行 `passwd`。
+- 内核、DTB、initrd、模块和 FIT 必须成套构建，不能只替换 `/boot`。
+- 不要使用未经 Release 校验、来源不明或历史记录中的旧 `.img.xz` 刷写设备。
+
+## 文档导航
+
+- [默认配置](docs/DEFAULTS.md)
+- [GitHub Actions 手动构建与发布](docs/GITHUB-ACTIONS.md)
+- [下载、校验与刷写](docs/DOWNLOADS.md)
+- [构建指南](docs/BUILDING.md)
+- [首次启动](docs/first-boot.md)
+- [网络与双网口](docs/NETWORKING.md)
+- [屏幕设计与功能](docs/SCREEN-DESIGN.md)
+- [独立屏幕包](docs/DISPLAY-PACKAGE.md)
+- [U-Boot 固件格式](docs/UBOOT-FIRMWARE.md)
+- [测试与验收](docs/TESTING.md)
 - [来源与许可](NOTICE.md)
-
-基础系统使用 Debian、systemd 和 Armbian 构建组件；OpenWrt E87N 源码提供板级硬件参考。
-本项目没有官方 Armbian 板卡支持认证。新增代码遵循 GPL-2.0，第三方代码保留原许可；
-MediaTek PHY 微码使用独立许可，不统一改为 GPL。
