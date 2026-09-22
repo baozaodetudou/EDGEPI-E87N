@@ -46,7 +46,9 @@ automatic-rotation page. An unavailable fixed page temporarily falls back to
 overview and returns to the configured page when telemetry recovers. The current
 device has no usable storage-temperature telemetry, so storage is configurable
 but skipped at runtime.
-The traffic page shows cumulative RX/TX totals, not an instantaneous rate. The
+The traffic page shows cumulative RX/TX totals and measured receive/transmit
+rates calculated from consecutive monotonic samples. The first sample after a
+start, counter reset or long pause is unknown instead of an invented zero. The
 fan page shows user-facing mode, cooling level and PWM percentage; internal
 control strings and unsupported RPM values are not displayed.
 

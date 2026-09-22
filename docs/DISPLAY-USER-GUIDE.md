@@ -198,7 +198,7 @@ e87nctl display on
 | `thermal` | 当前可读取的 CPU/PHY 温度和风扇状态 |
 | `fan` | 内核风扇模式、cooling level 和 PWM 百分比；不显示虚假的 RPM 或内部控制字符串 |
 | `network` | 有效网口的链路、地址和 RX/TX 累计计数 |
-| `traffic` | 所有可见网口的 RX/TX 累计总量、主链路和本地地址；不显示瞬时速率 |
+| `traffic` | 所有可见网口的 RX/TX 累计总量、按相邻采样计算的实时速率、主链路和本地地址 |
 | `storage` | 可读取的 NVMe 温度 |
 
 ## 无数据时为什么会自动隐藏

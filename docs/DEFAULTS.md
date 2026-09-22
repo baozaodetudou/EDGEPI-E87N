@@ -1,6 +1,6 @@
 # 最小系统默认配置
 
-本配置仅用于本仓库新构建的 Debian 13 Trixie 显示/风扇最小镜像，不修改设备现有 OpenWrt。镜像构建输入和固件发布版本来自 [e87n-build.json](../userpatches/config/e87n-build.json)：当前 `firmware_version` 为 `2026.09.1`，审查目标为 Debian 13.7、Linux 6.18.52 LTS，包内核 release 为 `6.18.52-current-edgepi-e87n`。独立显示包版本来自 `packaging/e87n-display/VERSION`，当前为 `1.3.2-1`；历史同名镜像不会自动更新。
+本配置仅用于本仓库新构建的 Debian 13 Trixie 显示/风扇最小镜像，不修改设备现有 OpenWrt。镜像构建输入和固件发布版本来自 [e87n-build.json](../userpatches/config/e87n-build.json)：当前 `firmware_version` 为 `2026.09.1`，审查目标为 Debian 13.7、Linux 6.18.52 LTS，包内核 release 为 `6.18.52-current-edgepi-e87n`。独立显示包版本来自 `packaging/e87n-display/VERSION`，当前为 `1.3.3-1`；历史同名镜像不会自动更新。
 
 | 项目 | 默认值 |
 | --- | --- |

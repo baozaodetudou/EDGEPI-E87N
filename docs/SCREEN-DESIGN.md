@@ -1,6 +1,6 @@
 # E87N 小屏界面设计
 
-当前布局版本：`e87n-display 1.3.2-1 / 428×142 / RGB565 / 三配色 / 八页面 / 不显示 RPM`。
+当前布局版本：`e87n-display 1.3.3-1 / 428×142 / RGB565 / 三配色 / 八页面 / 不显示 RPM`。
 渲染代码位于 `board-support/e87n/display.py`，预览命令为：
 
 ```sh
@@ -12,7 +12,8 @@ python3 -m e87n.display --preview /tmp/e87n-overview.png --screen overview
 - 428×142 是硬约束；所有页面都以此尺寸渲染，再写入 NV3007 framebuffer。
 - 三套配色共享相同的数据语义和可用性规则；主题只改变颜色，实时遥测决定卡片、行和页面
   是否出现。
-- 只使用大块面板、短标签和高对比纯色，适配 RGB565、低亮度和 270° 旋转。
+- 使用开放式信息面、短标签、细分隔线和高对比纯色，减少卡片边框，适配 RGB565、低亮度和
+  270° 旋转。
 - 重要信息优先级：有效网口链路/IP → CPU/RAM/温度 → 风扇控制状态。
 - 缺失遥测对应的卡片或行直接隐藏并收紧布局，不保留空面板，也不把缺失值推断成 0 或
   `断开`。
@@ -26,9 +27,9 @@ python3 -m e87n.display --preview /tmp/e87n-overview.png --screen overview
 | `aurora` | 希望重点状态更醒目 | 近黑背景、洋红主色、青色辅助色 |
 | `light` | 光线较强的机房或桌面 | 浅灰背景、深色正文、高对比边框 |
 
-三种主题都保持 428×142 输出，并且都不显示虚构的网速、协商速率或 RPM。它们只改变
-颜色，不改变字段含义、网口资格或页面可用性判断；同一份实时遥测在三种主题下会得到
-相同的动态收缩布局。
+三种主题都保持 428×142 输出，并且都不显示虚构的协商速率或 RPM。`traffic` 页的实时速率
+来自连续两次累计计数与单调时间差，不是链路协商速率。主题只改变颜色，不改变字段含义、
+网口资格或页面可用性判断；同一份实时遥测在三种主题下会得到相同的动态收缩布局。
 
 ## Overview 布局
 
@@ -67,7 +68,7 @@ python3 -m e87n.display --preview /tmp/e87n-overview.png --screen overview
 | `thermal` | CPU/PHY 温度、thermal policy | `MODE`、`LEVEL`、`PWM` |
 | `fan` | 内核控制模式、cooling level、PWM、policy | 完整显示；无 RPM |
 | `network` | 可见接口的 link、IPv4/全局 IPv6、累计 RX/TX 计数 | 不显示 |
-| `traffic` | 可见网口 RX/TX 累计总量、主链路和本地地址 | 不显示 |
+| `traffic` | 可见网口 RX/TX 累计总量、实时收发速率、主链路和本地地址 | 不显示 |
 | `storage` | 可用温度传感器和存储设备状态 | 不显示 |
 
 八个页面 `overview`、`cpu`、`memory`、`thermal`、`fan`、`network`、`traffic`、`storage`

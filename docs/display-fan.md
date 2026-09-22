@@ -2,9 +2,9 @@
 
 目标为 Debian 13 Trixie + Linux 6.18 LTS，当前审查版本为 Debian 13.7 / Linux 6.18.52，完整 release 为 `6.18.52-current-edgepi-e87n`；版本和源码 pin 以 [e87n-build.json](../userpatches/config/e87n-build.json) 为准。此实现参考原系统的硬件接口，但不安装 LuCI/UCI/procd、原 musl 显示 ELF 或原风扇守护程序。它是原生命令行控制与小屏程序，不会新开 HTTP 服务。
 
-## 当前配置与历史候选 — 2026-09-21
+## 当前配置与历史候选 — 2026-09-22
 
-当前最小镜像预装同源构建的 `e87n-display` 基线包，启用 NV3007 与 PWM 背光设备树节点，提供模块自动加载配置和下一次启动启用的显示服务。当前独立显示包版本为 `1.3.2-1`。Firmware workflow 用 QEMU 验证该预装基线；供升级和重新安装的 deb 由独立 Display Release 发布，不要求与 firmware 同版本。用户操作见[屏幕包更新与设置指南](DISPLAY-USER-GUIDE.md)，构建与维护细节见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)。构建不再安装旧 headless 黑名单。2026 年 9 月 21 日已在真实设备上验证 Debian 13、`fb_nv3007`、中文字体、断链网口隐藏、单口全宽、缺失页面跳过、固定页回退、背光命令和短时风扇测试，现场操作者已确认实体屏幕显示正常；完整结果见 [FINAL-VALIDATION-20260921.md](FINAL-VALIDATION-20260921.md)。
+当前最小镜像预装同源构建的 `e87n-display` 基线包，启用 NV3007 与 PWM 背光设备树节点，提供模块自动加载配置和下一次启动启用的显示服务。当前独立显示包版本为 `1.3.3-1`。Firmware workflow 用 QEMU 验证该预装基线；供升级和重新安装的 deb 由独立 Display Release 发布，不要求与 firmware 同版本。用户操作见[屏幕包更新与设置指南](DISPLAY-USER-GUIDE.md)，构建与维护细节见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)。构建不再安装旧 headless 黑名单。2026 年 9 月 22 日已在真实设备上验证开放式中文界面、Debian 版本顶栏、断链网口隐藏、单口全宽、缺失页面跳过及流量实时速率；板端硬件 60 项、显示 58 项测试通过。此前完整包升级证据见 [FINAL-VALIDATION-20260921.md](FINAL-VALIDATION-20260921.md)。
 
 [9 月 13 日历史屏幕/风扇候选](candidate-display-fan-20260913.md)保留其当次构建、静态检查、导出与哈希证据。9 月 12 日的 Trixie 与 Bookworm 镜像也属历史候选；这些文件均不能作为当前最小配置交付。
 
