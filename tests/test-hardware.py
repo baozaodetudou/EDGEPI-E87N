@@ -147,16 +147,18 @@ class HardwareTests(unittest.TestCase):
             "loadavg": [0.5, 1.25, 2.75], "mem_total_kib": 1011132,
             "mem_available_kib": 750000, "uptime_seconds": 123.75,
             "network": [{"name": "end0", "ipv4": None, "ipv6": [],
-                         "rx_bytes": 123456, "tx_bytes": 987654, "carrier": 1}],
+                         "rx_bytes": 123456, "tx_bytes": 987654, "carrier": 1,
+                         "rx_bytes_per_second": None, "tx_bytes_per_second": None}],
             "local_ipv4": [],
             "storage": [{"name": "nvme0", "temp_mc": 37000}],
+            "system": {"distribution": None, "version": None},
         })
 
     def test_empty_and_missing_sensors(self):
         result = self.hw.snapshot()
         self.assertEqual(set(result), {"cpu_usage_percent", "cpu_temp_mc", "phy_temp_mc", "fan", "cpu_frequency", "loadavg", "mem_total_kib",
                                        "local_ipv4",
-                                       "mem_available_kib", "uptime_seconds", "network", "storage"})
+                                       "mem_available_kib", "uptime_seconds", "network", "storage", "system"})
         self.assertEqual(result["loadavg"], [None, None, None])
         self.assertEqual(result["fan"], {"state": None, "max_state": None, "pwm": None, "pwm_percent": None,
                                          "pwm_enable": None, "rpm": None, "rpm_available": False,
@@ -342,6 +344,34 @@ Local:
         self.assertEqual(net["rx_bytes"], 77)
         self.assertIsNone(net["carrier"])
 
+    def test_network_rates_use_elapsed_time_and_reject_counter_resets(self):
+        self.populate_samples()
+        rx = "sys/devices/platform/ethernet/net/end0/statistics/rx_bytes"
+        tx = "sys/devices/platform/ethernet/net/end0/statistics/tx_bytes"
+        with mock.patch.object(hardware.time, "monotonic",
+                               side_effect=[100.0, 102.0, 104.0, 225.0]):
+            first = self.hw.snapshot()["network"][0]
+            self.assertIsNone(first["rx_bytes_per_second"])
+            self.assertIsNone(first["tx_bytes_per_second"])
+
+            self.put(rx, str(123456 + 4096))
+            self.put(tx, str(987654 + 2048))
+            second = self.hw.snapshot()["network"][0]
+            self.assertEqual(second["rx_bytes_per_second"], 2048.0)
+            self.assertEqual(second["tx_bytes_per_second"], 1024.0)
+
+            self.put(rx, "1")
+            self.put(tx, str(987654 + 4096))
+            reset = self.hw.snapshot()["network"][0]
+            self.assertIsNone(reset["rx_bytes_per_second"])
+            self.assertEqual(reset["tx_bytes_per_second"], 1024.0)
+
+            self.put(rx, "4097")
+            self.put(tx, str(987654 + 8192))
+            stale = self.hw.snapshot()["network"][0]
+            self.assertIsNone(stale["rx_bytes_per_second"])
+            self.assertIsNone(stale["tx_bytes_per_second"])
+
     def test_nvme_composite_only_and_controller_without_hwmon(self):
         self.populate_samples()
         self.put("sys/devices/pci0000:00/0000:00:00.0/nvme/nvme0/hwmon/hwmon7/temp1_label", "Sensor 2")
@@ -356,6 +386,16 @@ Local:
         self.assertEqual(len(self.hw.snapshot()["network"]), 32)
         self.assertEqual(self.hw.snapshot()["loadavg"], [None, None, None])
         self.assertLessEqual(len(self.hw._entries("sys/class/net", r".*", limit=1000)), hardware._MAX_ENTRIES)
+
+    def test_system_identity_uses_bounded_os_release(self):
+        self.put("usr/lib/os-release", 'ID=debian\nVERSION_ID="13.7"\nPRETTY_NAME="ignored"\n')
+        self.assertEqual(self.hw.snapshot()["system"], {
+            "distribution": "debian", "version": "13.7",
+        })
+        self.put("usr/lib/os-release", 'ID="bad value"\nVERSION_ID="13;rm"\n')
+        self.assertEqual(self.hw.snapshot()["system"], {
+            "distribution": None, "version": None,
+        })
 
     def test_sensor_symlinks_cannot_escape_selected_sysfs(self):
         self.populate_samples()

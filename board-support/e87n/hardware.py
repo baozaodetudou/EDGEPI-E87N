@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import shlex
 import socket
 import stat
 import struct
@@ -132,6 +133,8 @@ class _Hardware:
         self.owner_uid = _owner_uid
         self.euid = os.geteuid if _euid is None else _euid
         self._previous_cpu = None
+        self._previous_network = {}
+        self._previous_network_time = None
 
     def _trusted(self, info, *, directory=False):
         valid_type = stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode)
@@ -261,6 +264,38 @@ class _Hardware:
         idle = delta[3] + (delta[4] if len(delta) > 4 else 0)
         return (sum(delta) - idle) * 100 / sum(delta)
 
+    def _network_rates(self, network):
+        """Add per-interface byte rates from consecutive monotonic samples."""
+        now = time.monotonic()
+        previous = self._previous_network
+        previous_time = self._previous_network_time
+        current = {
+            item["name"]: (item.get("rx_bytes"), item.get("tx_bytes"))
+            for item in network
+        }
+        self._previous_network = current
+        self._previous_network_time = now
+
+        elapsed = now - previous_time if previous_time is not None else None
+        valid_interval = (type(elapsed) in (int, float)
+                          and math.isfinite(elapsed) and 0 < elapsed <= 120)
+        for item in network:
+            item["rx_bytes_per_second"] = None
+            item["tx_bytes_per_second"] = None
+            before = previous.get(item["name"])
+            if not valid_interval or before is None:
+                continue
+            for counter_index, (counter_key, rate_key) in enumerate((
+                    ("rx_bytes", "rx_bytes_per_second"),
+                    ("tx_bytes", "tx_bytes_per_second"))):
+                value = item.get(counter_key)
+                old_value = before[counter_index]
+                if (type(value) is int and type(old_value) is int
+                        and value >= old_value >= 0):
+                    rate = (value - old_value) / elapsed
+                    if math.isfinite(rate):
+                        item[rate_key] = rate
+
     def _ipv4_address(self, name):
         # SIOCGIFADDR reads the primary IPv4 address locally. No bind, connect,
         # packet, DNS lookup or subprocess. Fixture roots never query the host.
@@ -316,6 +351,26 @@ class _Hardware:
                             result.add(address)
             previous = line
         return [str(address) for address in sorted(result, key=lambda item: (item.is_link_local, int(item)))[:32]]
+
+    def _system_identity(self):
+        """Read the bounded distribution identity used by the display header."""
+        values = {}
+        for source in ("etc/os-release", "usr/lib/os-release"):
+            text = self._text(source)
+            if text is None:
+                continue
+            for line in text.splitlines():
+                key, separator, raw = line.partition("=")
+                if not separator or key not in ("ID", "VERSION_ID") or key in values:
+                    continue
+                try:
+                    fields = shlex.split(raw, comments=True)
+                except ValueError:
+                    continue
+                if len(fields) == 1 and re.fullmatch(r"[A-Za-z0-9._+-]{1,64}", fields[0]):
+                    values[key] = fields[0]
+            break
+        return {"distribution": values.get("ID"), "version": values.get("VERSION_ID")}
 
     def snapshot(self):
         cpu_usage = self._cpu_usage()
@@ -378,6 +433,7 @@ class _Hardware:
                             "rx_bytes": self._number(f"{path}/statistics/rx_bytes"),
                             "tx_bytes": self._number(f"{path}/statistics/tx_bytes"),
                             "carrier": self._number(f"{path}/carrier", 0, 1)})
+        self._network_rates(network)
         storage = []
         for name in self._entries("sys/class/nvme", r"nvme[0-9]+", limit=16):
             device = f"sys/class/nvme/{name}"
@@ -434,7 +490,8 @@ class _Hardware:
                 "mem_total_kib": memory.get("MemTotal"),
                 "mem_available_kib": memory.get("MemAvailable"),
                 "uptime_seconds": uptime, "network": network,
-                "local_ipv4": self._local_ipv4_addresses(), "storage": storage}
+                "local_ipv4": self._local_ipv4_addresses(), "storage": storage,
+                "system": self._system_identity()}
 
     def _load_config_at(self, directory):
         try:

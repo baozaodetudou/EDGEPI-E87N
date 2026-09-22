@@ -469,7 +469,7 @@ class RendererTests(unittest.TestCase):
     def test_overview_shows_assigned_ip_usage_ram_temperature_and_fan(self):
         snapshot = display.preview_snapshot()
         _, texts, _ = self.capture_render(snapshot, "overview")
-        for text in ("E87N  /  系统", "在线", "网口1", "192.0.2.87",
+        for text in ("E87N  /  系统", "Debian 13", "在线", "网口1", "192.0.2.87",
                      "网口2", "198.51.100.23",
                      "CPU", "24%", "内存", "38%", "温度", "58.8 C", "风扇",
                      "自动 75%"):
@@ -512,11 +512,11 @@ class RendererTests(unittest.TestCase):
         self.assertEqual(display._overview_address(data), ("end0", "2001:db8::87"))
         data["network"] = [{"name": "br-lan", "carrier": 1, "ipv6": ["fe80::87"]}]
         data["local_ipv4"] = ["192.0.2.87"]
-        self.assertEqual(display._overview_address(data), ("LOCAL IPv4", "192.0.2.87"))
+        self.assertEqual(display._overview_address(data), ("本机 IPv4", "192.0.2.87"))
         data["local_ipv4"] = []
-        self.assertEqual(display._overview_address(data), ("NO IP", "--"))
+        self.assertEqual(display._overview_address(data), ("无地址", "--"))
         data["network"][0]["carrier"] = 0
-        self.assertEqual(display._overview_address(data), ("NO IP", "--"))
+        self.assertEqual(display._overview_address(data), ("无地址", "--"))
 
     def test_overview_invalid_addresses_and_percentages_are_unknown(self):
         for value in (None, [], True, 1234, "", "0.0.0.0", "127.0.0.1", "224.0.0.1",
@@ -524,10 +524,10 @@ class RendererTests(unittest.TestCase):
             with self.subTest(value=value):
                 data = {"network": [{"name": "end0", "carrier": 1, "ipv4": value}],
                         "local_ipv4": [value]}
-                self.assertEqual(display._overview_address(data), ("NO IP", "--"))
+                self.assertEqual(display._overview_address(data), ("无地址", "--"))
         for value in ("::", "::1", "ff02::1", "fe80::1%end0", "192.0.2.87", "bad"):
             data = {"network": [{"name": "end0", "ipv6": [value]}]}
-            self.assertEqual(display._overview_address(data), ("NO IP", "--"))
+            self.assertEqual(display._overview_address(data), ("无地址", "--"))
         for value in (None, -1, 101, float("nan"), float("inf"), True, "50"):
             _, texts, _ = self.capture_render({"cpu_usage_percent": value}, "overview")
             self.assertNotIn("CPU", texts)
@@ -551,11 +551,23 @@ class RendererTests(unittest.TestCase):
 
     def test_network_shows_cumulative_totals_without_rates(self):
         _, texts, _ = self.capture_render(display.preview_snapshot(), "network")
-        for text in ("网络  /  网口", "网口1", "网口2", "RX 31.8 GiB",
-                     "TX 7.6 GiB", "RX 1.1 GiB", "TX 329.7 MiB", "在线"):
+        for text in ("网络  /  网口", "网口1", "网口2", "接收 31.8 GiB",
+                     "发送 7.6 GiB", "接收 1.1 GiB", "发送 329.7 MiB", "在线"):
             self.assertIn(text, texts)
         self.assertNotIn("断开", texts)
         self.assertFalse(any("/s" in text for text in texts))
+
+    def test_traffic_shows_aggregate_realtime_rates(self):
+        _, texts, _ = self.capture_render(display.preview_snapshot(), "traffic")
+        for text in ("接收累计", "发送累计", "实时", "1.5 MiB/s", "768.0 KiB/s"):
+            self.assertIn(text, texts)
+
+        partial = display.preview_snapshot()
+        partial["network"][1]["rx_bytes_per_second"] = None
+        _, texts, _ = self.capture_render(partial, "traffic")
+        self.assertNotIn("1.5 MiB/s", texts)
+        self.assertIn("--", texts)
+        self.assertIn("768.0 KiB/s", texts)
 
     def test_single_active_port_hides_idle_port_and_uses_full_width_card(self):
         snapshot = {"uptime_seconds": 60, "network": [
@@ -621,11 +633,11 @@ class RendererTests(unittest.TestCase):
              "rx_bytes": 1, "tx_bytes": 2},
         ]}
         _, overview, _ = self.capture_render(snapshot, "overview")
-        self.assertIn("LOCAL IPv4", overview)
+        self.assertIn("本机 IPv4", overview)
         self.assertIn("192.0.2.87", overview)
         self.assertNotIn("fe80::87", overview)
         _, network, _ = self.capture_render(snapshot, "network")
-        self.assertIn("LOCAL IPv4", network)
+        self.assertIn("本机 IPv4", network)
         self.assertIn("192.0.2.87", network)
         self.assertEqual(network.count("fe80::87"), 1)
 
@@ -645,7 +657,8 @@ class RendererTests(unittest.TestCase):
             "cpu": ("24%", "0.42", "0.31", "0.28", "1800 MHz", "ondemand", "cpufreq-dt"),
             "memory": ("38%", "已用 384.0 MiB", "可用 640.0 MiB", "1.0 GiB"),
             "fan": ("自动", "档位", "L2/3", "75%", "step_wise", "无测速"),
-            "traffic": ("32.9 GiB", "7.9 GiB", "end0", "192.0.2.87"),
+            "traffic": ("32.9 GiB", "7.9 GiB", "1.5 MiB/s", "768.0 KiB/s",
+                        "end0", "192.0.2.87"),
         }
         for screen, expected in expectations.items():
             with self.subTest(screen=screen):
