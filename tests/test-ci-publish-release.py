@@ -287,7 +287,8 @@ class PublisherTests(unittest.TestCase):
         for key, values in {
             "kind": ["", "firmware", "image;id"],
             "tag": ["", "-x", "x/y", "x..y", "x.lock", "x;touch pwned", "x\n",
-                    publisher.release_tag("display"), "e87n-image-v2026.09.1-run-123"],
+                    publisher.release_tag("display"),
+                    publisher.release_tag("image") + "-run-123"],
             "repository": ["owner", "owner/repo/other", "../repo", "owner/repo?x=1"],
             "source-commit": ["a" * 39, "g" * 40, SOURCE + ";id", "--help"],
         }.items():

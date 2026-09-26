@@ -137,7 +137,7 @@ e87nctl display config
 
 镜像构建输入和低频固件版本来自
 [`userpatches/config/e87n-build.json`](userpatches/config/e87n-build.json)，当前
-`firmware_version` 为 `2026.09.1`，目标为 Debian 13 / Linux 6.18.52。独立显示包版本来自
+`firmware_version` 为 `2026.09.2`，目标为 Debian 13 / Linux 6.18.52。独立显示包版本来自
 [`packaging/e87n-display/VERSION`](packaging/e87n-display/VERSION)，当前为 `1.3.3-1`。构建入口：
 
 ```sh
