@@ -46,7 +46,8 @@ jobs:
           image_artifact=$(python3 scripts/release_identity.py artifact --kind image \
             --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT")
           python3 scripts/ci-publish-release.py preflight --kind image \
-            --repository "$GITHUB_REPOSITORY" --source-commit "$GITHUB_SHA" --tag "$release_tag"
+            --repository "$GITHUB_REPOSITORY" --source-commit "$GITHUB_SHA" --tag "$release_tag" \
+            --replace-existing
           printf 'release_tag=%s\n' "$release_tag" >> "$GITHUB_OUTPUT"
           printf 'image_artifact=%s\n' "$image_artifact" >> "$GITHUB_OUTPUT"
       - name: Install validation tools
@@ -187,4 +188,5 @@ jobs:
         run: |
           python3 scripts/ci-publish-release.py publish --kind image \
             --repository "$GITHUB_REPOSITORY" --source-commit "$GITHUB_SHA" \
-            --tag "$RELEASE_TAG" --assets output/release-assets
+            --tag "$RELEASE_TAG" --assets output/release-assets --replace-existing \
+            --replacement-id "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"

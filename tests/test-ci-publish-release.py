@@ -38,7 +38,10 @@ class FakeGh:
         self.created = self.published = self.tag_exists = False
         self.fail = None
         self.release = {"id": 42, "tag_name": self.tag, "draft": True, "prerelease": True,
+                        "immutable": False,
                         "target_commitish": SOURCE, "published_at": None}
+        self.existing_release = None
+        self.extra_refs = {}
         self.other_releases, self.assets = [], []
         self.after_upload = lambda assets: None
         self.after_edit = lambda: None
@@ -54,7 +57,9 @@ class FakeGh:
         self.test.assertNotIn("GH_DEBUG", kwargs["env"])
         self.test.assertEqual(kwargs["stdin"], subprocess.DEVNULL)
         self.test.assertEqual(kwargs["stderr"], subprocess.DEVNULL)
-        self.test.assertEqual(kwargs["stdout"], subprocess.PIPE if command[1] == "api" else subprocess.DEVNULL)
+        method = command[command.index("--method") + 1] if command[1] == "api" else None
+        captured = command[1] == "api" and method == "GET"
+        self.test.assertEqual(kwargs["stdout"], subprocess.PIPE if captured else subprocess.DEVNULL)
         self.test.assertEqual(kwargs["timeout"], 900 if command[1:3] == ["release", "upload"] else 120)
         self.calls.append(command)
         if command[1] == "auth":
@@ -62,40 +67,82 @@ class FakeGh:
             return subprocess.CompletedProcess(command, int(self.fail == "auth"), SECRET, SECRET)
         self.test.assertEqual(self.calls[0][1:3], ["auth", "status"])
         if command[1] == "api":
-            self.test.assertEqual(command[command.index("--method") + 1], "GET")
             self.test.assertEqual(command[command.index("--hostname") + 1], "github.com")
-            self.test.assertIn("--include", command)
             endpoint = command[-1].removeprefix(f"repos/{REPOSITORY}/")
+            if method == "DELETE":
+                self.test.assertNotIn("--include", command)
+                if endpoint in ("releases/41", "releases/42"):
+                    if self.fail == "delete-release":
+                        return subprocess.CompletedProcess(command, 1, SECRET, SECRET)
+                    release_id = int(endpoint.rsplit("/", 1)[1])
+                    if release_id == 41:
+                        self.existing_release = None
+                    else:
+                        self.created = self.published = False
+                    self.other_releases = [release for release in self.other_releases
+                                           if release.get("id") != release_id]
+                    if release_id == 42:
+                        self.assets = []
+                elif endpoint.startswith("git/refs/tags/"):
+                    deleted_tag = endpoint.removeprefix("git/refs/tags/")
+                    if ((deleted_tag == self.tag and self.fail == "delete-tag") or
+                            (deleted_tag != self.tag and self.fail == "delete-temp-tag")):
+                        return subprocess.CompletedProcess(command, 1, SECRET, SECRET)
+                    if deleted_tag == self.tag:
+                        self.tag_exists = False
+                    self.extra_refs.pop(deleted_tag, None)
+                else:
+                    self.test.fail("Unexpected DELETE endpoint: " + endpoint)
+                return subprocess.CompletedProcess(command, 0, SECRET, SECRET)
+            self.test.assertEqual(method, "GET")
+            self.test.assertIn("--include", command)
             if endpoint in self.overrides:
                 override = self.overrides[endpoint]
                 return override() if callable(override) else override
             if endpoint == f"commits/{SOURCE}":
                 return response(data={"sha": SOURCE})
-            if endpoint == f"git/ref/tags/{self.tag}":
-                return response(data={"ref": f"refs/tags/{self.tag}", "object": self.tag_object}) if self.tag_exists else response(404, {})
-            if endpoint == f"releases/tags/{self.tag}":
-                return response(data=self.release) if self.published else response(404, {})
+            if endpoint.startswith("git/ref/tags/"):
+                requested_tag = endpoint.removeprefix("git/ref/tags/")
+                if requested_tag in self.extra_refs:
+                    return response(data={"ref": f"refs/tags/{requested_tag}",
+                                          "object": self.extra_refs[requested_tag]})
+                return (response(data={"ref": f"refs/tags/{requested_tag}", "object": self.tag_object})
+                        if requested_tag == self.tag and self.tag_exists else response(404, {}))
+            if endpoint.startswith("releases/tags/"):
+                requested_tag = endpoint.removeprefix("releases/tags/")
+                if (self.existing_release is not None and not self.existing_release["draft"] and
+                        self.existing_release["tag_name"] == requested_tag):
+                    return response(data=self.existing_release)
+                return (response(data=self.release) if self.published and
+                        self.release["tag_name"] == requested_tag else response(404, {}))
             if endpoint.startswith("releases?per_page=100&page="):
                 page = int(endpoint.rsplit("=", 1)[1])
-                releases = self.other_releases + ([self.release] if self.created else [])
+                releases = self.other_releases + ([self.existing_release]
+                           if self.existing_release is not None else []) + ([self.release] if self.created else [])
                 return response(data=releases[(page - 1) * 100:page * 100])
             if endpoint == "releases/42/assets?per_page=100":
                 return response(data=self.assets)
+            if endpoint == "releases/41":
+                return response(data=self.existing_release) if self.existing_release is not None else response(404, {})
             if endpoint == "releases/42":
-                return response(data=self.release)
+                return response(data=self.release) if self.created or self.published else response(404, {})
             self.test.fail("Unexpected API endpoint: " + endpoint)
         self.test.assertEqual(command[1], "release")
         action = command[2]
-        self.test.assertEqual(command[3], self.tag)
+        command_tag = command[3]
         self.test.assertEqual(command[command.index("--repo") + 1], REPOSITORY)
         self.test.assertNotIn("--clobber", command)
         if action == "create":
             self.created = True
             self.test.assertFalse(self.published)
+            self.release.update(id=42, tag_name=command_tag, draft=True, prerelease=True,
+                                immutable=False,
+                                target_commitish=SOURCE, published_at=None)
             self.test.assertEqual(command[command.index("--target") + 1], SOURCE)
             self.test.assertTrue({"--draft", "--prerelease", "--latest=false"} <= set(command))
         elif action == "upload":
             self.test.assertTrue(self.created and not self.published)
+            self.test.assertEqual(command_tag, self.release["tag_name"])
             paths = command[command.index("--") + 1:]
             self.assets = [{"name": Path(path).name, "size": Path(path).stat().st_size, "state": "uploaded",
                             "digest": "sha256:" + hashlib.sha256(Path(path).read_bytes()).hexdigest()}
@@ -105,10 +152,14 @@ class FakeGh:
                 self.assets = []
         elif action == "edit":
             self.test.assertTrue(self.created and not self.published)
+            self.test.assertEqual(command_tag, self.release["tag_name"])
             self.test.assertTrue({"--draft=false", "--prerelease", "--latest=false"} <= set(command))
             if self.fail != "edit":
-                self.published = self.tag_exists = True
-                self.release.update(draft=False, published_at="2026-09-21T00:00:00Z")
+                new_tag = command[command.index("--tag") + 1] if "--tag" in command else command_tag
+                self.published = True
+                self.tag_exists = new_tag == self.tag
+                self.release.update(tag_name=new_tag, draft=False, published_at="2026-09-21T00:00:00Z")
+                self.tag_object = {"type": "commit", "sha": SOURCE}
                 self.after_edit()
         else:
             self.test.fail("Unexpected write: " + action)
@@ -169,13 +220,18 @@ class PublisherTests(unittest.TestCase):
         self.fake = FakeGh(self, publisher.release_tag(kind))
         self.output, self.errors = io.StringIO(), io.StringIO()
 
-    def run_cli(self, command="publish", kind=None, **values):
+    def run_cli(self, command="publish", kind=None, replace_existing=False,
+                replacement_id=None, **values):
         options = {"kind": self.kind if kind is None else kind, "repository": REPOSITORY,
                    "source-commit": SOURCE, "tag": publisher.release_tag(self.kind)}
         if command == "publish":
             options["assets"] = str(self.assets)
         options.update(values)
         args = [command] + [f"--{key}={value}" for key, value in options.items() if value is not None]
+        if replace_existing:
+            args.append("--replace-existing")
+        if replacement_id is not None:
+            args.append("--replacement-id=" + replacement_id)
         with contextlib.redirect_stdout(self.output), contextlib.redirect_stderr(self.errors):
             try:
                 result = publisher.main(args)
@@ -186,6 +242,10 @@ class PublisherTests(unittest.TestCase):
 
     def actions(self):
         return [call[2] for call in self.fake.calls if call[1] == "release"]
+
+    def deletions(self):
+        return [call[-1].removeprefix(f"repos/{REPOSITORY}/") for call in self.fake.calls
+                if call[1] == "api" and call[call.index("--method") + 1] == "DELETE"]
 
     def test_preflight_is_read_only_for_both_kinds(self):
         for kind in ("image", "display"):
@@ -318,19 +378,178 @@ class PublisherTests(unittest.TestCase):
         with mock.patch.object(publisher.subprocess, "run", side_effect=FileNotFoundError(SECRET)):
             self.assertNotEqual(self.run_cli(), 0)
 
-    def test_tag_release_and_draft_collisions_prevent_create(self):
+    def test_preflight_allows_existing_tag_release_and_draft_without_writes(self):
+        for state in ("tag", "published", "draft"):
+            self.fake = FakeGh(self)
+            if state == "tag":
+                self.fake.tag_exists = True
+            elif state == "published":
+                self.fake.published = self.fake.tag_exists = True
+            else:
+                self.fake.created = True
+            with self.subTest(state=state):
+                self.assertEqual(self.run_cli("preflight", replace_existing=True), 0,
+                                 self.errors.getvalue())
+                self.assertEqual(self.actions(), [])
+                self.assertEqual(self.deletions(), [])
+
+    def test_preflight_rejects_existing_identity_without_replace_flag(self):
+        for state in ("tag", "release"):
+            self.fake = FakeGh(self)
+            if state == "tag":
+                self.fake.tag_exists = True
+            else:
+                self.fake.published = True
+            with self.subTest(state=state):
+                self.assertNotEqual(self.run_cli("preflight"), 0)
+                self.assertEqual(self.actions(), [])
+
+    def test_replacement_options_are_image_publish_only(self):
+        self.reset_channel("display")
+        self.assertNotEqual(self.run_cli("preflight", replace_existing=True), 0)
+        self.assertEqual(self.fake.calls, [])
+        self.reset_channel("image")
+        cases = (
+            ("publish", {"replace_existing": True}),
+            ("publish", {"replacement_id": "123-1"}),
+            ("publish", {"replace_existing": True, "replacement_id": "bad/value"}),
+        )
+        for command, options in cases:
+            self.fake = FakeGh(self)
+            with self.subTest(command=command, options=options):
+                self.assertNotEqual(self.run_cli(command, **options), 0)
+                self.assertEqual(self.fake.calls, [])
+
+    def test_release_immutability_must_be_explicitly_false(self):
+        for state in ("missing", None, "false", True):
+            self.fake = FakeGh(self)
+            release = {**self.fake.release, "id": 41, "draft": False,
+                       "published_at": "2026-09-21T00:00:00Z"}
+            if state == "missing":
+                release.pop("immutable")
+            else:
+                release["immutable"] = state
+            self.fake.existing_release = release
+            self.fake.tag_exists = True
+            with self.subTest(state=state):
+                self.assertNotEqual(self.run_cli("preflight", replace_existing=True), 0)
+                self.assertEqual(self.deletions(), [])
+
+    def test_replacement_upload_failure_leaves_public_identity_untouched(self):
+        self.fake.existing_release = {**self.fake.release, "id": 41, "draft": False,
+                                      "published_at": "2026-09-21T00:00:00Z"}
         self.fake.tag_exists = True
-        self.assertNotEqual(self.run_cli(), 0)
-        self.assertEqual(self.actions(), [])
-        self.fake = FakeGh(self)
-        self.fake.published = True
-        self.assertNotEqual(self.run_cli(), 0)
-        self.fake = FakeGh(self)
-        self.fake.other_releases = [{"tag_name": f"other-{index}"} for index in range(100)] + [self.fake.release]
-        self.assertNotEqual(self.run_cli(), 0)
+        self.fake.fail = "upload"
+        self.assertNotEqual(self.run_cli(replace_existing=True, replacement_id="123-1"), 0)
+        self.assertEqual(self.actions(), ["create", "upload"])
+        self.assertEqual(self.deletions(), [])
+        self.assertIsNotNone(self.fake.existing_release)
+        self.assertTrue(self.fake.tag_exists)
+
+    def test_publish_verifies_replacement_draft_before_switching_identity(self):
+        expected = {
+            "tag": [f"git/refs/tags/{TAG}"],
+            "published": ["releases/41", f"git/refs/tags/{TAG}"],
+            "draft": ["releases/41"],
+        }
+        for state, deletions in expected.items():
+            self.fake = FakeGh(self)
+            if state == "tag":
+                self.fake.tag_exists = True
+                self.fake.tag_object = {"type": "commit", "sha": "b" * 40}
+            elif state == "published":
+                self.fake.existing_release = {**self.fake.release, "id": 41, "draft": False,
+                                              "target_commitish": "b" * 40,
+                                              "published_at": "2026-09-21T00:00:00Z"}
+                self.fake.tag_exists = True
+                self.fake.tag_object = {"type": "commit", "sha": "b" * 40}
+            else:
+                self.fake.existing_release = {**self.fake.release, "id": 41,
+                                              "target_commitish": "b" * 40}
+            with self.subTest(state=state):
+                self.assertEqual(self.run_cli(replace_existing=True, replacement_id="123-1"), 0,
+                                 self.errors.getvalue())
+                self.assertEqual(self.deletions(), deletions)
+                self.assertEqual(self.actions(), ["create", "upload", "edit"])
+                upload_index = next(index for index, call in enumerate(self.fake.calls)
+                                    if call[1:3] == ["release", "upload"])
+                edit_index = next(index for index, call in enumerate(self.fake.calls)
+                                  if call[1:3] == ["release", "edit"])
+                delete_indexes = [index for index, call in enumerate(self.fake.calls)
+                                  if call[1] == "api" and
+                                  call[call.index("--method") + 1] == "DELETE"]
+                self.assertTrue(all(upload_index < index < edit_index for index in delete_indexes))
+                self.assertTrue(self.fake.published and self.fake.tag_exists)
+                edit = next(call for call in self.fake.calls if call[1:3] == ["release", "edit"])
+                self.assertEqual(edit[edit.index("--tag") + 1], TAG)
+
+    def test_existing_identity_delete_failure_keeps_verified_replacement_draft(self):
+        for state, failure in (("release", "delete-release"), ("tag", "delete-tag")):
+            self.fake = FakeGh(self)
+            self.fake.fail = failure
+            if state == "release":
+                self.fake.existing_release = {**self.fake.release, "id": 41, "draft": False,
+                                              "published_at": "2026-09-21T00:00:00Z"}
+                self.fake.tag_exists = True
+            else:
+                self.fake.tag_exists = True
+            with self.subTest(state=state):
+                self.assertNotEqual(self.run_cli(replace_existing=True, replacement_id="123-1"), 0)
+                self.assertEqual(self.actions(), ["create", "upload"])
+                self.assertIn("without automatic rollback", self.errors.getvalue())
+
+    def test_replacement_edit_failure_exposes_loss_window_and_keeps_draft(self):
+        self.fake.existing_release = {**self.fake.release, "id": 41, "draft": False,
+                                      "published_at": "2026-09-21T00:00:00Z"}
+        self.fake.tag_exists = True
+        self.fake.fail = "edit"
+        self.assertNotEqual(self.run_cli(replace_existing=True, replacement_id="123-1"), 0)
+        self.assertEqual(self.actions(), ["create", "upload", "edit"])
+        self.assertEqual(self.deletions(), ["releases/41", f"git/refs/tags/{TAG}"])
+        self.assertIsNone(self.fake.existing_release)
+        self.assertFalse(self.fake.tag_exists)
+        self.assertTrue(self.fake.created)
+        self.assertFalse(self.fake.published)
+        self.assertEqual(self.fake.release["tag_name"], f"{TAG}-replacement-123-1")
+
+    def test_replacement_final_verification_failures_are_detected(self):
+        mutations = (
+            ("release-id", lambda: self.fake.release.update(id=43)),
+            ("asset-digest", lambda: self.fake.assets[0].update(digest="sha256:" + "0" * 64)),
+            ("tag-target", lambda: self.fake.tag_object.update(sha="b" * 40)),
+        )
+        for name, mutation in mutations:
+            self.fake = FakeGh(self)
+            self.fake.existing_release = {**self.fake.release, "id": 41, "draft": False,
+                                          "published_at": "2026-09-21T00:00:00Z"}
+            self.fake.tag_exists = True
+            self.fake.after_edit = mutation
+            self.output, self.errors = io.StringIO(), io.StringIO()
+            with self.subTest(name=name):
+                self.assertNotEqual(self.run_cli(replace_existing=True, replacement_id="123-1"), 0)
+                self.assertIsNone(self.fake.existing_release)
+                self.assertTrue(self.fake.published and self.fake.tag_exists)
+
+    def test_temporary_ref_cleanup_failure_preserves_published_release(self):
+        temporary = f"{TAG}-replacement-123-1"
+        self.fake.existing_release = {**self.fake.release, "id": 41, "draft": False,
+                                      "published_at": "2026-09-21T00:00:00Z"}
+        self.fake.tag_exists = True
+        self.fake.fail = "delete-temp-tag"
+        self.fake.after_edit = lambda: self.fake.extra_refs.update(
+            {temporary: {"type": "commit", "sha": SOURCE}})
+        self.assertNotEqual(self.run_cli(replace_existing=True, replacement_id="123-1"), 0)
+        self.assertTrue(self.fake.published and self.fake.tag_exists)
+        self.assertIn(temporary, self.fake.extra_refs)
+        self.assertEqual(self.fake.release["tag_name"], TAG)
+
+    def test_duplicate_release_listing_still_fails_closed(self):
+        self.fake.other_releases = [{"tag_name": f"other-{index}"} for index in range(100)] + [
+            self.fake.release, {**self.fake.release, "id": 43}]
+        self.assertNotEqual(self.run_cli("preflight"), 0)
         self.assertTrue(any(call[-1].endswith("page=2") for call in self.fake.calls))
 
-    def test_partial_remote_failures_preserve_draft_and_never_clobber(self):
+    def test_partial_remote_failures_retain_state_without_rollback(self):
         for stage, actions in (("create", ["create"]), ("upload", ["create", "upload"]),
                                ("edit", ["create", "upload", "edit"])):
             self.fake = FakeGh(self, publisher.release_tag(self.kind))
@@ -338,7 +557,7 @@ class PublisherTests(unittest.TestCase):
             with self.subTest(stage=stage):
                 self.assertNotEqual(self.run_cli(), 0)
                 self.assertEqual(self.actions(), actions)
-                self.assertIn("retained without cleanup", self.errors.getvalue())
+                self.assertIn("without automatic rollback", self.errors.getvalue())
 
     def test_remote_asset_integrity_is_verified_before_publish(self):
         mutations = [lambda assets: assets[0].update(digest="sha256:" + "0" * 64),

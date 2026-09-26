@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish verified CI assets through a draft; failures never trigger cleanup."""
+"""Publish verified CI assets through a draft; image releases may be replaced."""
 import argparse
 import hashlib
 from importlib import import_module
@@ -98,9 +98,49 @@ def preflight(args):
     gh("auth", "status", "--hostname", "github.com")
     commit = api(args.repository, f"commits/{args.source_commit}")
     require(isinstance(commit, dict) and commit.get("sha") == args.source_commit, "Source commit mismatch")
-    for endpoint in (f"git/ref/tags/{args.tag}", f"releases/tags/{args.tag}"):
-        require(api(args.repository, endpoint, absent=True) is None, "Tag or release already exists")
-    require(find_release(args) is None, "Release already exists (including drafts)")
+    ref, release = inspect_existing(args)
+    require(args.replace_existing or (ref is None and release is None),
+            "Tag or release already exists")
+
+
+def delete_api(repository, endpoint):
+    gh("api", "--hostname", "github.com", "--method", "DELETE",
+       "-H", "Accept: application/vnd.github+json",
+       "-H", "X-GitHub-Api-Version: 2022-11-28", f"repos/{repository}/{endpoint}")
+
+
+def inspect_existing(args):
+    ref = api(args.repository, f"git/ref/tags/{args.tag}", absent=True)
+    published = api(args.repository, f"releases/tags/{args.tag}", absent=True)
+    listed = find_release(args)
+    releases = [release for release in (published, listed) if release is not None]
+    release = None
+    if releases:
+        require(all(isinstance(release, dict) for release in releases),
+                "Existing release identity mismatch")
+        ids = {release.get("id") for release in releases}
+        require(len(ids) == 1 and all(type(value) is int and value > 0 for value in ids) and
+                all(release.get("tag_name") == args.tag for release in releases),
+                "Existing release identity mismatch")
+        release = releases[0]
+        require(release.get("immutable") is False,
+                "Existing release immutability state is unsafe")
+    if ref is not None:
+        require(isinstance(ref, dict) and ref.get("ref") == f"refs/tags/{args.tag}",
+                "Existing tag identity mismatch")
+    return ref, release
+
+
+def delete_identity(args, ref, release):
+    if release is not None:
+        release_id = release["id"]
+        delete_api(args.repository, f"releases/{release_id}")
+        require(api(args.repository, f"releases/{release_id}", absent=True) is None,
+                "Existing release deletion was not confirmed")
+    if ref is not None:
+        delete_api(args.repository, f"git/refs/tags/{args.tag}")
+        require(api(args.repository, f"git/ref/tags/{args.tag}", absent=True) is None,
+                "Existing tag deletion was not confirmed")
 
 
 def digest(path):
@@ -246,6 +286,61 @@ def check_tag(args, pending=False):
     raise ValueError("Annotated tag nesting limit exceeded")
 
 
+def create_verified_draft(args, files, downloads):
+    gh("release", "create", args.tag, "--repo", args.repository, "--target", args.source_commit,
+       "--title", release_title(args.kind), "--notes-file", files["RELEASE-NOTES.md"][0],
+       "--draft", "--prerelease", "--latest=false")
+    release_id = check_release(find_created_release(args), args, True)
+    check_remote_assets(args, release_id, {})
+    gh("release", "upload", args.tag, "--repo", args.repository, "--",
+       *(value[0] for value in downloads.values()))
+    check_release(api(args.repository, f"releases/{release_id}"), args, True, release_id)
+    check_remote_assets(args, release_id, downloads)
+    check_tag(args, pending=True)
+    return release_id
+
+
+def publish_draft(args, release_id, downloads):
+    gh("release", "edit", args.tag, "--repo", args.repository,
+       "--draft=false", "--prerelease", "--latest=false")
+    check_release(api(args.repository, f"releases/{release_id}"), args, False, release_id)
+    check_remote_assets(args, release_id, downloads)
+    check_tag(args)
+
+
+def replacement_args(args):
+    result = argparse.Namespace(**vars(args))
+    result.tag = f"{args.tag}-replacement-{args.replacement_id}"
+    require(safe(result.tag), "Invalid replacement release tag")
+    return result
+
+
+def publish_replacement(args, files, downloads):
+    replacement = replacement_args(args)
+    replacement_ref, replacement_release = inspect_existing(replacement)
+    require(replacement_ref is None and replacement_release is None,
+            "Replacement release identity already exists")
+    release_id = create_verified_draft(replacement, files, downloads)
+
+    # Re-read the public identity only after the replacement draft and its
+    # remote SHA-256 have been verified. A failed build or upload therefore
+    # leaves the current public release untouched.
+    current_ref, current_release = inspect_existing(args)
+    delete_identity(args, current_ref, current_release)
+    gh("release", "edit", replacement.tag, "--repo", args.repository,
+       "--tag", args.tag, "--target", args.source_commit,
+       "--title", release_title(args.kind), "--draft=false", "--prerelease", "--latest=false")
+    check_release(api(args.repository, f"releases/{release_id}"), args, False, release_id)
+    check_remote_assets(args, release_id, downloads)
+    check_tag(args)
+
+    # A draft normally has no ref until publication. Remove a stale temporary
+    # ref if GitHub created one while retagging the verified draft.
+    temporary_ref = api(args.repository, f"git/ref/tags/{replacement.tag}", absent=True)
+    if temporary_ref is not None:
+        delete_identity(replacement, temporary_ref, None)
+
+
 def publish(args, files):
     # Staging includes validation evidence, but each release channel exposes
     # exactly one end-user download.
@@ -254,21 +349,14 @@ def publish(args, files):
                  (args.kind == "display" and re.fullmatch(r"e87n-display_.+_all\.deb", name))}
     require(len(downloads) == 1, "Release must contain exactly one public payload")
     try:
-        gh("release", "create", args.tag, "--repo", args.repository, "--target", args.source_commit,
-           "--title", release_title(args.kind), "--notes-file", files["RELEASE-NOTES.md"][0],
-           "--draft", "--prerelease", "--latest=false")
-        release_id = check_release(find_created_release(args), args, True)
-        check_remote_assets(args, release_id, {})  # Never adopt or overwrite preexisting assets.
-        gh("release", "upload", args.tag, "--repo", args.repository, "--", *(v[0] for v in downloads.values()))
-        check_release(api(args.repository, f"releases/{release_id}"), args, True, release_id)
-        check_remote_assets(args, release_id, downloads)
-        check_tag(args, pending=True)
-        gh("release", "edit", args.tag, "--repo", args.repository, "--draft=false", "--prerelease", "--latest=false")
-        check_release(api(args.repository, f"releases/{release_id}"), args, False, release_id)
-        check_tag(args)
+        if args.replace_existing:
+            publish_replacement(args, files, downloads)
+        else:
+            release_id = create_verified_draft(args, files, downloads)
+            publish_draft(args, release_id, downloads)
     except (OSError, ValueError):
-        print("Release creation was attempted; remote release/tag/assets were retained without cleanup. "
-              "Inspect manually before retrying; publication may already have occurred.", file=sys.stderr)
+        print("Release publication was attempted; remote state was retained without automatic rollback. "
+              "Inspect the official and replacement tags before retrying.", file=sys.stderr)
         raise
 
 
@@ -279,6 +367,8 @@ def main(argv=None):
     for option in ("repository", "source-commit", "tag"):
         parser.add_argument("--" + option, required=True)
     parser.add_argument("--assets")
+    parser.add_argument("--replace-existing", action="store_true")
+    parser.add_argument("--replacement-id")
     args = parser.parse_args(argv)
     try:
         require(safe(args.tag), "Invalid release tag")
@@ -288,6 +378,11 @@ def main(argv=None):
         require(re.fullmatch(SHA, args.source_commit), "Invalid source commit")
         args.source_commit = args.source_commit.lower()
         require(bool(args.assets) == (args.command == "publish"), "--assets is required only for publish")
+        require(not args.replace_existing or args.kind == "image",
+                "Replacement is supported only for image releases")
+        require(bool(args.replacement_id) == (args.command == "publish" and args.replace_existing),
+                "--replacement-id is required only for replacement publish")
+        require(args.replacement_id is None or safe(args.replacement_id), "Invalid replacement id")
         files = validate_assets(args.assets, args.source_commit, args.kind) if args.command == "publish" else None
         preflight(args)
         if files is not None:

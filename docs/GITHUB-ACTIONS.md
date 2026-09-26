@@ -15,8 +15,8 @@ Request、tag push 和定时任务不会自动发布，也不会自动刷写设�
 
 ## 触发 Firmware 发布
 
-1. 确认 `userpatches/config/e87n-build.json` 中的 `firmware_version` 已为本次新版本；任何会改变
-   公开镜像内容的发布都必须先递增它。
+1. 确认 `userpatches/config/e87n-build.json` 中的 `firmware_version` 是希望公开的版本。保持同一
+   版本重跑会在全部构建和验收通过后替换同名 Image Release/tag；需要保留旧版时先递增版本。
 2. 打开 [E87N Debian 13 ARM64 固件构建与发布](https://github.com/baozaodetudou/EDGEPI-E87N/actions/workflows/build-e87n.yml)。
 3. 点击 **Run workflow**，分支保持 `main`，按工作流页面要求确认并启动。
 4. 等待固件检查、镜像构建、静态审计、QEMU 验收和 release 阶段全部成功。
@@ -83,9 +83,14 @@ Display 可以在兼容的已运行固件上高频升级。只有显示功能开
 | Display | `packaging/e87n-display/VERSION` | `e87n-display-v<display_version>` | `E87N Display \| <display_version>` |
 
 Actions `run_id` 和 `run_attempt` 只保留在候选 artifact、构建元数据和 Release 正文中，确保
-证据精确绑定本次运行，但不会进入正式 tag。同一版本已有 tag、已发布 Release 或残留 draft
-时，preflight 会直接失败；不要通过重跑生成第二个 tag。先检查远端状态，确认失败发布是否
-已经部分完成，再决定恢复或人工清理 draft。新内容应递增对应版本。
+证据精确绑定本次运行，但不会进入正式 tag。Image `preflight` 对同名 tag、已发布 Release 或
+残留 draft 只做只读识别；构建、审计和 release 输入校验全部通过后，发布器先用本次 run
+专属临时 tag 创建 draft、上传并核对远端 SHA-256，然后才删除旧 Image Release/tag，将已
+验证 draft 切换为正式 tag。同版本因此只保留一份当前公开镜像。切换中途失败时工作流停止
+且不自动回滚，应同时检查正式 tag 和 `-replacement-<run>-<attempt>` 临时 tag 后重跑。
+
+Display 不启用覆盖参数：同版本已有 tag、Release 或 draft 时 preflight 仍会失败，必须递增
+`packaging/e87n-display/VERSION`，或由维护者明确处理残留的失败 draft。
 
 ## Release 中的文件
 
@@ -120,6 +125,8 @@ workflow “运行成功”与 Release “已发布”仍是两个阶段。某�
 ## 权限与安全
 
 - 普通 job 只有 `contents: read`；每个通道只有自己的 `release` job 拥有 `contents: write`。
+- 同名 Image Release/tag 的删除只发生在最终 `release` job，且在 replacement draft 的附件
+  SHA-256 已远端复验后；构建、审计、验收或 replacement 上传失败不会删除当前公开镜像。
 - checkout 和 upload-artifact 使用固定提交 SHA，而不是可变 tag。
 - 不读取 SSH 私钥、设备密码或工作区外敏感文件。
 - 构建明确禁用写卡、外部服务器推送和自动刷写。
@@ -127,8 +134,8 @@ workflow “运行成功”与 Release “已发布”仍是两个阶段。某�
   实机完整验收通过。GitHub 只有一个全仓库 latest，不能分别代表 Image 和 Display 通道。
 
 旧规则生成的 `e87n-trixie-...-<run_id>`、`e87n-display-...-<run_id>` tag 及早期
-双附件 Release（包括 2026 年 9 月 21 日的现有版本）保留为历史记录。它们不删除、不改写，
-也不作为新版本命名或附件布局的模板。
+双附件 Release 保留为历史记录。覆盖逻辑只处理当前中央配置精确生成的
+`e87n-image-v<firmware_version>`；不会改写旧规则的 tag，也不会覆盖 Display tag。
 
 ## 本地验证工作流
 

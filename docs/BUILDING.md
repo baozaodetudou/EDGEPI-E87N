@@ -30,7 +30,7 @@
 | 用户空间与固件 | `board-support/`、`packaging/e87n-display/`、`scripts/build-display-deb.sh`、`userpatches/customize-image.sh`、`firmware/`；PHY 固件安装前检查 SHA-256 与大小 |
 | 额外存储模块 | `E87N_EXTRA_STORAGE=no`；只有显式设为 `yes` 才请求额外 DM/RAID 等模块 |
 
-这些 pin 固定框架和内核源码，不构成逐字节可复现的整个系统快照。低频镜像发布版本由同一配置中的 `firmware_version` 管理，正式 tag 为 `e87n-image-v<firmware_version>`；任何公开镜像内容变化都必须递增该值。`customize-image.sh` 从 Debian 签名软件源更新软件包，安装 SSH/网络/时间与 locale 基础依赖，并构建、预装 `e87n-display`。Firmware workflow 固定 `SOURCE_DATE_EPOCH=0`，核对预装基线包与 QEMU 实际测试包的 SHA-256；该基线只属于固件验收，不作为 Firmware Release 的独立附件。Display workflow 另行构建、测试并发布可升级的 deb，版本和发布节奏独立。显示包依赖 `python3`、`python3-pil`、`fonts-dejavu-core` 和 `fonts-wqy-microhei`，独立版本与升级方法见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)。
+这些 pin 固定框架和内核源码，不构成逐字节可复现的整个系统快照。低频镜像发布版本由同一配置中的 `firmware_version` 管理，正式 tag 为 `e87n-image-v<firmware_version>`；同版本重新构建并通过全部验收后会替换同名 Release/tag，需要保留旧版时再递增该值。`customize-image.sh` 从 Debian 签名软件源更新软件包，安装 SSH/网络/时间与 locale 基础依赖，并构建、预装 `e87n-display`。Firmware workflow 固定 `SOURCE_DATE_EPOCH=0`，核对预装基线包与 QEMU 实际测试包的 SHA-256；该基线只属于固件验收，不作为 Firmware Release 的独立附件。Display workflow 另行构建、测试并发布可升级的 deb，版本和发布节奏独立。显示包依赖 `python3`、`python3-pil`、`fonts-dejavu-core` 和 `fonts-wqy-microhei`，独立版本与升级方法见 [DISPLAY-PACKAGE.md](DISPLAY-PACKAGE.md)。
 
 重建特定候选时，应保留该候选的仓库输入、框架兼容修补、最终内核配置、构建参数、主机/容器版本、包版本、日志和校验清单。候选记录中的冻结输入归档和 release 整理属于当次人工交付步骤，`build.sh` 不会自动生成同样的 release 目录或证明新镜像与旧镜像哈希相同。
 

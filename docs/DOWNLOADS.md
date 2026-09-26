@@ -22,6 +22,11 @@ Image tag 为 `e87n-image-v<firmware_version>`，Display tag 为
 `e87n-display-v<display_version>`。历史上带 Actions run ID 的 tag 以及同时包含 TAR/deb 的
 Release 仅用于追溯；新 Release 每个通道只公开一个项目附件。
 
+Image tag 是可替换的当前版本入口：同一 `firmware_version` 重新构建并通过全部验收后，附件、
+源码提交、Release 正文和 SHA-256 可能被新的 Actions run 替换。每次下载都必须以当时 Release
+正文中的源码提交、run 和摘要重新校验，不能沿用以前保存的同名文件哈希。Display tag 不覆盖，
+显示包内容变化使用新的 Debian 包版本。
+
 ## 下载后先校验
 
 下载 Firmware Release 后，Linux 使用：

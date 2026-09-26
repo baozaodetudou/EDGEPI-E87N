@@ -109,6 +109,10 @@ class SplitWorkflowPolicy(unittest.TestCase):
             self.assertIn('"$GITHUB_REF" == refs/heads/main', preflight["run"])
             self.assertIn("ci-publish-release.py preflight", preflight["run"])
             self.assertIn(f"--kind {kind}", preflight["run"])
+            if kind == "image":
+                self.assertIn("--replace-existing", preflight["run"])
+            else:
+                self.assertNotIn("--replace-existing", preflight["run"])
             self.assertIn("GITHUB_RUN_ID", preflight["run"])
             self.assertIn("GITHUB_RUN_ATTEMPT", preflight["run"])
 
@@ -139,6 +143,12 @@ class SplitWorkflowPolicy(unittest.TestCase):
             self.assertNotIn("--display-artifact", prepare["run"])
             self.assertIn('--run-attempt "$GITHUB_RUN_ATTEMPT"', prepare["run"])
             self.assertNotIn("--clobber", publish["run"])
+            if kind == "image":
+                self.assertIn("--replace-existing", publish["run"])
+                self.assertIn('--replacement-id "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"', publish["run"])
+            else:
+                self.assertNotIn("--replace-existing", publish["run"])
+                self.assertNotIn("--replacement-id", publish["run"])
             self.assertEqual(publish["env"]["RELEASE_TAG"], "${{ needs.validate.outputs.release_tag }}")
         self.assertEqual(len(candidate_names), 2)
 
@@ -190,7 +200,7 @@ export -f python3
                 self.assertEqual(arguments.read_text().splitlines(), [
                     "scripts/ci-publish-release.py", "preflight", "--kind", kind,
                     "--repository", "fixture/repo", "--source-commit", "a" * 40,
-                    "--tag", tag])
+                    "--tag", tag, *(["--replace-existing"] if kind == "image" else [])])
                 failed = root / f"{kind}.failed.output"
                 result = subprocess.run(["bash", "-euo", "pipefail", "-c", step["run"]],
                     env={**env, "E87N_PREFLIGHT_EXIT": "42", "GITHUB_OUTPUT": str(failed)},

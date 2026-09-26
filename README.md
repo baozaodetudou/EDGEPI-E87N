@@ -43,9 +43,10 @@
 | Image | `e87n-build.json` 的 `firmware_version` | `e87n-image-v<firmware_version>` | `edgepi-e87n-debian_<firmware_version>_arm64-uboot-firmware.tar` |
 | Display | `packaging/e87n-display/VERSION` | `e87n-display-v<display_version>` | `e87n-display_<display_version>_all.deb` |
 
-正式 tag 不再包含 Actions run ID。同一版本只能发布一次；镜像内容变化必须递增
-`firmware_version`，显示包内容变化必须递增 Debian 包版本。历史 run-id tag 和早期双附件
-Release 保留用于追溯，不应作为当前命名模板。
+正式 tag 不再包含 Actions run ID。Image 同一版本重新构建并通过全部验收后，会先上传并校验
+临时 replacement draft，再替换同名 Release/tag；构建或上传失败不会触碰现有 Image Release。
+需要保留多个公开镜像时递增 `firmware_version`。Display 内容变化仍必须递增 Debian 包版本。
+历史 run-id tag 和早期双附件 Release 保留用于追溯，不应作为当前命名模板。
 
 - [Firmware workflow](https://github.com/baozaodetudou/EDGEPI-E87N/actions/workflows/build-e87n.yml)
 - [Display workflow](https://github.com/baozaodetudou/EDGEPI-E87N/actions/workflows/build-display.yml)
@@ -137,7 +138,7 @@ e87nctl display config
 
 镜像构建输入和低频固件版本来自
 [`userpatches/config/e87n-build.json`](userpatches/config/e87n-build.json)，当前
-`firmware_version` 为 `2026.09.2`，目标为 Debian 13 / Linux 6.18.52。独立显示包版本来自
+`firmware_version` 为 `2026.09.1`，目标为 Debian 13 / Linux 6.18.52。独立显示包版本来自
 [`packaging/e87n-display/VERSION`](packaging/e87n-display/VERSION)，当前为 `1.3.3-1`。构建入口：
 
 ```sh
